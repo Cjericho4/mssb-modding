@@ -86,6 +86,7 @@ ADDR_JUMPTABLE = 0x800EEC40      # u32[48]
 ADDR_ANIMPARAMS = 0x800FB798     # s16[15][54]
 ADDR_FAMILY = 0x800E8558         # u8[54][6] {family, baseID, uniqueIdx, isBase, isCaptain, colour}
 ADDR_REL_DESCS = (0x800E8AA8, 0x800E8AB8, 0x800E8AC8)  # DiskFileDesc for menus/game/challenge.rel
+REL_NAMES = ("menus.rel", "game.rel", "challenge.rel")
 ADDR_GAME_REL_DESC = ADDR_REL_DESCS[1]  # the RELs live LZSS-packed back to back in files/aaaa.dat, not in the FST
 ADDR_BLOB_LIS = 0x800227EC       # fn_800227E4: lis  r3, 0x4d      (3C 60 00 4D)
 ADDR_BLOB_ADDI = 0x800227F4      # fn_800227E4: addi r3, r3, 0x6600 (38 63 66 00)
@@ -133,8 +134,41 @@ ADDR_PORTRAIT_DESC2 = 0x800E8B18
 REL_PORTRAIT_DESCS = (0x21ED8, 0xF548, 0x105A8)
 PORTRAIT_W = 50
 PORTRAIT_H = 50
+TEX_FMT_CI4 = 8
 TEX_FMT_CI8 = 9
 TLUT_FMT_RGB5A3 = 2
+
+# Menu art keyed by charID (.agent/character_select.md section 8).  Both files are LZSS-packed in
+# ZZZZ.dat; their texture headers are rewritten so the donor's frames show the source's art.
+#   common file (boot-loaded UI slot 1): roster preview name, sequence 0x82, texture c<29 ? c : c+28
+#     (111x18 CI4, one shared RGB565 TLUT); mini-screen picture, sequence 0x83, texture 153+c (52x60
+#     CI8, RGB5A3 TLUT; some of them alias each other's buffers).
+#   grid portrait file (UI slot 9): select-grid portrait, sequence 0x19, texture 4+c (50x50 CI8).
+# The descriptor tuples also live in menus.rel (grid x9), game.rel (x5 each) and challenge.rel (x1
+# each); they are only rewritten when a file has to be moved (see place_menu_file()).
+ADDR_MENU_COMMON_DESC = 0x800E8BF8   # lbl_800E8AA8+0x150 (also lbl_800EEFD0+0xF0)
+ADDR_MENU_GRID_DESC = 0x800E8CD8     # lbl_800E8AA8+0x230 (also lbl_800EEFD0+0x1D0)
+# retail copies of each descriptor tuple: (main.dol, menus.rel, game.rel, challenge.rel)
+MENU_DESC_COPIES = {ADDR_MENU_COMMON_DESC: (2, 0, 5, 1), ADDR_MENU_GRID_DESC: (2, 9, 5, 1)}
+MENU_COMMON_RETAIL = (0x40B, 0x40106568, 0x1A9FE800, 0x68C10)
+MENU_GRID_RETAIL = (0x40B, 0x400ADFFC, 0x18AEE800, 0x4BAB0)
+SEQ_NAME, SEQ_MINI, SEQ_GRID = 0x82, 0x83, 0x19
+
+# Colour word ("Blue"/"Purple" before the preview name): menus.rel fn_2_74F40 switches on charID
+# (cases 12..53, jumptable_2_data_2D844 in .data) to labels 0..6 of common sequence 0x7B.  The jump
+# table is empty in the file; each entry is an R_PPC_ADDR32 relocation whose addend is the case's
+# .text offset.  --colour-word none points a donor's entry at the label-0 case (what Mario and every
+# other single-colour character shows): a 4-byte addend edit in the relocation table.
+MENUS_TEXT_SEC, MENUS_DATA_SEC = 1, 5
+MENUS_COLOUR_JT = 0x2D844
+MENUS_COLOUR_FIRST = 12
+MENUS_COLOUR_CASE = {1: 0x7556C, 2: 0x75574, 3: 0x7557C, 4: 0x75584, 5: 0x7558C, 6: 0x75594, 0: 0x7559C}
+MENUS_COLOUR_LABEL = {}
+for _lab, _ids in ((1, (13, 16, 20, 22, 25, 34, 42, 50, 52)), (2, (21, 24, 29, 33, 44, 51, 53)), (3, (23, 30, 36, 45)),
+                   (4, (12, 26, 27, 31, 35, 43, 46, 49)), (5, (32,)), (6, (47,))):
+    for _c in _ids:
+        MENUS_COLOUR_LABEL[_c] = _lab
+del _lab, _ids, _c
 
 ZZZZ_STATS_OFFSET = 0x06CF8800   # CharacterStats[54], 0xA0 each (menus.rel lbl_2_data_C8)
 STATS_ROW = 0xA0
@@ -1259,6 +1293,8 @@ class TextureFile:
             size = None
             if fmt == TEX_FMT_CI8:
                 size = align(width, 8) * align(height, 4)
+            elif fmt == TEX_FMT_CI4:
+                size = align(width, 8) * align(height, 8) // 2
             self.textures.append({"index": i, "hdr": h, "data": self.archive + data_off, "tlut": self.archive + tlut_off,
                                   "w": width, "h": height, "fmt": fmt, "colours": colours, "tlut_fmt": tlut_fmt, "size": size})
 
@@ -1307,6 +1343,241 @@ def portrait_desc(dol):
 
 
 # ----------------------------------------------------------------------------------------------
+# Menu art (character_select.md section 8): charID-keyed names, mini pictures and grid portraits
+# ----------------------------------------------------------------------------------------------
+def name_texture(c):
+    """Common-file texture of charID c's roster preview name."""
+    return c if c < 29 else c + 28
+
+
+def frame_textures(data, sequence):
+    """{frame: texture index} of a UI sprite-bank sequence with one image list (the character
+    name/picture/portrait lists).  The bank is root word 1; bank+8 is a relative sequence table;
+    each sequence is {count, header list, image list}.  Offsets in each table are relative to that
+    table.  Records are type 0 (a full template) or type 2 (word deltas over the template, indices
+    counted after the record's first word), stored in descending frame order; the texture index is
+    the expanded record's halfword at +6."""
+    u16 = lambda o: struct.unpack_from(">H", data, o)[0]   # noqa: E731
+    u32 = lambda o: struct.unpack_from(">I", data, o)[0]   # noqa: E731
+    bank = u32(4)
+    table = bank + u32(bank + 8)
+    if sequence >= u32(table):
+        raise ValueError("sequence outside sprite bank")
+    seq = table + u32(table + 8 + sequence * 4)
+    if (u32(seq) & 0x7FFFFFFF) != 2:
+        raise ValueError("expected header list plus one image list")
+    group = seq + u32(seq + 12)
+    count, stride = struct.unpack_from(">HH", data, group)
+    pos = group + 4
+    template = data[pos:pos + stride]
+    frames = {}
+    for _ in range(count):
+        kind = u16(pos) & 0x7FFF
+        frame = u16(pos + 2)
+        record = bytearray(template)
+        if kind == 0:
+            size = stride
+        elif kind == 2:
+            record[:4] = data[pos:pos + 4]
+            changes, words = struct.unpack_from(">HH", data, pos + 4)
+            size = words * 4
+            values = pos + size - changes * 4
+            for i in range(changes):
+                dst = 4 + u16(pos + 8 + i * 2) * 4
+                if dst + 4 > stride:
+                    raise ValueError("delta outside expanded record")
+                record[dst:dst + 4] = data[values + i * 4:values + i * 4 + 4]
+        else:
+            raise ValueError("unexpected record type %d in a character list" % kind)
+        if frame in frames:
+            raise ValueError("duplicate frame")
+        frames[frame] = struct.unpack_from(">H", record, 6)[0]
+        pos += size
+    if set(frames) != set(range(count)):
+        raise ValueError("character frames are not contiguous")
+    return frames
+
+
+def load_menu_file(disc, dol, addr):
+    """(unpacked bytes, descriptor) of an LZSS-packed ZZZZ.dat UI file named by a DOL descriptor."""
+    d = dol.desc(addr, 0)
+    if d[0] != LZSS_FLAGS or not d[1] & SIZE_COMPRESSED_BIT:
+        raise SystemExit("main.dol: descriptor at %08X is not an LZSS file" % addr)
+    return lzss_decompress(disc.read_zzzz(d[2], d[3]), d[1] & 0x0FFFFFFF)[0], d
+
+
+def menu_art_map(common, grid):
+    """charID -> texture index for the three charID-keyed menu images, read from the files' own
+    sprite banks (frame 54 is the empty-slot placeholder and is dropped)."""
+    m = {"name": frame_textures(common, SEQ_NAME), "mini": frame_textures(common, SEQ_MINI),
+         "grid": frame_textures(grid, SEQ_GRID)}
+    for k in m:
+        m[k] = {c: m[k][c] for c in range(NUM_CHARS)}
+    if m["name"] != {c: name_texture(c) for c in range(NUM_CHARS)} or m["mini"] != {c: 153 + c for c in range(NUM_CHARS)} \
+            or m["grid"] != {c: 4 + c for c in range(NUM_CHARS)}:
+        raise SystemExit("menu art: the name/picture/portrait frame lists are not the retail ones (patched disc?)")
+    return m
+
+
+class MenuTextures:
+    """Edits a UI texture file by rewriting texture headers.  retarget(dst, src) makes texture dst
+    use src's pixel buffer and either src's palette or a private copy of a new one.  No buffer that
+    another header still references is ever written: a private palette goes into a buffer that no
+    header references any more (dst's old palette, its old pixels, or buffers freed by earlier
+    retargets, e.g. a donor's old name pixels), and only if there is none is it appended (the file
+    then grows)."""
+
+    def __init__(self, data):
+        self.tf = TextureFile(data)
+        self.free = []          # candidate (start, end) ranges freed by retargets
+        self.grown = 0
+        for t in self.tf.textures:
+            if t["size"] is None:
+                raise SystemExit("menu art: texture %d has unsupported format %d" % (t["index"], t["fmt"]))
+
+    @property
+    def data(self):
+        return self.tf.data
+
+    def tex(self, i):
+        return self.tf.textures[i]
+
+    def tlut(self, i):
+        return self.tf.tlut(self.tex(i))
+
+    def _referenced(self, start, end):
+        for t in self.tf.textures:
+            for s, n in ((t["data"], t["size"]), (t["tlut"], t["colours"] * 2)):
+                if s < end and start < s + n:
+                    return True
+        return False
+
+    def _set(self, i, data=None, tlut=None):
+        t = self.tex(i)
+        if data is not None:
+            struct.pack_into(">I", self.tf.data, t["hdr"], data - self.tf.archive)
+            t["data"] = data
+        if tlut is not None:
+            struct.pack_into(">I", self.tf.data, t["hdr"] + 4, tlut - self.tf.archive)
+            t["tlut"] = tlut
+
+    def _alloc(self, n):
+        for k, (s, e) in enumerate(self.free):
+            if e - s >= n and not self._referenced(s, e):
+                rest = align(s + n, 0x20)
+                self.free[k] = (rest, e)
+                return s
+        off = align(len(self.tf.data), 0x20)
+        self.tf.data[len(self.tf.data):] = b"\0" * (off + n - len(self.tf.data))
+        self.grown += n
+        return off
+
+    def retarget(self, dst, src, tlut=None):
+        d, s = self.tex(dst), self.tex(src)
+        if (d["w"], d["h"], d["fmt"], d["colours"], d["tlut_fmt"]) != (s["w"], s["h"], s["fmt"], s["colours"], s["tlut_fmt"]):
+            raise SystemExit("menu art: textures %d and %d differ in size/format" % (dst, src))
+        old = [(d["tlut"], d["tlut"] + d["colours"] * 2), (d["data"], d["data"] + d["size"])]
+        self._set(dst, data=s["data"], tlut=s["tlut"])
+        self.free = old + self.free     # dst's own buffers first: an unshared palette is rewritten in place
+        if tlut is None or tlut == self.tlut(src):
+            return
+        if len(tlut) != s["colours"] * 2:
+            raise ValueError("palette size")
+        off = self._alloc(len(tlut))
+        self.tf.data[off:off + len(tlut)] = tlut
+        self._set(dst, tlut=off)
+
+
+def patch_menu_art(common, grid, C, clones):
+    """Donor S's preview name, mini picture and grid portrait := the source C's (the two images with
+    their palettes recoloured by the slot's spec).  Returns the two MenuTextures editors."""
+    amap = menu_art_map(common, grid)
+    ce, ge = MenuTextures(common), MenuTextures(grid)
+    for S, _ in clones:             # names first: each frees the donor's own name pixels
+        ce.retarget(amap["name"][S], amap["name"][C])
+    for S, rc in clones:
+        pal = rc.for_palette()
+        ce.retarget(amap["mini"][S], amap["mini"][C], recolour_tlut(ce.tlut(amap["mini"][C]), pal))
+        ge.retarget(amap["grid"][S], amap["grid"][C], recolour_tlut(ge.tlut(amap["grid"][C]), pal))
+    return ce, ge
+
+
+def rel_header(rel):
+    """(module id, [(file offset, size)] per section, [(module id, relocation offset)])."""
+    mid, = struct.unpack_from(">I", rel, 0)
+    nsec, secoff = struct.unpack_from(">II", rel, 0x0C)
+    impoff, impsize = struct.unpack_from(">II", rel, 0x28)
+    secs = [struct.unpack_from(">II", rel, secoff + i * 8) for i in range(nsec)]
+    imps = [struct.unpack_from(">II", rel, impoff + k * 8) for k in range(impsize // 8)]
+    return mid, [(o & ~1, n) for o, n in secs], imps
+
+
+def rel_self_relocs(rel):
+    """Yield (entry file offset, section, offset in section, type, target section, addend) for every
+    relocation a REL applies against itself."""
+    mid, _, imps = rel_header(rel)
+    for m, p in imps:
+        if m != mid:
+            continue
+        sec = None
+        cur = 0
+        while True:
+            delta, kind, tsec, addend = struct.unpack_from(">HBBI", rel, p)
+            if kind == 203:                 # R_DOLPHIN_END
+                break
+            if kind == 202:                 # R_DOLPHIN_SECTION
+                sec, cur = tsec, 0
+            else:
+                cur += delta
+                if kind != 201:             # R_DOLPHIN_NOP only advances
+                    yield p, sec, cur, kind, tsec, addend
+            p += 8
+
+
+def colour_word_entries(rel):
+    """{charID: relocation entry file offset} for fn_2_74F40's colour-word jump table, checked
+    against the retail switch (each addend is the case of its retail label; each case is li r0, N)."""
+    _, secs, _ = rel_header(rel)
+    text = secs[MENUS_TEXT_SEC][0]
+    for lab, case in MENUS_COLOUR_CASE.items():
+        if struct.unpack_from(">I", rel, text + case)[0] != 0x38000000 | lab:
+            raise SystemExit("menus.rel: fn_2_74F40's colour-word case %d is not li r0, %d" % (lab, lab))
+    found = {}
+    for p, sec, off, kind, tsec, addend in rel_self_relocs(rel):
+        if sec == MENUS_DATA_SEC and MENUS_COLOUR_JT <= off < MENUS_COLOUR_JT + 4 * (NUM_CHARS - MENUS_COLOUR_FIRST):
+            c = MENUS_COLOUR_FIRST + (off - MENUS_COLOUR_JT) // 4
+            if kind != 1 or tsec != MENUS_TEXT_SEC or addend != MENUS_COLOUR_CASE[MENUS_COLOUR_LABEL.get(c, 0)]:
+                raise SystemExit("menus.rel: colour-word jump-table entry for charID %d is not retail" % c)
+            found[c] = p
+    if sorted(found) != list(range(MENUS_COLOUR_FIRST, NUM_CHARS)):
+        raise SystemExit("menus.rel: colour-word jump table not found")
+    return found
+
+
+def patch_colour_word(rel, donors):
+    """Donor charIDs show label 0 (no colour word).  Returns the edited relocation entry offsets."""
+    found = colour_word_entries(rel)
+    out = []
+    for S in donors:
+        if MENUS_COLOUR_LABEL.get(S, 0):
+            struct.pack_into(">I", rel, found[S] + 4, MENUS_COLOUR_CASE[0])
+            out.append(found[S] + 4)
+    return out
+
+
+def replace_desc(buf, old, new):
+    """Replace every copy of descriptor tuple `old` in buf; returns how many."""
+    a, b = struct.pack(">4I", *old), struct.pack(">4I", *new)
+    n = 0
+    i = buf.find(a)
+    while i >= 0:
+        buf[i:i + 16] = b
+        n += 1
+        i = buf.find(a, i + 16)
+    return n
+
+
+# ----------------------------------------------------------------------------------------------
 # Disc folder
 # ----------------------------------------------------------------------------------------------
 class Disc:
@@ -1340,13 +1611,18 @@ def load_subfile(disc, dol, idx):
     return raw[:sizeflags & 0x0FFFFFFF]
 
 
-def load_game_rel(disc, dol):
-    """game.rel as the game loads it: LZSS-packed in aaaa.dat via its DOL descriptor."""
-    flags, sizeflags, off, comp = dol.desc(ADDR_GAME_REL_DESC, 0)
+def load_rel(disc, dol, idx):
+    """menus.rel (0), game.rel (1) or challenge.rel (2) as the game loads it: LZSS-packed in
+    aaaa.dat via its DOL descriptor."""
+    flags, sizeflags, off, comp = dol.desc(ADDR_REL_DESCS[idx], 0)
     raw = disc.read_aaaa(off, comp)
     if sizeflags & SIZE_COMPRESSED_BIT:
         return lzss_decompress(raw, sizeflags & 0x0FFFFFFF)[0]
     return raw[:sizeflags & 0x0FFFFFFF]
+
+
+def load_game_rel(disc, dol):
+    return load_rel(disc, dol, 1)
 
 
 def load_master(disc, dol, idx):
@@ -1585,6 +1861,8 @@ def preflight(disc, dol, log):
             problems.append("main.dol ARAM allocation already patched")
         if dol.desc(ADDR_SUBFILES, 0)[2] != 0x09439000 or dol.pair(0) != (0, -1):
             problems.append("main.dol character tables do not look like retail GYQE01")
+        if dol.desc(ADDR_MENU_COMMON_DESC, 0) != MENU_COMMON_RETAIL or dol.desc(ADDR_MENU_GRID_DESC, 0) != MENU_GRID_RETAIL:
+            problems.append("main.dol menu art descriptors are not retail (already patched DOL?)")
         if dol.read(ADDR_FINDCHAR, len(FINDCHAR_RETAIL)) != FINDCHAR_RETAIL:
             problems.append("main.dol fn_800698F8 (findCharacterID) is not retail (already patched DOL?)")
     except ValueError as e:
@@ -1692,6 +1970,8 @@ def clone(args, log=print):
     blob_used = len(blob) if blob is not None else 0
     report = []
     inplace = []         # (offset, bytes) rewritten inside the existing ZZZZ.dat
+    rel_edits = {0: [], 1: [], 2: []}   # REL index -> [(label, fn(rel bytearray) -> log line)]
+    desc_moves = []      # (label, DOL address, old descriptor, new descriptor) of moved menu files
 
     # --- presentation: unique index (names/portraits/announcer/voice bank) and the HUD portrait
     ui_source = args.ui == "source"
@@ -1715,6 +1995,34 @@ def clone(args, log=print):
         inplace.append((pdesc[2], pcomp + b"\0" * (pdesc[3] - len(pcomp))))
         log("ui: HUD portraits %s := %s's (palette recoloured); file re-packed in place at ZZZZ.dat+0x%08X (%d of %d B)" % (
             ", ".join(CHAR_NAMES[S] for S, _ in clones), CHAR_NAMES[C], pdesc[2], len(pcomp), pdesc[3]))
+        # menu art (character_select.md section 8): preview name, mini picture, grid portrait
+        common, cdesc = load_menu_file(disc, dol, ADDR_MENU_COMMON_DESC)
+        grid, gdesc = load_menu_file(disc, dol, ADDR_MENU_GRID_DESC)
+        ce, ge = patch_menu_art(common, grid, C, clones)
+        log("ui: menus: preview name, mini picture and grid portrait of %s := %s's (pictures recoloured)" % (
+            ", ".join(CHAR_NAMES[S] for S, _ in clones), CHAR_NAMES[C]))
+        for label, addr, desc, ed in (("common menu file", ADDR_MENU_COMMON_DESC, cdesc, ce), ("grid portrait file", ADDR_MENU_GRID_DESC, gdesc, ge)):
+            data = bytes(ed.data)
+            comp = lzss_compress_optimal(data)
+            if lzss_decompress(comp, len(data))[0] != data:
+                raise SystemExit("internal error: LZSS round trip failed (%s)" % label)
+            if len(data) == desc[1] & 0x0FFFFFFF and len(comp) <= desc[3] and not getattr(args, "relocate_menu_art", False):
+                inplace.append((desc[2], comp + b"\0" * (desc[3] - len(comp))))
+                log("ui: %s re-packed in place at ZZZZ.dat+0x%08X (%d of %d B, %d B to spare)" % (
+                    label, desc[2], len(comp), desc[3], desc[3] - len(comp)))
+            else:
+                new = (desc[0], SIZE_COMPRESSED_BIT | len(data), place(comp, 0x800), len(comp))
+                n = replace_desc(dol.data, desc, new)
+                if n != MENU_DESC_COPIES[addr][0]:
+                    raise SystemExit("main.dol: expected %d copies of the %s descriptor, found %d" % (MENU_DESC_COPIES[addr][0], label, n))
+                desc_moves.append((label, addr, desc, new))
+                log("ui: %s (%d -> %d B%s) moved to ZZZZ.dat+0x%08X; %d DOL descriptor copies updated, REL copies below" % (
+                    label, len(data), len(comp), ", grew %d B" % ed.grown if ed.grown else "", new[2], n))
+        if getattr(args, "colour_word", "none") == "none":
+            rel_edits[0].append(("colour word", lambda rel: "colour word: label 0 for charIDs %s (relocation addends at %s)" % (
+                [S for S, _ in clones], ", ".join("0x%X" % o for o in patch_colour_word(rel, [S for S, _ in clones])) or "none needed")))
+        else:
+            log("ui: colour word: the donors keep theirs (--colour-word donor)")
     else:
         log("ui: donor (menus, HUD and announcer keep the donor's name/portrait/call-out)")
 
@@ -1784,29 +2092,48 @@ def clone(args, log=print):
         dol.set_blob_alloc_size(len(blob))
         log("ARAM blob moved to ZZZZ.dat+0x%08X, size 0x%X -> 0x%X (fn_800227E4 immediates patched)" % (blob_off, blob_desc[3], len(blob)))
 
-    # --- game.rel gameplay tables: patched copy re-packed in place inside aaaa.dat (the game never
-    # reads a files/game.rel; that file only exists in decomp setups)
-    rel_patch = None
+    # --- game.rel gameplay tables (the game never reads a files/game.rel; that file only exists in
+    # decomp setups)
     if not args.no_gameplay:
-        rel = bytearray(load_game_rel(disc, dol))
-        base, size = rel_data_section(rel)
-        for off, rs in [REL_VOICE] + REL_TABLES:
-            if off + NUM_CHARS * rs > size:
-                raise SystemExit("game.rel table at 0x%X is outside .data" % off)
-            for S, _ in report:
-                rel[base + off + S * rs:base + off + (S + 1) * rs] = rel[base + off + C * rs:base + off + (C + 1) * rs]
+        def gameplay_tables(rel):
+            base, size = rel_data_section(rel)
+            for off, rs in [REL_VOICE] + REL_TABLES:
+                if off + NUM_CHARS * rs > size:
+                    raise SystemExit("game.rel table at 0x%X is outside .data" % off)
+                for S, _ in report:
+                    rel[base + off + S * rs:base + off + (S + 1) * rs] = rel[base + off + C * rs:base + off + (C + 1) * rs]
+            return "copied voice/hitbox/timing tables"
+        rel_edits[1].append(("gameplay tables", gameplay_tables))
+    for label, addr, old, new in desc_moves:
+        for i in range(3):
+            def move(rel, label=label, addr=addr, old=old, new=new, i=i):
+                n = replace_desc(rel, old, new)
+                if n != MENU_DESC_COPIES[addr][1 + i]:
+                    raise SystemExit("%s: expected %d copies of the %s descriptor, found %d" % (REL_NAMES[i], MENU_DESC_COPIES[addr][1 + i], label, n))
+                return "%d %s descriptor copies updated" % (n, label)
+            if MENU_DESC_COPIES[addr][1 + i]:
+                rel_edits[i].append((label, move))
+
+    # --- RELs: each edited one is re-packed in place inside aaaa.dat (growing aaaa.dat would shift
+    # other disc files)
+    rel_patches = []
+    rel_ends = sorted(dol.desc(a, 0)[2] for a in ADDR_REL_DESCS) + [(disc.files / "aaaa.dat").stat().st_size]
+    for i, edits in rel_edits.items():
+        if not edits:
+            continue
+        old = dol.desc(ADDR_REL_DESCS[i], 0)
+        rel = bytearray(load_rel(disc, dol, i))
+        lines = [fn(rel) for _, fn in edits]
         comp = lzss_compress_optimal(bytes(rel))
         if lzss_decompress(comp, len(rel))[0] != bytes(rel):
-            raise SystemExit("internal error: LZSS round trip failed (game.rel)")
-        old = dol.desc(ADDR_GAME_REL_DESC, 0)
-        # room until the next REL (or the end of aaaa.dat): growing aaaa.dat would shift other disc files
-        room = min([dol.desc(a, 0)[2] for a in ADDR_REL_DESCS if dol.desc(a, 0)[2] > old[2]]
-                   + [(disc.files / "aaaa.dat").stat().st_size]) - old[2]
+            raise SystemExit("internal error: LZSS round trip failed (%s)" % REL_NAMES[i])
+        room = min(e for e in rel_ends if e > old[2]) - old[2]
         if len(comp) > room:
-            raise SystemExit("patched game.rel packs to %d B but only %d B fit in aaaa.dat; rerun with --no-gameplay" % (len(comp), room))
-        rel_patch = (old[2], comp)
-        dol.set_desc(ADDR_GAME_REL_DESC, 0, (old[0], SIZE_COMPRESSED_BIT | len(rel), old[2], len(comp)))
-        log("game.rel: copied voice/hitbox/timing tables, re-packed in place at aaaa.dat+0x%08X (%d B, room %d B)" % (old[2], len(comp), room))
+            raise SystemExit("patched %s packs to %d B but only %d B fit in aaaa.dat; rerun with %s" % (
+                REL_NAMES[i], len(comp), room, "--no-gameplay" if i == 1 else "--ui donor"))
+        rel_patches.append((old[2], comp + b"\0" * max(0, old[3] - len(comp))))
+        dol.set_desc(ADDR_REL_DESCS[i], 0, (old[0], SIZE_COMPRESSED_BIT | len(rel), old[2], len(comp)))
+        log("%s: %s; re-packed in place at aaaa.dat+0x%08X (%d B, room %d B)" % (REL_NAMES[i], "; ".join(lines), old[2], len(comp), room))
 
     if dry:
         log("DRY RUN summary: %d B in %d chunks appended to ZZZZ.dat from 0x%08X; %d in-place rewrite(s); main.dol/stats/game.rel rows for slots %s" % (
@@ -1846,10 +2173,11 @@ def clone(args, log=print):
             f.write(stats)
         log("stats: copied %s's row and chemistry to %s" % (CHAR_NAMES[C], ", ".join(CHAR_NAMES[S] for S, _ in report)))
 
-    if rel_patch:
+    if rel_patches:
         with open(disc.files / "aaaa.dat", "r+b") as f:
-            f.seek(rel_patch[0])
-            f.write(rel_patch[1])
+            for off, b in rel_patches:
+                f.seek(off)
+                f.write(b)
 
     # --- fst.bin and DOL
     fst = (disc.sys / "fst.bin").read_bytes()
@@ -1863,7 +2191,8 @@ def clone(args, log=print):
     log("")
     log("Done.  In the game, pick: " + ", ".join("%s (slot %d) -> %s" % (CHAR_NAMES[S], S, rc.spec) for S, rc in report))
     if ui_source:
-        log("Menus, HUD and the announcer show/say %s for these slots (grid cells of main characters included)." % CHAR_NAMES[C])
+        log("Menus (preview name, mini picture, grid portrait), HUD and the announcer show/say %s for these slots%s." % (
+            CHAR_NAMES[C], "" if getattr(args, "colour_word", "none") == "none" else "; the donors keep their colour word"))
     log("Boot: Dolphin -> File -> Open -> %s" % (out / "sys" / "main.dol"))
     return {"source": C, "slots": [(S, rc.spec) for S, rc in report], "out": out,
             "iso": Path(args.iso) if args.iso else None, "dry_run": False}
@@ -1889,6 +2218,10 @@ recolour spec (after the slot and a colon): """ + Recolour.__doc__)
                     help="do not recolour the ARAM (in-game) body; clones then look like the plain source in matches")
     ap.add_argument("--ui", choices=("source", "donor"), default="source",
                     help="whose name/portrait/announcer call-out/voice the clone slots get in menus and in-game (default: source)")
+    ap.add_argument("--colour-word", choices=("none", "donor"), default="none",
+                    help="with --ui source: the colour word shown before a clone's name on the roster screen; "
+                         "none (default: the clone is the source, e.g. no 'Purple') or donor (keep e.g. 'Purple')")
+    ap.add_argument("--relocate-menu-art", action="store_true", help=argparse.SUPPRESS)  # tests: force the append path
     ap.add_argument("--no-stats", action="store_true", help="keep the donor's stats instead of copying the source's")
     ap.add_argument("--no-gameplay", action="store_true", help="keep the donor's game.rel/DOL gameplay tables")
     ap.add_argument("--list-slots", action="store_true", help="print the slot table and exit")

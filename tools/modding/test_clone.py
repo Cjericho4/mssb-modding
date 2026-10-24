@@ -84,6 +84,110 @@ def correlation(a, b):
     return sum((x - ma) * (y - mb) for x, y in zip(a, b)) / (sa * sb + 1e-9)
 
 
+def menu_textures(d, dl, addr):
+    data, desc = cc.load_menu_file(d, dl, addr)
+    return cc.TextureFile(data), desc
+
+
+def check_menu_art(disc, dol, pdisc, pdol, C, slots, ui_source, old_zz, new_zz, relocated):
+    """The donors' preview name, mini picture and grid portrait; everything else in both files
+    decodes as before; descriptors and file bytes change only where intended.  Returns the
+    ZZZZ.dat ranges the files may occupy in place."""
+    print(" menu art (preview name, mini picture, grid portrait)")
+    amap = cc.menu_art_map(*(cc.load_menu_file(disc, dol, a)[0] for a in (cc.ADDR_MENU_COMMON_DESC, cc.ADDR_MENU_GRID_DESC)))
+    allowed_zz = []
+    for label, addr in (("common menu file", cc.ADDR_MENU_COMMON_DESC), ("grid portrait file", cc.ADDR_MENU_GRID_DESC)):
+        tf, desc = menu_textures(disc, dol, addr)
+        ptf, pdesc = menu_textures(pdisc, pdol, addr)
+        if not ui_source:
+            check(pdesc == desc and pdisc.read_zzzz(desc[2], desc[3]) == disc.read_zzzz(desc[2], desc[3]), "%s untouched" % label)
+            continue
+        if relocated:
+            check(pdesc[0] == desc[0] and pdesc[2] >= old_zz and pdesc[2] % 0x800 == 0 and pdesc[2] + pdesc[3] <= new_zz,
+                  "%s moved to the appendix (ZZZZ.dat+0x%08X, %d B)" % (label, pdesc[2], pdesc[3]))
+            check(pdisc.read_zzzz(desc[2], desc[3]) == disc.read_zzzz(desc[2], desc[3]), "%s: old slot left as it was" % label)
+            dcopies = cc.MENU_DESC_COPIES[addr][0]
+            check(bytes(pdol.data).count(struct.pack(">4I", *pdesc)) == dcopies and bytes(pdol.data).count(struct.pack(">4I", *desc)) == 0,
+                  "%s: all %d DOL descriptor copies updated, none left over" % (label, dcopies))
+        else:
+            check(pdesc == desc, "%s descriptors unchanged (re-packed in place)" % label)
+            raw = pdisc.read_zzzz(desc[2], desc[3])
+            used = cc.lzss_decompress(raw, desc[1] & 0x0FFFFFFF)[1]
+            check(raw[used:] == b"\0" * (desc[3] - used), "%s: re-packed stream fits (%d of %d B) and is zero padded" % (label, used, desc[3]))
+            allowed_zz.append((desc[2], desc[2] + desc[3]))
+        check(len(ptf.data) >= len(tf.data) and ptf.count == tf.count and ptf.data[:tf.archive + 4] == tf.data[:tf.archive + 4],
+              "%s: root and texture count intact (%d -> %d B)" % (label, len(tf.data), len(ptf.data)))
+        donor_tex = {}
+        kinds = ("name", "mini") if addr == cc.ADDR_MENU_COMMON_DESC else ("grid",)
+        for S, rc in slots:
+            for k in kinds:
+                donor_tex[amap[k][S]] = (k, S, rc)
+        dec = lambda f, t: (f.pixels(t), f.tlut(t))  # noqa: E731
+        others = [i for i in range(tf.count) if i not in donor_tex]
+        check(all(dec(ptf, ptf.textures[i]) == dec(tf, tf.textures[i]) for i in others),
+              "%s: all %d other textures decode identical (aliased buffers included)" % (label, len(others)))
+        check(all(ptf.data[ptf.textures[i]["hdr"]:ptf.textures[i]["hdr"] + 0x20] == tf.data[tf.textures[i]["hdr"]:tf.textures[i]["hdr"] + 0x20] for i in others),
+              "%s: all other texture headers identical" % label)
+        new_bufs = []
+        for i, (k, S, rc) in sorted(donor_tex.items()):
+            src = tf.textures[amap[k][C]]
+            pt = ptf.textures[i]
+            want = tf.tlut(src) if k == "name" else cc.recolour_tlut(tf.tlut(src), rc.for_palette())
+            hdr_same = ptf.data[pt["hdr"] + 8:pt["hdr"] + 0x20] == tf.data[tf.textures[i]["hdr"] + 8:tf.textures[i]["hdr"] + 0x20]
+            check(ptf.pixels(pt) == tf.pixels(src) and ptf.tlut(pt) == want and hdr_same,
+                  "%s %d of %s = %s's %s" % (k, i, cc.CHAR_NAMES[S], cc.CHAR_NAMES[C], "pixels" if k == "name" else "pixels + recoloured palette (%s)" % rc.spec))
+            if k != "name" and want != tf.tlut(src):
+                users = [t["index"] for t in ptf.textures if t["index"] != i and t["tlut"] < pt["tlut"] + 512 and pt["tlut"] < t["tlut"] + t["colours"] * 2]
+                check(not users and pt["tlut"] % 32 == 0, "%s %d: recoloured palette is private (buffer 0x%X, 32-aligned)" % (k, i, pt["tlut"]))
+                new_bufs.append((pt["tlut"], pt["tlut"] + 512))
+            check(pt["data"] == ptf.textures[amap[k][C]]["data"], "%s %d: points at the source's pixel buffer" % (k, i))
+        allowed = [(t["hdr"], t["hdr"] + 8) for i, t in ((i, tf.textures[i]) for i in donor_tex)] + new_bufs + [(len(tf.data), len(ptf.data))]
+        bad = covered(diff_ranges(bytes(tf.data), bytes(ptf.data[:len(tf.data)])) + ([(len(tf.data), len(ptf.data))] if len(ptf.data) > len(tf.data) else []), allowed)
+        check(not bad, "%s: byte-identical outside the donor headers' buffer offsets and the private palettes%s" % (label, "" if not bad else " unexpected %r" % bad[:3]))
+    return allowed_zz
+
+
+def check_rels(disc, dol, pdisc, pdol, C, slots, ui_source, colour_word, gameplay):
+    """menus/game/challenge.rel: aaaa.dat changes only inside the REL slots, menus.rel only at the
+    colour-word relocation addends (and moved-descriptor copies), the RELs' descriptor copies of the
+    menu files agree with the DOL's."""
+    print(" RELs (aaaa.dat)")
+    descs = [dol.desc(a, 0) for a in cc.ADDR_REL_DESCS]
+    ends = sorted(d[2] for d in descs) + [(disc.files / "aaaa.dat").stat().st_size]
+    slots_aaaa = [(d[2], min(e for e in ends if e > d[2])) for d in descs]
+    a, b = (disc.files / "aaaa.dat").read_bytes(), (pdisc.files / "aaaa.dat").read_bytes()
+    check(len(a) == len(b) and not covered(diff_ranges(a, b), slots_aaaa), "aaaa.dat same size, byte-identical outside the three REL slots")
+    moves = [(dol.desc(x, 0), pdol.desc(x, 0)) for x in (cc.ADDR_MENU_COMMON_DESC, cc.ADDR_MENU_GRID_DESC) if dol.desc(x, 0) != pdol.desc(x, 0)]
+    donors = [S for S, _ in slots]
+    for i, name in enumerate(cc.REL_NAMES):
+        rel, prel = cc.load_rel(disc, dol, i), cc.load_rel(pdisc, pdol, i)
+        if pdol.desc(cc.ADDR_REL_DESCS[i], 0) != descs[i]:
+            check(pdol.desc(cc.ADDR_REL_DESCS[i], 0)[2] == descs[i][2], "%s re-packed in place" % name)
+        allowed = []
+        for old, new in moves:
+            pos = [k for k in range(0, len(rel) - 15, 4) if rel[k:k + 16] == struct.pack(">4I", *old)]
+            check(all(prel[k:k + 16] == struct.pack(">4I", *new) for k in pos) and bytes(prel).count(struct.pack(">4I", *old)) == 0,
+                  "%s: %d descriptor copies of the moved file updated" % (name, len(pos)))
+            allowed += [(k, k + 16) for k in pos]
+        if i == 1 and gameplay:
+            base, size = cc.rel_data_section(bytearray(rel))
+            for off, rs in [cc.REL_VOICE] + cc.REL_TABLES:
+                allowed += [(base + off + S * rs, base + off + (S + 1) * rs) for S in donors]
+                check(all(prel[base + off + S * rs:base + off + (S + 1) * rs] == rel[base + off + C * rs:base + off + (C + 1) * rs] for S in donors),
+                      "game.rel table 0x%X: donor rows = the source's" % off)
+        if i == 0:
+            entries = cc.colour_word_entries(rel)
+            edited = [S for S in donors if ui_source and colour_word == "none" and cc.MENUS_COLOUR_LABEL.get(S, 0)]
+            allowed += [(entries[S] + 4, entries[S] + 8) for S in edited]
+            got = {c: struct.unpack_from(">I", prel, p + 4)[0] for c, p in entries.items()}
+            want = {c: cc.MENUS_COLOUR_CASE[0 if c in edited else cc.MENUS_COLOUR_LABEL.get(c, 0)] for c in entries}
+            check(got == want, "menus.rel colour word: charIDs %s -> label 0 (%s), every other case retail" % (
+                edited, "--colour-word %s" % colour_word if ui_source else "--ui donor"))
+        bad = covered(diff_ranges(rel, prel), allowed)
+        check(len(rel) == len(prel) and not bad, "%s differs only in the intended %s" % (
+            name, {0: "colour-word relocation addends", 1: "per-character tables", 2: "descriptor copies"}[i]))
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--disc", required=True)
@@ -93,6 +197,9 @@ def main():
     ap.add_argument("--iso", action="store_true", help="also write and verify an ISO (1.5 GB)")
     ap.add_argument("--patched", help="verify this already-patched folder instead of running the patcher (give the same --source/--slot you used)")
     ap.add_argument("--ui", choices=("source", "donor"), default="source", help="the --ui the patcher ran with (default source)")
+    ap.add_argument("--colour-word", choices=("none", "donor"), default="none", help="the --colour-word the patcher ran with")
+    ap.add_argument("--relocate-menu-art", action="store_true", help="run the patcher with its (test-only) forced move of the menu art files")
+    ap.add_argument("--no-gameplay", action="store_true", help="the patcher ran with --no-gameplay")
     args = ap.parse_args()
 
     disc = cc.Disc(args.disc)
@@ -171,7 +278,9 @@ def main():
     else:
         print("3. run the patcher")
         out = work / "patched"
-        argv = ["--disc", args.disc, "--out", str(out), "--source", args.source, "--force", "--ui", args.ui]
+        argv = ["--disc", args.disc, "--out", str(out), "--source", args.source, "--force", "--ui", args.ui, "--colour-word", args.colour_word]
+        argv += ["--relocate-menu-art"] if args.relocate_menu_art else []
+        argv += ["--no-gameplay"] if args.no_gameplay else []
         for s in args.slot:
             argv += ["--slot", s]
         if args.iso:
@@ -188,6 +297,7 @@ def main():
     allowed_zz = [(cc.ZZZZ_STATS_OFFSET, cc.ZZZZ_STATS_OFFSET + cc.NUM_CHARS * cc.STATS_ROW)]
     if ui_source:
         allowed_zz.append((pdesc[2], pdesc[2] + pdesc[3]))       # the HUD portrait file, re-packed in place
+    allowed_zz += check_menu_art(disc, dol, pdisc, pdol, C, slots, ui_source, old_zz, new_zz, args.relocate_menu_art)
     with open(disc.files / "ZZZZ.dat", "rb") as a, open(pdisc.files / "ZZZZ.dat", "rb") as b:
         pos = 0
         bad = False
@@ -200,7 +310,7 @@ def main():
                     if not any(lo <= pos + s and pos + e <= hi for lo, hi in allowed_zz):
                         bad = True
             pos += n
-    check(not bad, "original ZZZZ.dat region unchanged outside the stats block%s" % (" and the HUD portrait file" if ui_source else ""))
+    check(not bad, "original ZZZZ.dat region unchanged outside the stats block%s" % (" and the HUD portrait and menu art files" if ui_source else ""))
 
     print(" ui (%s)" % args.ui)
     clone_ids = [s for s, _ in slots]
@@ -308,7 +418,13 @@ def main():
     print(" DOL byte diff")
     allowed = [(dol.off(cc.ADDR_BLOB_LIS), dol.off(cc.ADDR_BLOB_LIS) + 4), (dol.off(cc.ADDR_BLOB_ADDI), dol.off(cc.ADDR_BLOB_ADDI) + 4),
                (dol.off(cc.ADDR_MASTER + 515 * 16), dol.off(cc.ADDR_MASTER + 515 * 16) + 16),
-               (dol.off(cc.ADDR_GAME_REL_DESC), dol.off(cc.ADDR_GAME_REL_DESC) + 16)]  # game.rel re-packed size
+               ] + [(dol.off(a), dol.off(a) + 16) for a in cc.ADDR_REL_DESCS]  # RELs re-packed in place (size words)
+    for a in (cc.ADDR_MENU_COMMON_DESC, cc.ADDR_MENU_GRID_DESC):
+        if pdol.desc(a, 0) != dol.desc(a, 0):    # moved menu file: every DOL copy of its descriptor
+            k = bytes(dol.data).find(dol.read(a, 16))
+            while k >= 0:
+                allowed.append((k, k + 16))
+                k = bytes(dol.data).find(dol.read(a, 16), k + 1)
     text_allowed = [allowed[0], allowed[1]]
     if ui_source:
         allowed.append((dol.off(cc.ADDR_FINDCHAR), dol.off(cc.ADDR_FINDCHAR) + len(cc.FINDCHAR_PATCH)))
@@ -346,17 +462,8 @@ def main():
         check(all(st[j * 0xA0 + 0x3B + S] == (so[C * 0xA0 + 0x3B + C] if j in clone_cols else so[j * 0xA0 + 0x3B + C]) for j in range(54)),
               "chemistry column %d equals the source's" % S)
 
-    print(" game.rel / fst.bin / other files")
-    rel = cc.load_game_rel(disc, dol)      # what the game loads (ZZZZ.dat), not files/game.rel
-    prel = cc.load_game_rel(pdisc, pdol)
-    base, size = cc.rel_data_section(rel)
-    allowed = []
-    for off, rs in [cc.REL_VOICE] + cc.REL_TABLES:
-        for S, _ in slots:
-            allowed.append((base + off + S * rs, base + off + (S + 1) * rs))
-            check(prel[base + off + S * rs:base + off + (S + 1) * rs] == rel[base + off + C * rs:base + off + (C + 1) * rs], "game.rel table 0x%X row %d" % (off, S)) if off == cc.REL_VOICE[0] else None
-    bad = covered(diff_ranges(rel, prel), allowed)
-    check(not bad, "game.rel differs only in the per-character tables")
+    check_rels(disc, dol, pdisc, pdol, C, slots, ui_source, args.colour_word, not args.no_gameplay)
+    print(" fst.bin / other files")
     fst = (disc.sys / "fst.bin").read_bytes()
     pfst = (pdisc.sys / "fst.bin").read_bytes()
     zent = [e for e, p in cc.fst_paths(pfst) if p == "ZZZZ.dat"][0]
