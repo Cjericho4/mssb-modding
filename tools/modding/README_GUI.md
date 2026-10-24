@@ -51,7 +51,7 @@ not the USA version, already patched, ...).  An extracted game folder works too 
     the light and dark shading comes from the original).
   * The round button on the left shows that row in the **Preview** on the right: the character's
     main texture before and after.
-  * **+ Add a clone** / **Remove** to change how many copies you make.
+  * **+ Add a clone** / the **×** at the end of a row to change how many copies you make.
 
 The default is four Marios on the four Toad colours: blue, green, purple and yellow.
 
@@ -68,7 +68,7 @@ The default is four Marios on the four Toad colours: blue, green, purple and yel
 ## 4. Create the game
 
 The new game is saved next to your original as `... - Clones.iso` (change it with **Save as...**).
-Click **Create patched game**.  It takes a few minutes; the box at the bottom shows what it is doing.
+Click **Create patched game**.  It takes a few minutes; the **Log** on the right shows what it is doing.
 When it is done a message says where the file is.
 
 ## 5. Play it in Dolphin or Rio
@@ -101,7 +101,7 @@ When it is done a message says where the file is.
   and ranked modes expect the original game, so play the clones game offline.
 * **Not enough disk space**: free up about 3.5 GB on the drive you save to, or **Save as...** onto
   another drive.
-* **Something else went wrong**: the message box says what; the box at the bottom of the window has
+* **Something else went wrong**: the message box says what; the **Log** on the right of the window has
   the technical details.  Copy them when you ask for help.
 
 To undo everything, delete the `- Clones.iso`; your original game was never changed.
