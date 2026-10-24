@@ -221,11 +221,13 @@ def main():
     slots = [(s, g.colour_spec(c)) for s, c in g.default_rows(ch)]
     job = g.Job(args.iso, out_iso, 0, slots, keep_work=True)
     ns = g.job_args(job, work / "w" / "disc", work / "x.iso")
-    need = ("dry_run", "out", "disc", "force", "source", "slot", "no_aram_overlay", "ui", "no_gameplay", "no_stats", "iso")
+    need = ("dry_run", "out", "disc", "force", "source", "slot", "no_aram_overlay", "ui", "colour_word", "no_gameplay", "no_stats", "iso")
     check(all(hasattr(ns, k) for k in need), "namespace has every attribute clone() reads")
     check(ns.slot == ["29:hue=blue,keeplum=0.5", "30:hue=green,keeplum=0.5", "31:hue=purple,keeplum=0.5", "32:hue=yellow,keeplum=0.5"]
           and ns.ui == "source" and not ns.no_stats and ns.force and not ns.dry_run, "namespace values %r" % ns.slot)
     check(g.job_args(g.Job(args.iso, out_iso, 0, slots, ui_source=False, copy_stats=False), "o", "i").ui == "donor", "ui donor / no stats")
+    check(ns.colour_word == "none" and g.job_args(g.Job(args.iso, out_iso, 0, slots, keep_colour_word=True), "o", "i").colour_word == "donor",
+          "colour word: none by default, donor when 'Keep the donor's colour word' is ticked")
 
     def refused(j, needle, free=10 ** 12):
         try:

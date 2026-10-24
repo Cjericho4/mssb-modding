@@ -451,7 +451,8 @@ class PreviewWorker:
 # The patch job (what the big button runs)
 # ----------------------------------------------------------------------------------------------
 class Job:
-    def __init__(self, game_path, output_iso, source, slots, ui_source=True, copy_stats=True, keep_work=False):
+    def __init__(self, game_path, output_iso, source, slots, ui_source=True, copy_stats=True, keep_work=False,
+                 keep_colour_word=False):
         self.game_path = Path(game_path)
         self.output_iso = Path(output_iso)
         self.source = source
@@ -459,6 +460,7 @@ class Job:
         self.ui_source = ui_source
         self.copy_stats = copy_stats
         self.keep_work = keep_work
+        self.keep_colour_word = keep_colour_word   # roster screen: keep the donor's "Purple" etc. before the name
 
 
 def default_output(game_path):
@@ -473,6 +475,7 @@ def job_args(job, work_out, iso_path):
         disc=str(job.game_path), out=str(work_out), source=str(job.source),
         slot=["%d:%s" % (s, spec) for s, spec in job.slots], iso=str(iso_path),
         ui="source" if job.ui_source else "donor", no_aram_overlay=False,
+        colour_word="donor" if job.keep_colour_word else "none",
         no_stats=not job.copy_stats, no_gameplay=False, dry_run=False, force=True, list_slots=False)
 
 
@@ -694,22 +697,27 @@ class App:
         self.ui_source = tk.BooleanVar(value=True)
         self.copy_stats = tk.BooleanVar(value=True)
         self.keep_work = tk.BooleanVar(value=False)
+        self.keep_colour_word = tk.BooleanVar(value=False)
         self.keeplum = tk.DoubleVar(value=0.5)
         self.chk_ui = ttk.Checkbutton(self.adv, variable=self.ui_source)
         self.chk_ui.grid(row=2, column=0, columnspan=3, sticky="w")
+        self.chk_colour = ttk.Checkbutton(self.adv, text="Keep the donor's colour word (e.g. 'Purple')", variable=self.keep_colour_word)
+        self.chk_colour.grid(row=3, column=0, columnspan=3, sticky="w", padx=(px(22), 0))
+        self.ui_source.trace_add("write", lambda *_: self.chk_colour.state(
+            ["!disabled"] if self.ui_source.get() and self.chk_ui.instate(["!disabled"]) else ["disabled"]))
         self.chk_stats = ttk.Checkbutton(self.adv, variable=self.copy_stats)
-        self.chk_stats.grid(row=3, column=0, columnspan=3, sticky="w")
-        T.section(self.adv, "Keep shading", row=4, column=0, pady=(10, 0))
+        self.chk_stats.grid(row=4, column=0, columnspan=3, sticky="w")
+        T.section(self.adv, "Keep shading", row=5, column=0, pady=(10, 0))
         self.scale = ttk.Scale(self.adv, from_=0.0, to=1.0, variable=self.keeplum, length=px(220),
                                command=lambda v: self.keeplum_changed())
-        self.scale.grid(row=4, column=1, sticky="w", padx=(px(14), 0), pady=(px(10), 0))
+        self.scale.grid(row=5, column=1, sticky="w", padx=(px(14), 0), pady=(px(10), 0))
         self.keeplum_lbl = ttk.Label(self.adv, text="0.50", font=T.F["mono"])
-        self.keeplum_lbl.grid(row=4, column=2, sticky="e", pady=(px(10), 0))
+        self.keeplum_lbl.grid(row=5, column=2, sticky="e", pady=(px(10), 0))
         ttk.Label(self.adv, text="Higher keeps the light and dark areas of the original; lower is brighter and flatter.",
-                  style="Muted.TLabel").grid(row=5, column=0, columnspan=3, sticky="w", pady=(px(2), 0))
+                  style="Muted.TLabel").grid(row=6, column=0, columnspan=3, sticky="w", pady=(px(2), 0))
         self.chk_keep = ttk.Checkbutton(self.adv, text="Keep the working folder (for troubleshooting)", variable=self.keep_work)
         self.chk_keep.grid(row=7, column=0, columnspan=3, sticky="w", pady=(px(10), 0))
-        self.inputs += [self.chk_ui, self.chk_stats, self.scale, self.chk_keep]
+        self.inputs += [self.chk_ui, self.chk_colour, self.chk_stats, self.scale, self.chk_keep]
         self.adv.grid_remove()
         self.update_source_labels()
 
@@ -791,6 +799,8 @@ class App:
                 pass
         for w in (self.btn_iso, self.btn_dir):
             w.state(["disabled"] if self.busy else ["!disabled"])
+        if on and not self.ui_source.get():               # the colour word only matters with source menus
+            self.chk_colour.state(["disabled"])
 
     def set_status(self, text, colour, pill, pill_colour):
         self.status.configure(text=text, fg=colour)
@@ -819,7 +829,7 @@ class App:
 
     def update_source_labels(self):
         n = pretty_name(self.source())
-        self.chk_ui.configure(text="Show clones as %s in menus, on the HUD and by the announcer (recommended)" % n)
+        self.chk_ui.configure(text="Show clones as %s: name and pictures in menus, HUD, announcer (recommended)" % n)
         self.chk_stats.configure(text="Give clones %s's stats" % n)
 
     def toggle_advanced(self):
@@ -1136,7 +1146,8 @@ class App:
     def make_job(self):
         return Job(self.game_path.get(), self.out_path.get().strip(), self.source(),
                    [(r["slot"], self.spec_for(r["colour"])) for r in self.rows],
-                   ui_source=self.ui_source.get(), copy_stats=self.copy_stats.get(), keep_work=self.keep_work.get())
+                   ui_source=self.ui_source.get(), copy_stats=self.copy_stats.get(), keep_work=self.keep_work.get(),
+                   keep_colour_word=self.keep_colour_word.get())
 
     def create(self):
         if self.game is None or self.busy:

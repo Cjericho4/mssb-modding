@@ -398,7 +398,8 @@ def main():
         check(all(pdol.desc(cc.ADDR_SUBITEM_FILES, S * 6 + k) == dol.desc(cc.ADDR_SUBITEM_FILES, C * 6 + k) for k in range(6)), "disc-path sub-item files")
         if S < cc.JUMPTABLE_CASES:
             check(pdol.u32(cc.ADDR_JUMPTABLE + S * 4) == src_case, "per-character setup switch case")
-        check(all(pdol.s16(cc.ADDR_ANIMPARAMS + (k * 54 + S) * 2) == dol.s16(cc.ADDR_ANIMPARAMS + (k * 54 + C) * 2) for k in range(15)), "15 animation parameter tables")
+        if not args.no_gameplay:
+            check(all(pdol.s16(cc.ADDR_ANIMPARAMS + (k * 54 + S) * 2) == dol.s16(cc.ADDR_ANIMPARAMS + (k * 54 + C) * 2) for k in range(15)), "15 animation parameter tables")
 
     print(" blob")
     check(pblob[0] == oblob[0] and pblob[1] == pblob[3] and pblob[2] >= old_zz and pblob[2] % 0x800 == 0 and pblob[2] + pblob[3] <= new_zz, "blob descriptor {%08X %08X %08X %08X}" % pblob)
