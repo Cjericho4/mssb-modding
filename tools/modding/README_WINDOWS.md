@@ -81,9 +81,11 @@ Options:
   roster-screen name, mini picture and select-grid portrait (both pictures recoloured like the
   clone), lineup/results portraits, HUD card, announcer and voice.  `donor` leaves every
   menu/HUD/announcer lookup as it was (the clone is called "Toad"/"Luigi").
-* `--colour-word none` (default) / `--colour-word donor`: on the roster screen a colour variant shows a
-  colour word ("Blue", "Purple", ...) next to its name.  `none` removes it for the clone slots (the
-  clone is Mario, who has none); `donor` keeps the donor's word.  Only with `--ui source`.
+* `--colour-word none` (default) / `--colour-word donor`: on the roster screen the game draws a
+  separate colour label for colour variants (chosen by a per-character switch in `menus.rel`; the
+  variant's name picture already reads e.g. "Blue Toad", so exactly what this label shows is not yet
+  confirmed).  `none` gives the clone slots the label every single-colour character such as Mario
+  gets; `donor` keeps the donor's.  Only with `--ui source`.
 * `--no-aram-overlay`: skip the in-match (ARAM) body recolour.  Use it only to isolate a problem; with
   it the clones look like plain Mario in matches.
 * `--no-stats` / `--no-gameplay`: keep the donor's stats / timing tables instead of Mario's.
@@ -135,8 +137,8 @@ command every non-red Toad is a Mario, so the order does not matter.
    Put Toads on both teams to see them batting and fielding.
 
 With the default `--ui source` the extra Toads show up as **Mario** on the roster screen (the name
-under the preview and the small team picture, which is a Mario recoloured like the clone, with no
-"Blue"/"Purple" colour word) and in the lineup/team and results screens (Mario's face and name), the
+under the preview and the small team picture, which is a Mario recoloured like the clone, and Mario's
+colour label instead of the variant's) and in the lineup/team and results screens (Mario's face and name), the
 bottom-left batter/pitcher card in a match shows a Mario icon tinted in the clone's colour, the
 announcer calls them "Mario", and they use Mario's voice bank.  The **Toad cell on the character grid
 stays Toad**: the grid cells show the family's base character (Red Toad), and the clones live on the
@@ -168,7 +170,7 @@ relocations; everything outside the intended edits is byte-identical.  **Verifie
 verified until it runs in Dolphin:** the `--ui source` presentation, i.e. that the menus really show
 "Mario" for the clone slots (name banners and the small portraits are keyed by the unique index the
 patcher changes, but no one has watched the menus do it), the roster-screen name/mini picture/grid
-portrait and the missing colour word (added after the first Rio test, which still showed the donor's
+portrait and the colour label (added after the first Rio test, which still showed the donor's
 picture), the recoloured HUD card, the announcer saying "Mario" and Mario's voice bank loading for the
 clone.
 
@@ -216,7 +218,7 @@ Reading a crash in Dolphin:
 | Colours wrong but stable | recolour spec | widen the band `hue=0.62,width=0.08`, or `all=1` |
 | Clone plays fine but menus/announcer still say the donor's name | the unique-index remap did not take | report (which screen); `test_clone.py --patched` must show the `ui (source)` checks passing |
 | Menus show a wrong/garbled name or face for the clone, or a crash on the roster/records screen | a menu lookup not covered by the unique index, or the re-packed menu art files | rerun with `--ui donor`, report which screen |
-| Roster screen still shows the donor's picture/name, or a wrong colour word | menu art files / menus.rel colour-word edit | report which pane; try `--colour-word donor` to rule out the menus.rel edit |
+| Roster screen still shows the donor's picture/name, or an odd colour label | menu art files / menus.rel colour-word edit | report which pane; try `--colour-word donor` to rule out the menus.rel edit |
 | HUD batter card is still the donor's face in a match | the in-place portrait file was not picked up | report; try `--ui donor` to confirm the rest still works |
 | Clone is silent (no voice) in a match | voice bank (file 5+unique) | report; `--ui donor` goes back to the donor's bank |
 

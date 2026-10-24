@@ -66,9 +66,9 @@ The default is four Marios on the four Toad colours: blue, green, purple and yel
   screen, the select grid, the lineup and the in-match card then show Mario's name and a Mario picture
   in the clone's colour, and the announcer says "Mario".  Untick it if a menu shows something odd; the
   clones then keep their old name, face and voice in menus.
-  * *Keep the donor's colour word (e.g. 'Purple')*: off by default.  A colour variant such as Purple
-    Toad shows a colour word on the roster screen; normally the clone drops it (it is Mario).  Tick
-    this to keep it.
+  * *Keep the donor's colour word (e.g. 'Purple')*: off by default.  The roster screen draws a colour
+    label for colour variants such as Purple Toad; normally the clone gets Mario's instead (Mario has
+    no colour).  Tick this to keep the donor's.
 * *Give clones Mario's stats*: on by default.
 * *Keep shading*: how closely the new colour follows the original's light and dark areas.
 * *Keep the working folder*: for troubleshooting only.
