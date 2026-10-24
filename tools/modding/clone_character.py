@@ -56,6 +56,8 @@ lineup/HUD/announcer show the source.  --ui donor keeps every menu/HUD/announcer
 """
 import argparse
 import colorsys
+import hashlib
+import math
 import shutil
 import struct
 import sys
@@ -156,14 +158,16 @@ REL_VOICE_SIGNATURE = (324, 311, 298, 285)  # Mario, Luigi, DK, Diddy
 
 CHAR_NAMES = [
     "Mario", "Luigi", "DK", "Diddy", "Peach", "Daisy", "Yoshi", "BabyMario", "BabyLuigi", "Bowser",
-    "Wario", "Waluigi", "RedKoopa", "RedToad", "Boo", "Toadette", "RedShyGuy", "Birdo", "Monty",
+    "Wario", "Waluigi", "GreenKoopa", "RedToad", "Boo", "Toadette", "RedShyGuy", "Birdo", "Monty",
     "BowserJr", "RedParatroopa", "BluePianta", "RedPianta", "YellowPianta", "BlueNoki", "RedNoki",
     "GreenNoki", "HammerBro", "Toadsworth", "BlueToad", "YellowToad", "GreenToad", "PurpleToad",
     "BlueMagikoopa", "RedMagikoopa", "GreenMagikoopa", "YellowMagikoopa", "KingBoo", "Petey",
-    "Dixie", "Goomba", "Paragoomba", "GreenKoopa", "GreenParatroopa", "BlueShyGuy", "YellowShyGuy",
+    "Dixie", "Goomba", "Paragoomba", "RedKoopa", "GreenParatroopa", "BlueShyGuy", "YellowShyGuy",
     "GreenShyGuy", "BlackShyGuy", "GrayDryBones", "GreenDryBones", "RedDryBones", "BlueDryBones",
     "FireBro", "BoomerangBro",
 ]
+# Petey's body has non-CMPR textures (formats 8): it can't be recoloured, so it can't be a source.
+UNSUPPORTED_SOURCES = frozenset({38})
 FAMILY_NAMES = ["-", "Koopa", "Toad", "ShyGuy", "Paratroopa", "Pianta", "Noki", "Bros", "Magikoopa", "DryBones"]
 COLOUR_PRESETS = {
     "red": 0.0, "orange": 0.08, "yellow": 0.16, "green": 0.33, "cyan": 0.5, "blue": 0.62,
@@ -562,13 +566,29 @@ class Recolour:
         tint=RRGGBB[:strength]  blend every colour towards RRGGBB (strength 0..1, default 0.5)
         solid=RRGGBB       replace every colour (debug)
         tex=0/1/2          only touch these texture indices, slash-separated (default: all)
+        region=0/1         recolour these detected colour regions of the source (see --list-regions;
+                           0 = its main colour).  With no from/width/minsat/region/all key, a slot
+                           recolours the source's main colour region (Mario: his reds, as before)
+        maxsat= minval= maxval=<0..1>  more limits for the from/width band (default 1, 0, 1)
+        keepskin=1         never touch skin tones, even inside the band
     A bare preset name (blue, green, ...) is shorthand for hue=<preset>."""
+
+    BAND_KEYS = ("from", "width", "minsat", "maxsat", "minval", "maxval", "keepskin")
 
     def __init__(self, spec):
         self.hue = None
         self.band_from = 0.0
         self.band_width = 0.035  # suit reds sit at hue <= 0.031; skin/ear shading starts at 0.038
         self.minsat = 0.5
+        self.maxsat = 1.0
+        self.minval = 0.0
+        self.maxval = 1.0
+        self.keepskin = False
+        self.explicit_band = False   # a from/width/... key was given: never replaced by a region
+        self.region = None           # [region indices] from region=, resolved by resolve()
+        self.bands = None            # resolved [Region]; None = the single from/width band above
+        self.regions = []            # every region of the source (a colour goes to its nearest one)
+        self.skip_tex = frozenset()  # texture indices a resolved region leaves alone (the gloves)
         self.all = False
         self.sat = 1.0
         self.val = 1.0
@@ -590,6 +610,8 @@ class Recolour:
             k, v = part.split("=", 1)
             k = k.strip().lower()
             v = v.strip()
+            if k in self.BAND_KEYS:
+                self.explicit_band = True
             if k == "hue":
                 self.hue = COLOUR_PRESETS[v.lower()] if v.lower() in COLOUR_PRESETS else float(v)
             elif k == "from":
@@ -598,6 +620,16 @@ class Recolour:
                 self.band_width = float(v)
             elif k == "minsat":
                 self.minsat = float(v)
+            elif k == "maxsat":
+                self.maxsat = float(v)
+            elif k == "minval":
+                self.minval = float(v)
+            elif k == "maxval":
+                self.maxval = float(v)
+            elif k == "keepskin":
+                self.keepskin = v not in ("0", "false", "no")
+            elif k == "region":
+                self.region = [int(x) for x in v.split("/") if x]
             elif k == "all":
                 self.all = v not in ("0", "false", "no")
             elif k == "sat":
@@ -617,22 +649,80 @@ class Recolour:
                 self.tex = set(int(x) for x in v.split("/") if x)
             else:
                 raise SystemExit("unknown recolour key %r" % k)
+        if self.region is not None and (self.explicit_band or self.all):
+            raise SystemExit("recolour spec %r: region= cannot be combined with from/width/minsat/.../all" % spec)
         self._cache = {}
+        self._texel_cache = {}
 
-    def _in_band(self, h, s):
+    @property
+    def uses_default_band(self):
+        """True when nothing says which colours to change (resolve() then picks the main region)."""
+        return not (self.explicit_band or self.all or self.region is not None)
+
+    def resolve(self, regions):
+        """Bind region= (or, with no band keys at all, the main region regions[0]) to the source's
+        detected regions.  Without regions (or with an explicit band) the spec is left as it is."""
+        if self.region is not None:
+            bad = [i for i in self.region if not 0 <= i < len(regions)]
+            if bad:
+                raise SystemExit("recolour spec %r: the source has %d colour regions (0..%d), not %s"
+                                 % (self.spec, len(regions), len(regions) - 1, "/".join(map(str, bad))))
+            picked = [regions[i] for i in self.region]
+        elif self.uses_default_band and regions:
+            picked = [r for r in regions if r.default] or [regions[0]]
+        else:
+            return self
+        self.bands = picked
+        self.regions = list(regions)
+        self.skip_tex = frozenset().union(*[r.skip for r in picked])
+        self._cache = {}
+        self._texel_cache = {}
+        return self
+
+    def _in_band(self, h, s, v=0.0):
+        if self.bands is not None:
+            # a colour inside several regions' boxes belongs to the one whose hue centre is nearest
+            # (and brightness/saturation): DK's fur box must not take his tie's reds
+            inside = [r for r in self.regions if r.contains(h, s, v)]
+            if not inside:
+                return False
+            best = min(inside, key=lambda r: r.distance(h, s, v))
+            return any(best is b for b in self.bands)
         if s < self.minsat:
             return False
         if self.all:
             return True
+        if s > self.maxsat or v < self.minval or v > self.maxval or (self.keepskin and is_skin(h, s, v)):
+            return False
         d = abs((h - self.band_from + 0.5) % 1.0 - 0.5)
         return d <= self.band_width
 
-    def map_rgb8(self, r8, g8, b8):
-        """Map one 8-bit RGB colour through the spec (shared by every pixel format)."""
+    def touches(self, tex_index):
+        """Does this spec recolour texture `tex_index` of a body?"""
+        return (self.tex is None or tex_index in self.tex) and tex_index not in self.skip_tex
+
+    @property
+    def blockwise(self):
+        """Decide per CMPR block (by the colours its texels show) instead of per endpoint: true for
+        detected regions; Mario's original band keeps the per-endpoint rule (byte-identical)."""
+        return self.bands is not None and all(b.blockwise for b in self.bands)
+
+    def texel_in_band(self, rgb):
+        """Is a decoded texel colour (3 bytes) inside the selected region(s)?  Cached."""
+        r = self._texel_cache.get(rgb)
+        if r is None:
+            r = self._in_band(*colorsys.rgb_to_hsv(rgb[0] / 255.0, rgb[1] / 255.0, rgb[2] / 255.0))
+            self._texel_cache[rgb] = r
+        return r
+
+    def map_rgb8(self, r8, g8, b8, force=False):
+        """Map one 8-bit RGB colour through the spec (shared by every pixel format).  force: the
+        colour is an endpoint of a block whose texels are mostly in the region, so it follows the
+        region even when it lies outside it itself (unless it is skin or nearly grey)."""
         if self.solid is not None:
             return (self.solid >> 16) & 0xFF, (self.solid >> 8) & 0xFF, self.solid & 0xFF
         h, s, v = colorsys.rgb_to_hsv(r8 / 255.0, g8 / 255.0, b8 / 255.0)
-        hit = self._in_band(h, s)
+        hit = self._in_band(h, s, v) or (force and s >= 0.12 and not is_skin(h, s, v))
         if hit:
             if self.hue is not None:
                 h = self.hue % 1.0
@@ -653,12 +743,13 @@ class Recolour:
             bf = bf * (1 - t) + (self.tint & 0xFF) / 255.0 * t
         return int(round(rf * 255)), int(round(gf * 255)), int(round(bf * 255))
 
-    def map565(self, c):
-        r = self._cache.get(c)
+    def map565(self, c, force=False):
+        key = c | 0x10000 if force else c
+        r = self._cache.get(key)
         if r is not None:
             return r
-        out = rgb_to_rgb565(*self.map_rgb8(*rgb565_to_rgb(c)))
-        self._cache[c] = out
+        out = rgb_to_rgb565(*self.map_rgb8(*rgb565_to_rgb(c), force=force))
+        self._cache[key] = out
         return out
 
     def map_rgb5a3(self, p):
@@ -685,10 +776,31 @@ def _swap01(idx):
     return out
 
 
+def block_mostly_in_band(c0, c1, idx, rc):
+    """True when at least half of a CMPR block's visible texels show a colour of the region.  A
+    texel is often an interpolated mix of two endpoints that are themselves outside the region
+    (Baby Luigi's cap: dark olive + green, every texel at the 1/3 point), so per-endpoint tests alone
+    leave such blocks half recoloured."""
+    pal = cmpr_palette(c0, c1)
+    n = [0, 0, 0, 0]
+    for sh in (24, 16, 8, 0):
+        cnt = _IDX_COUNTS[(idx >> sh) & 0xFF]
+        for i in range(4):
+            n[i] += cnt[i]
+    inside = total = 0
+    for i in range(4):
+        if n[i] and pal[i] is not None:
+            total += n[i]
+            if rc.texel_in_band(pal[i]):
+                inside += n[i]
+    return total > 0 and 2 * inside >= total
+
+
 def recolour_block(block, rc):
     c0, c1, idx = struct.unpack(">HHI", block)
-    n0 = rc.map565(c0)
-    n1 = rc.map565(c1)
+    force = rc.blockwise and block_mostly_in_band(c0, c1, idx, rc)
+    n0 = rc.map565(c0, force)
+    n1 = rc.map565(c1, force)
     four = c0 > c1
     if four:
         if n0 == n1:
@@ -709,11 +821,327 @@ def recolour_gpc(gpc, rc):
     """Recolour the CMPR endpoints of every texture in place; headers and geometry untouched."""
     d = gpc.data
     for t in gpc.textures:
-        if rc.tex is not None and t["index"] not in rc.tex:
+        if not rc.touches(t["index"]):
             continue
         start, end = t["data"], t["data"] + t["size"]
         for o in range(start, end, 8):
             d[o:o + 8] = recolour_block(bytes(d[o:o + 8]), rc)
+
+
+# ----------------------------------------------------------------------------------------------
+# CMPR decoding (preview images, region detection, the test contact sheet)
+# ----------------------------------------------------------------------------------------------
+_RGB565 = None
+
+
+def _rgb565_table():
+    global _RGB565
+    if _RGB565 is None:
+        _RGB565 = [bytes(rgb565_to_rgb(c)) for c in range(0x10000)]
+    return _RGB565
+
+
+def cmpr_palette(c0, c1):
+    """The four colours of a CMPR (DXT1) block as 3-byte strings; index 3 is None (transparent)
+    in 3-colour mode (c0 <= c1)."""
+    t = _rgb565_table()
+    a, b = t[c0], t[c1]
+    if c0 > c1:
+        return (a, b, bytes((2 * x + y) // 3 for x, y in zip(a, b)), bytes((x + 2 * y) // 3 for x, y in zip(a, b)))
+    return (a, b, bytes((x + y) // 2 for x, y in zip(a, b)), None)
+
+
+CHECKER = (b"\x99\x99\x99", b"\xcc\xcc\xcc")
+
+
+def decode_cmpr(data, w, h, checker=CHECKER):
+    """GameCube CMPR (8x8 tiles of four 4x4 DXT1 blocks, indices MSB first) -> RGB bytes, w*h*3.
+    Transparent texels become checker[(x>>3 ^ y>>3) & 1] (a grey checkerboard)."""
+    out = bytearray(w * h * 3)
+    stride = w * 3
+    o = 0
+    unpack = struct.unpack_from
+    for ty in range(0, h, 8):
+        for tx in range(0, w, 8):
+            for by, bx in ((0, 0), (0, 4), (4, 0), (4, 4)):
+                c0, c1, idx = unpack(">HHI", data, o)
+                o += 8
+                y0, x0 = ty + by, tx + bx
+                if y0 >= h or x0 >= w:
+                    continue
+                pal = cmpr_palette(c0, c1)
+                if pal[3] is None:
+                    pal = pal[:3] + (checker[((x0 >> 3) ^ (y0 >> 3)) & 1],)
+                n = min(4, w - x0)
+                for r in range(min(4, h - y0)):
+                    row = (idx >> (24 - 8 * r)) & 0xFF
+                    px = pal[row >> 6] + pal[(row >> 4) & 3] + pal[(row >> 2) & 3] + pal[row & 3]
+                    p = (y0 + r) * stride + x0 * 3
+                    out[p:p + n * 3] = px[:n * 3]
+    return bytes(out)
+
+
+_IDX_COUNTS = [tuple(sum(1 for k in range(4) if (b >> (2 * k)) & 3 == i) for i in range(4)) for b in range(256)]
+
+
+def cmpr_colour_counts(data, counts=None):
+    """{(r, g, b): texel count} over a CMPR texture (transparent texels left out)."""
+    counts = {} if counts is None else counts
+    unpack = struct.unpack_from
+    for o in range(0, len(data), 8):
+        c0, c1, idx = unpack(">HHI", data, o)
+        pal = cmpr_palette(c0, c1)
+        n = [0, 0, 0, 0]
+        for sh in (24, 16, 8, 0):
+            cnt = _IDX_COUNTS[(idx >> sh) & 0xFF]
+            n[0] += cnt[0]
+            n[1] += cnt[1]
+            n[2] += cnt[2]
+            n[3] += cnt[3]
+        for i in range(4):
+            if n[i] and pal[i] is not None:
+                counts[pal[i]] = counts.get(pal[i], 0) + n[i]
+    return counts
+
+
+def texture_bytes(gpc, t):
+    return bytes(gpc.data[t["data"]:t["data"] + t["size"]])
+
+
+# ----------------------------------------------------------------------------------------------
+# Colour regions: which colours of a character are "its" colours (Mario's red, Luigi's green, ...)
+# ----------------------------------------------------------------------------------------------
+def is_skin(h, s, v):
+    """Skin tones (peach/tan, every character's face and hands): orange hue, light, not too vivid."""
+    return h <= 0.13 and 0.08 <= s <= 0.62 and v >= 0.5
+
+
+# Every character's body carries two baseball-glove textures (orange-brown leather, the same few
+# images shared between characters).  Their colours sit right on top of brown fur, orange dresses
+# and skin, so a detected region never touches them.  md5(texture data)[:12] of all of them in the
+# retail bodies (test_matrix.py checks each cloneable character has exactly two).
+GLOVE_TEXTURES = frozenset("""
+8da02ffb3ea9 3d8f3fc12a04 14a8da07943c 799c1d92d00e 3f6017a6f8cd 37468e06f34c 4d342940c114
+c5181b821b6c 56a1383eff40 0b988894d1eb 0414e07d8d63 5ebe98e4d4ed 05853bc37f33 ccdc45f00ee3
+3bfbc4bc3abc 9439d82f2d70 b33278673130 57bd06c2f345 8e13c338ed31 625961e30213 b1a6ae25a138
+be99c0e257ad 77d9b7b1a3dc 4cd06b1fd065 9f4cc4b5fd1b 12d3a56c160c e68703ece83c 916129f18959
+0796c1fd528f 927163b674ca eb51c8b77a37 f1a1cdd1c589 63292930f0a5 2a28084a4a2a
+""".split())
+
+
+def glove_textures(gpc):
+    return frozenset(t["index"] for t in gpc.textures
+                     if hashlib.md5(texture_bytes(gpc, t)).hexdigest()[:12] in GLOVE_TEXTURES)
+
+
+HUE_NAMES = ((15, "red"), (40, "orange"), (70, "yellow"), (165, "green"), (195, "cyan"), (255, "blue"),
+             (320, "purple"), (345, "pink"), (360, "red"))
+
+
+class Region:
+    """A box in HSV space: hue within +-width of `hue`, saturation and value inside their limits,
+    optionally never skin.  `skip` = texture indices left alone (the gloves)."""
+    __slots__ = ("name", "hue", "width", "minsat", "maxsat", "minval", "maxval", "keepskin", "skip",
+                 "weight", "rgb", "sat", "val", "default", "blockwise")
+
+    def __init__(self, name, hue, width, minsat=0.5, maxsat=1.0, minval=0.0, maxval=1.0, keepskin=True,
+                 skip=frozenset(), weight=0.0, rgb=None, sat=0.8, val=0.7, blockwise=True):
+        self.name, self.hue, self.width = name, hue % 1.0, width
+        self.minsat, self.maxsat, self.minval, self.maxval = minsat, maxsat, minval, maxval
+        self.keepskin, self.skip, self.weight = keepskin, frozenset(skip), weight
+        self.sat, self.val = sat, val          # the cluster's typical colour (median s, v)
+        self.default = False                   # recoloured when a slot names no region
+        self.blockwise = blockwise
+        self.rgb = rgb if rgb is not None else tuple(int(x * 255) for x in colorsys.hsv_to_rgb(self.hue, 0.8, 0.85))
+
+    def contains(self, h, s, v):
+        if s < self.minsat or s > self.maxsat or v < self.minval or v > self.maxval:
+            return False
+        if abs((h - self.hue + 0.5) % 1.0 - 0.5) > self.width:
+            return False
+        return not (self.keepskin and is_skin(h, s, v))
+
+    def distance(self, h, s, v):
+        """How far a colour is from this region's typical colour (hue counts 4x)."""
+        dh = abs((h - self.hue + 0.5) % 1.0 - 0.5) * 4
+        return dh * dh + (s - self.sat) ** 2 + (v - self.val) ** 2
+
+    @property
+    def swatch(self):
+        return "#%02x%02x%02x" % tuple(self.rgb)
+
+    def __repr__(self):
+        return ("Region(%r, hue=%.3f, width=%.3f, sat %.2f-%.2f, val %.2f-%.2f%s, %.1f%%)"
+                % (self.name, self.hue, self.width, self.minsat, self.maxsat, self.minval, self.maxval,
+                   ", keepskin" if self.keepskin else "", self.weight * 100))
+
+
+def hue_name(h, s, v):
+    deg = (h % 1.0) * 360
+    name = next(n for top, n in HUE_NAMES if deg < top)
+    if name in ("orange", "yellow") and v < 0.6:
+        return "brown"
+    if name == "red" and v < 0.45:
+        return "dark red"
+    if s < 0.5 and v > 0.7:
+        return "light " + name
+    return name
+
+
+# Hand-tuned regions where the detector alone is ambiguous, keyed by charID: a list of
+# (name, overrides) applied to the detected regions in order, or full Region lists.  Mario's first
+# region is exactly the band clone_character used before regions existed (byte-identical output).
+REGION_OVERRIDES = {
+    0: [Region("red (cap, shirt)", 0.0, 0.035, 0.5, keepskin=False, blockwise=False)],
+}
+# Which detected regions a slot recolours by default (name prefixes, the first is the main one),
+# where the biggest coloured cluster is not the character's own colour: the turtles' yellow skin,
+# the colour variants' shared base colours (a Blue Toad's brown vest), Pianta palm hair.  Every
+# entry is checked against the contact sheet of test_matrix.py.
+# Textures no region touches for one character, beyond the gloves (same colours as the outfit):
+KEEP_TEXTURES = {
+    5: {8: "hair (the same orange as the dress)"},
+    7: {11: "mouth (the same red as the cap)"},
+}
+REGION_DEFAULTS = {
+    3: ("red",),                                   # Diddy: cap and shirt (fur is region 1)
+    4: ("light pink", "red"),                      # Peach: dress and its darker pink parts
+    5: ("orange", "yellow"),                       # Daisy: the whole dress
+    9: ("green",), 19: ("green",),                 # Bowser, Bowser Jr.: shell
+    12: ("green",), 42: ("red",), 20: ("red",), 43: ("green",),   # Koopas / Paratroopas: shell
+    21: ("light cyan",), 22: ("light pink",), 23: ("yellow",),   # Piantas: body
+    27: ("green",), 52: ("red",), 53: ("blue",),  # Bros: helmet and shell
+    29: ("blue",), 30: ("yellow",), 31: ("green",), 32: ("purple",),  # Toad colours: cap spots
+    39: ("pink",),                                 # Dixie: beret and top
+    44: ("blue",),                                 # Blue Shy Guy: robe
+}
+
+
+def _wpercentile(pairs, q):
+    """Weighted percentile of [(value, weight)]."""
+    pairs = sorted(pairs)
+    total = sum(w for _, w in pairs)
+    acc = 0.0
+    for v, w in pairs:
+        acc += w
+        if acc >= q * total:
+            return v
+    return pairs[-1][0] if pairs else 0.0
+
+
+def _bin_stats(cand, bins_):
+    """(median saturation, median value) of the candidate colours in these hue bins."""
+    sel = set(bins_)
+    members = [c for c in cand if c[0] in sel]
+    if not members:
+        return 0.0, 0.0
+    return (_wpercentile([(c[2], c[4]) for c in members], 0.5), _wpercentile([(c[3], c[4]) for c in members], 0.5))
+
+
+def detect_regions(gpc, char=None, bins=72, min_share=0.015):
+    """The character's recolourable colour regions, main one first: clusters of saturated hues over
+    every body texture (weighted by texel count), leaving out the gloves, skin tones, eyes and
+    near-greys/whites/blacks.  REGION_OVERRIDES[char] replaces or extends the result."""
+    skip = glove_textures(gpc) | frozenset(KEEP_TEXTURES.get(char, ()))
+    counts = {}
+    for t in gpc.textures:
+        if t["index"] not in skip:
+            cmpr_colour_counts(texture_bytes(gpc, t), counts)
+    total = float(sum(counts.values())) or 1.0
+    cand = []
+    hist = [0.0] * bins
+    for rgb, n in counts.items():
+        h, s, v = colorsys.rgb_to_hsv(rgb[0] / 255.0, rgb[1] / 255.0, rgb[2] / 255.0)
+        if s < 0.2 or v < 0.15 or is_skin(h, s, v):
+            continue
+        b = int(h * bins) % bins
+        cand.append((b, h, s, v, n, rgb))
+        hist[b] += n
+    sm = hist
+    on = [x >= 0.0015 * total for x in sm]
+    # contiguous runs of populated bins (wrapping around red), split at deep valleys
+    runs = []
+    if all(on):
+        runs = [list(range(bins))]
+    elif any(on):
+        start = next(i for i in range(bins) if not on[i])
+        cur = []
+        for k in range(1, bins + 1):
+            i = (start + k) % bins
+            if on[i]:
+                cur.append(i)
+            elif cur:
+                runs.append(cur)
+                cur = []
+        if cur:
+            runs.append(cur)
+    clusters = []
+    for run in runs:
+        parts, cur = [], [run[0]]
+        for j in range(1, len(run) - 1):
+            i = run[j]
+            left = max(sm[k] for k in cur)
+            right = max(sm[k] for k in run[j + 1:])
+            if sm[i] < sm[run[j - 1]] and sm[i] <= sm[run[j + 1]] and sm[i] < 0.5 * min(left, right):
+                parts.append(cur)
+                cur = []
+            cur.append(i)
+        cur += run[len(run) - 1:] if len(run) > 1 else []
+        parts.append(cur)
+        # a valley between two shades of one colour (Wario's yellow and its orange shading) is not a
+        # border: merge neighbours whose typical saturation and brightness are alike; keep DK's dark
+        # fur and bright red tie apart
+        merged = [parts[0]]
+        for part in parts[1:]:
+            a, b = _bin_stats(cand, merged[-1]), _bin_stats(cand, part)
+            if abs(a[0] - b[0]) < 0.22 and abs(a[1] - b[1]) < 0.22:
+                merged[-1] = merged[-1] + part
+            else:
+                merged.append(part)
+        clusters += merged
+    regions = []
+    for bins_ in clusters:
+        members = [c for c in cand if c[0] in set(bins_)]
+        weight = sum(c[4] for c in members)
+        if weight < min_share * total:
+            continue
+        # circular weighted mean hue
+        sx = sum(math.cos(2 * math.pi * c[1]) * c[4] for c in members)
+        sy = sum(math.sin(2 * math.pi * c[1]) * c[4] for c in members)
+        hue = (math.atan2(sy, sx) / (2 * math.pi)) % 1.0
+        width = _wpercentile([(abs((c[1] - hue + 0.5) % 1.0 - 0.5), c[4]) for c in members], 0.99) + 0.015
+        s_lo = _wpercentile([(c[2], c[4]) for c in members], 0.01) - 0.04
+        v_lo = _wpercentile([(c[3], c[4]) for c in members], 0.01) - 0.04
+        s_med = _wpercentile([(c[2], c[4]) for c in members], 0.5)
+        v_med = _wpercentile([(c[3], c[4]) for c in members], 0.5)
+        v_hi = _wpercentile([(c[3], c[4]) for c in members], 0.99)
+        rgb = tuple(int(sum(c[5][k] * c[4] for c in members) / weight) for k in range(3))
+        regions.append(Region(hue_name(hue, s_med, v_med), hue, width, max(0.2, s_lo - 0.04), 1.0,
+                              max(0.1, v_lo - 0.08), min(1.0, v_hi + 0.08), True, skip, weight / total, rgb, s_med, v_med))
+    regions.sort(key=lambda r: -r.weight)
+    seen = {}
+    for r in regions:
+        seen[r.name] = seen.get(r.name, 0) + 1
+        if seen[r.name] > 1:
+            r.name = "%s %d" % (r.name, seen[r.name])
+    ov = REGION_OVERRIDES.get(char)
+    if ov:
+        regions = list(ov) + [r for r in regions if not any(_overlaps(r, o) for o in ov)]
+    want = REGION_DEFAULTS.get(char, ())
+    picked = []
+    for prefix in want:
+        r = next((r for r in regions if r.name.startswith(prefix) and r not in picked), None)
+        if r is not None:
+            picked.append(r)
+    if not picked and regions:
+        picked = [regions[0]]
+    for r in picked:
+        r.default = True
+    return picked + [r for r in regions if r not in picked]
+
+
+def _overlaps(a, b):
+    return abs((a.hue - b.hue + 0.5) % 1.0 - 0.5) <= a.width + b.width
 
 
 # ----------------------------------------------------------------------------------------------
