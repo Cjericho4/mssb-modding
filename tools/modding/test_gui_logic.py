@@ -146,6 +146,17 @@ def main():
     hint = g.pick_hint(dol, 0, [29, 30, 31, 32, 1])
     check("several Toads" in hint and "every extra one" in hint and "pick Luigi" in hint, "pick hint: %s" % hint)
 
+    bad = []
+    for c in range(cc.NUM_CHARS):
+        try:
+            for t in (0, 1):
+                cc.Gpc(cc.load_subfile(game.disc, dol, c * cc.SUBFILE_TRACKS + t)).check()
+            cc.Gpc(cc.effective_body(game.disc, dol, c)).check()
+        except ValueError:
+            bad.append(c)
+    check(set(bad) == g.UNSUPPORTED_SOURCES and not set(bad) & set(g.SOURCES), "unsupported sources %r left out of the dropdown" % bad)
+    check(all(g.default_rows(g.donor_choices(dol, c)) for c in g.SOURCES), "every offered source has default clone rows")
+
     print("3. colours")
     check(g.colour_spec("blue") == "hue=blue,keeplum=0.5", "preset spec %s" % g.colour_spec("blue"))
     check(g.colour_spec("green", 1.0, g.BAND_ALL) == "hue=green,keeplum=1,all=1", "band/keeplum spec %s" % g.colour_spec("green", 1.0, g.BAND_ALL))
@@ -221,6 +232,8 @@ def main():
     check("Advanced" in m and d is None, "SystemExit -> plain message")
     m, d = g.friendly_error(OSError(28, "No space left on device"))
     check("drive is full" in m and d is None, "ENOSPC -> plain message")
+    m, d = g.friendly_error(PermissionError(13, "Permission denied", "x.iso"))
+    check("close it first" in m and d is None, "file in use -> plain message: %s" % m)
     try:
         raise KeyError("boom")
     except KeyError as e:

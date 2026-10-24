@@ -36,6 +36,10 @@ DEFAULT_ROWS = [(29, "blue"), (30, "green"), (31, "purple"), (32, "yellow")]
 PRESETS = list(cc.COLOUR_PRESETS)     # red, orange, yellow, green, cyan, blue, purple, pink
 NEEDED_FREE_BYTES = 3_300_000_000     # working copy (~1.5 GB) + the new .iso (~1.5 GB)
 DISC_IMAGE_OTHER = (".rvz", ".nkit", ".gcz", ".wbfs", ".ciso", ".wia", ".tgc")
+# Sources whose models clone_character can't recolour (Petey's body has non-CMPR textures);
+# test_gui_logic.py checks this list against the disc.
+UNSUPPORTED_SOURCES = {38}
+SOURCES = [c for c in range(cc.NUM_CHARS) if c not in UNSUPPORTED_SOURCES]
 BAND_REDS = "reds"
 BAND_ALL = "all"
 
@@ -475,7 +479,9 @@ def friendly_error(exc):
         if getattr(exc, "errno", None) == 28:
             return "The drive is full. Free up some space (about 3.3 GB) and try again.", None
         where = " (%s)" % exc.filename if getattr(exc, "filename", None) else ""
-        return "Couldn't read or write a file%s: %s" % (where, exc.strerror or exc), None
+        busy = (" If that game is open in Dolphin or Rio, close it first." if getattr(exc, "errno", None) in (1, 13)
+                or getattr(exc, "winerror", None) == 32 else "")
+        return "Couldn't read or write a file%s: %s.%s" % (where, exc.strerror or exc, busy), None
     return ("Something went wrong while making the game. The technical details are in the log at the "
             "bottom of the window.", "".join(traceback.format_exception(type(exc), exc, exc.__traceback__)))
 
@@ -556,7 +562,7 @@ class App:
         r += 1
         self.source_var = tk.StringVar(value=pretty_name(0))
         self.cb_source = ttk.Combobox(left, textvariable=self.source_var, state="readonly", width=24,
-                                      values=[pretty_name(c) for c in range(cc.NUM_CHARS)])
+                                      values=[pretty_name(c) for c in SOURCES])
         self.cb_source.grid(row=r, column=0, sticky="w", pady=(2, 10))
         self.cb_source.bind("<<ComboboxSelected>>", lambda e: self.source_changed())
         self.inputs.append(self.cb_source)
@@ -869,7 +875,10 @@ class App:
             spec = self.spec_for(row["colour"])
             before, after = pv.before_png, pv.after_png(spec)
         except BaseException as e:  # noqa: B902
-            self.preview_caption.configure(text="No preview: %s" % friendly_error(e)[0])
+            self.preview_caption.configure(text="No preview for %s: %s" % (pretty_name(self.source()), e))
+            for lbl in (self.img_before, self.img_after):
+                lbl.configure(image="")
+                lbl.image = None
             return
         zoom = max(1, 256 // max(pv.w, pv.h))
         imgs = []
