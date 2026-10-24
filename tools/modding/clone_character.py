@@ -414,8 +414,8 @@ def rgb_to_rgb565(r, g, b):
 class Recolour:
     """Spec: comma-separated key=value.  Keys:
         hue=<0..1|preset>  target hue for the matched band (default band: reds, i.e. Mario's suit)
-        from=<0..1> width=<0..1>  hue band to retarget (default from=0 width=0.09)
-        minsat=<0..1>      minimum saturation for a colour to be considered part of the band (0.3)
+        from=<0..1> width=<0..1>  hue band to retarget (default from=0 width=0.05: Mario's red, not his skin)
+        minsat=<0..1>      minimum saturation for a colour to be considered part of the band (0.5)
         all=1              retarget every saturated colour, not just the band
         sat=<mult> val=<mult>  multiply saturation / brightness (applied to matched colours)
         tint=RRGGBB[:strength]  blend every colour towards RRGGBB (strength 0..1, default 0.5)
@@ -426,8 +426,8 @@ class Recolour:
     def __init__(self, spec):
         self.hue = None
         self.band_from = 0.0
-        self.band_width = 0.09
-        self.minsat = 0.3
+        self.band_width = 0.05
+        self.minsat = 0.5
         self.all = False
         self.sat = 1.0
         self.val = 1.0
