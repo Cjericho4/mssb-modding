@@ -67,12 +67,13 @@ def main():
     ap.add_argument("--work", required=True)
     ap.add_argument("--source", default="mario")
     ap.add_argument("--slot", action="append", default=[])
+    ap.add_argument("--iso", action="store_true", help="also write and verify an ISO (1.5 GB)")
     args = ap.parse_args()
 
     disc = cc.Disc(args.disc)
     dol = cc.Dol((disc.sys / "main.dol").read_bytes())
     C = cc.parse_char(args.source)
-    slots = [cc.parse_slot_spec(s) for s in args.slot] or [(29, cc.Recolour("hue=blue")), (30, cc.Recolour("hue=green")), (31, cc.Recolour("hue=purple"))]
+    slots = [cc.parse_slot_spec(s) for s in args.slot] or [(29, cc.Recolour("hue=blue")), (30, cc.Recolour("hue=green")), (31, cc.Recolour("hue=purple")), (32, cc.Recolour("hue=yellow"))]
 
     print("1. LZSS round trip on retail files")
     for t in range(cc.SUBFILE_TRACKS):
@@ -102,6 +103,8 @@ def main():
     argv = ["--disc", args.disc, "--out", str(out), "--source", args.source, "--force"]
     for s in args.slot:
         argv += ["--slot", s]
+    if args.iso:
+        argv += ["--iso", str(work / "patched.iso")]
     cc.main(argv)
 
     print("4. verify the patched disc")
@@ -249,6 +252,26 @@ def main():
     check(not covered(diff_ranges(fst, pfst), [(zent["index"] * 12 + 8, zent["index"] * 12 + 12)]), "fst.bin differs only in that field")
     for name in ("sys/boot.bin", "sys/bi2.bin", "sys/apploader.img", "files/menus.rel", "files/challenge.rel", "files/aaaa.dat", "files/opening.bnr"):
         check((disc.root / name).read_bytes() == (pdisc.root / name).read_bytes(), "%s identical" % name)
+
+    if args.iso:
+        print(" iso")
+        with open(work / "patched.iso", "rb") as iso:
+            boot = iso.read(0x440)
+            dol_off, fst_off, fst_size = struct.unpack_from(">III", boot, 0x420)
+            iso.seek(fst_off)
+            check(iso.read(fst_size) == pfst, "iso: fst at 0x%X equals the patched fst.bin" % fst_off)
+            iso.seek(dol_off)
+            check(iso.read(len(pdol.data)) == bytes(pdol.data), "iso: main.dol at 0x%X equals the patched DOL" % dol_off)
+            for e, p in cc.fst_paths(pfst):
+                iso.seek(e["offset"])
+                with open(pdisc.files / p, "rb") as g:
+                    same = True
+                    left = e["size"]
+                    while left and same:
+                        n = min(left, 1 << 22)
+                        same = iso.read(n) == g.read(n)
+                        left -= n
+                check(same, "iso: %s at 0x%X (%d B) matches" % (p, e["offset"], e["size"]))
 
     print()
     if FAILS:

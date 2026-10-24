@@ -746,7 +746,7 @@ def clone(args):
     C = parse_char(args.source)
     clones = [parse_slot_spec(s) for s in args.slot]
     if not clones:
-        clones = [(29, Recolour("hue=blue")), (30, Recolour("hue=green")), (31, Recolour("hue=purple"))]
+        clones = [(29, Recolour("hue=blue")), (30, Recolour("hue=green")), (31, Recolour("hue=purple")), (32, Recolour("hue=yellow"))]
     slots = [s for s, _ in clones]
     if len(set(slots)) != len(slots):
         raise SystemExit("duplicate donor slot")
@@ -867,7 +867,7 @@ def clone(args):
             f.write(b)
         f.seek(0, 2)
         end = f.tell()
-        pad = align(end, 0x800) - end
+        pad = align(end, 0x8000) - end
         f.write(b"\0" * pad)
     new_zz_size = disc.zzzz_size()
     log("ZZZZ.dat: %d -> %d bytes" % (append_at, new_zz_size))
@@ -923,14 +923,15 @@ def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0], formatter_class=argparse.RawDescriptionHelpFormatter,
                                  epilog="""examples:
   py clone_character.py --disc "C:\\mssb\\GYQE01" --list-slots
-  py clone_character.py --disc "C:\\mssb\\GYQE01" --out "C:\\mssb\\GYQE01-marios" --source mario --slot BlueToad:blue --slot YellowToad:green --slot GreenToad:purple
+  py clone_character.py --disc "C:\\mssb\\GYQE01" --out "C:\\mssb\\GYQE01-luigi" --source mario --slot Luigi:green
+  py clone_character.py --disc "C:\\mssb\\GYQE01" --out "C:\\mssb\\GYQE01-marios" --source mario --slot BlueToad:blue --slot YellowToad:green --slot GreenToad:purple --slot PurpleToad:yellow
   py clone_character.py --disc ... --out ... --source 0 --slot 29:hue=0.62,sat=1.1 --slot 30:tint=00FF00:0.6 --iso "C:\\mssb\\marios.iso"
 recolour spec (after the slot and a colon): """ + Recolour.__doc__)
     ap.add_argument("--disc", required=True, help="extracted disc folder (contains sys/ and files/)")
     ap.add_argument("--out", help="output folder (created; never the input)")
     ap.add_argument("--source", default="mario", help="character to clone (name or id, default mario)")
     ap.add_argument("--slot", action="append", default=[], metavar="SLOT[:RECOLOUR]",
-                    help="donor slot and recolour spec; repeatable.  Default: BlueToad:blue YellowToad:green GreenToad:purple")
+                    help="donor slot and recolour spec; repeatable.  Default: all four Toad colours (29:blue 30:green 31:purple 32:yellow)")
     ap.add_argument("--iso", help="also write a bootable .iso (the disc grows past the standard size; Dolphin accepts it)")
     ap.add_argument("--no-aram-overlay", action="store_true",
                     help="do not recolour the ARAM (in-game) body; clones then look like the plain source in matches")

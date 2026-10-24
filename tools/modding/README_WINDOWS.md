@@ -22,7 +22,14 @@ Files you need from the repo: `tools/modding/clone_character.py` and `tools/modd
 
 The patcher never modifies this folder; it is your clean copy.
 
-## 3. Run the patcher
+## 3. Baseline: boot the clean folder once
+
+Before patching anything, Dolphin -> **File -> Open...** -> `C:\mssb\GYQE01\sys\main.dol` and start an
+exhibition game.  Dolphin boots an extracted folder as a virtual disc (it rebuilds the file table from
+`files\`).  If the *clean* folder does not boot or hangs loading a stadium, folder-boot itself is the
+problem (not the patch): use the `--iso` output below instead, which keeps the retail file table.
+
+## 4. Run the patcher
 
 ```powershell
 cd C:\mssb\tools          # wherever you put clone_character.py
@@ -30,20 +37,22 @@ cd C:\mssb\tools          # wherever you put clone_character.py
 # see the 54 slots, which ones can be donors, and how the game picks colour variants
 py .\clone_character.py --disc "C:\mssb\GYQE01" --list-slots
 
-# three Marios: blue on Blue Toad's slot, green on Yellow Toad's, purple on Green Toad's
+# TEST 1 (simplest): Luigi becomes a green Mario.  Luigi is a normal, directly selectable character.
+py .\clone_character.py --disc "C:\mssb\GYQE01" --out "C:\mssb\GYQE01-luigi" --source mario --slot Luigi:green
+
+# TEST 2: all four Toad colours become Marios (blue, green, purple, yellow)
 py .\clone_character.py --disc "C:\mssb\GYQE01" --out "C:\mssb\GYQE01-marios" --source mario `
-    --slot BlueToad:blue --slot YellowToad:green --slot GreenToad:purple
+    --slot BlueToad:blue --slot YellowToad:green --slot GreenToad:purple --slot PurpleToad:yellow
 ```
 
-(`--slot BlueToad:blue --slot YellowToad:green --slot GreenToad:purple` is also the default if you give
-no `--slot`.)  It copies the folder (450 MB, takes a moment), appends the new model files to
+(The four Toad slots are also the default if you give no `--slot`.)  It copies the folder (450 MB, takes a moment), appends the new model files to
 `files\ZZZZ.dat`, patches `sys\main.dol`, `sys\fst.bin`, `files\game.rel` and the stats block, and ends
 with a `Done.` line telling you which menu characters are now Marios.
 
 Options:
-* `--iso "C:\mssb\marios.iso"` additionally writes a bootable ISO (1.46 GB; it is slightly larger than a
-  retail disc image, Dolphin does not mind).  The folder is the primary way to boot, the ISO is a
-  convenience.
+* `--iso "C:\mssb\marios.iso"` additionally writes a bootable ISO (1.46 GB; slightly larger than a
+  retail disc image, Dolphin does not mind).  The ISO keeps the retail file table (`sys\fst.bin`, with
+  the new ZZZZ.dat size), so it is the higher-fidelity path if folder boot misbehaves.
 * Recolour spec after the colon.  Presets: `red orange yellow green cyan blue purple pink`.  Or
   `hue=0.62` (0..1), `hue=0.62,sat=1.2,val=0.9`, `all=1` (recolour every saturated colour, skin too),
   `tint=00FF00:0.5` (blend towards a colour), `solid=0000FF` (debug: flat colour).  By default only
@@ -64,24 +73,27 @@ py .\test_clone.py --disc "C:\mssb\GYQE01" --work "C:\mssb\clone_test"
 
 It must end with `ALL CHECKS PASSED`.
 
-## 4. Boot the patched folder
+## 5. Boot the patched folder
 
 Dolphin -> **File -> Open...** -> `C:\mssb\GYQE01-marios\sys\main.dol`.  Dolphin boots an extracted
 folder as if it were a disc (it rebuilds the file table from `files\`).  Or open the `.iso` from step 3.
 
 Tip: add `C:\mssb` as a game folder (Config -> Paths) and the patched folder shows up in the game list.
 
-## 5. Picking the clones in the game
+## 6. Picking the clones in the game
 
-The clones live on the **Toad colour slots**.  The game has no colour button: when you put *several
+**Test 1 (Luigi):** Exhibition -> any captain -> put **Luigi** on a team next to Mario.  Luigi is a green
+Mario on the field (menus still say Luigi).  No colour logic involved; if this works, the whole
+pipeline works.
+
+**Test 2 (Toads):** the clones live on the **Toad colour slots**.  The game has no colour button: when you put *several
 Toads* on one team, the first is Red Toad (the real Toad) and each further Toad gets one of the other
-colours automatically (Blue, Yellow, Green, Purple, in a partly random order).  With the default
-command, Blue/Yellow/Green Toad are Marios, Purple Toad is still a Toad.
+colours automatically (Blue, Yellow, Green, Purple, in a partly random order).  With the test-2
+command every non-red Toad is a Mario, so the order does not matter.
 
-So, for the test:
 1. Exhibition -> pick a captain (Mario is fine) -> on the roster screen replace players with **Toad**
-   four times on the same team.
-2. Start the game.  On the field you get Mario, Red Toad, three recoloured Marios and a Purple Toad.
+   several times on the same team.
+2. Start the game.  On the field you get Mario, Red Toad and a recoloured Mario per extra Toad.
    Put Toads on both teams to see them batting and fielding.
 
 The menus still show the donor's name and portrait ("Toad"), and the announcer says "Toad".  The
@@ -93,7 +105,7 @@ stand-alone character (e.g. `--slot Luigi:green` makes Luigi a green Mario, triv
 Family base slots (Red Toad 13, Red Shy Guy 16, ...) share their body with their colour variants and
 are refused unless you pass `--no-aram-overlay`.
 
-## 6. What to expect / troubleshooting
+## 7. What to expect / troubleshooting
 
 Verified offline (test_clone.py): the LZSS codec round-trips real disc files; the retail colour-variant
 mechanism works exactly the way the patcher uses it (Blue Toad's model == Red Toad's body + overlay
