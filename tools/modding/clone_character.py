@@ -471,13 +471,34 @@ def rgb_to_rgb565(r, g, b):
     return ((r >> 3) << 11) | ((g >> 2) << 5) | (b >> 3)
 
 
+def luma(r, g, b):
+    return 0.299 * r + 0.587 * g + 0.114 * b
+
+
+def match_luma(rgb, target):
+    """Scale rgb to the target luma; if a channel would pass 1.0, blend toward white instead."""
+    y = luma(*rgb)
+    if y <= 0:
+        return (target, target, target)
+    out = [x * target / y for x in rgb]
+    if max(out) > 1.0:
+        top = [min(1.0, x) for x in out]
+        yt = luma(*top)
+        t = (target - yt) / (1.0 - yt) if yt < 1.0 else 0.0   # mix with white to recover the clipped luma
+        out = [x + (1.0 - x) * t for x in top]
+    return tuple(min(1.0, max(0.0, x)) for x in out)
+
+
 class Recolour:
     """Spec: comma-separated key=value.  Keys:
         hue=<0..1|preset>  target hue for the matched band (default band: reds, i.e. Mario's suit)
-        from=<0..1> width=<0..1>  hue band to retarget (default from=0 width=0.05: Mario's red, not his skin)
+        from=<0..1> width=<0..1>  hue band to retarget (default from=0 width=0.035: Mario's red, not his skin or ear shading)
         minsat=<0..1>      minimum saturation for a colour to be considered part of the band (0.5)
         all=1              retarget every saturated colour, not just the band
         sat=<mult> val=<mult>  multiply saturation / brightness (applied to matched colours)
+        keeplum=<0..1>     how far to pull a recoloured colour toward the original's perceived brightness
+                           (default 0.5; 0 = old look, greens/yellows washed-out and flat; 1 = exact
+                           match, greens/yellows quite dark)
         tint=RRGGBB[:strength]  blend every colour towards RRGGBB (strength 0..1, default 0.5)
         solid=RRGGBB       replace every colour (debug)
         tex=0/1/2          only touch these texture indices, slash-separated (default: all)
@@ -486,11 +507,12 @@ class Recolour:
     def __init__(self, spec):
         self.hue = None
         self.band_from = 0.0
-        self.band_width = 0.05
+        self.band_width = 0.035  # suit reds sit at hue <= 0.031; skin/ear shading starts at 0.038
         self.minsat = 0.5
         self.all = False
         self.sat = 1.0
         self.val = 1.0
+        self.keeplum = 0.5
         self.tint = None
         self.tint_strength = 0.5
         self.solid = None
@@ -522,6 +544,8 @@ class Recolour:
                 self.sat = float(v)
             elif k == "val":
                 self.val = float(v)
+            elif k == "keeplum":
+                self.keeplum = float(v)
             elif k == "tint":
                 col, _, strength = v.partition(":")
                 self.tint = int(col, 16)
@@ -553,12 +577,20 @@ class Recolour:
             return out
         r8, g8, b8 = rgb565_to_rgb(c)
         h, s, v = colorsys.rgb_to_hsv(r8 / 255.0, g8 / 255.0, b8 / 255.0)
-        if self._in_band(h, s):
+        hit = self._in_band(h, s)
+        if hit:
             if self.hue is not None:
                 h = self.hue % 1.0
             s = min(1.0, s * self.sat)
-            v = min(1.0, v * self.val)
         rf, gf, bf = colorsys.hsv_to_rgb(h, s, v)
+        if hit:
+            if self.keeplum and self.hue is not None:
+                # same HSV value looks far brighter in green than in red: match the original's luma
+                # instead, so the shading gradients survive the hue change
+                lr, lg, lb = match_luma((rf, gf, bf), luma(r8 / 255.0, g8 / 255.0, b8 / 255.0))
+                k = self.keeplum
+                rf, gf, bf = rf + (lr - rf) * k, gf + (lg - gf) * k, bf + (lb - bf) * k
+            rf, gf, bf = (min(1.0, x * self.val) for x in (rf, gf, bf))
         if self.tint is not None:
             t = self.tint_strength
             rf = rf * (1 - t) + ((self.tint >> 16) & 0xFF) / 255.0 * t
@@ -587,11 +619,9 @@ def recolour_block(block, rc):
     four = c0 > c1
     if four:
         if n0 == n1:
-            # keep 4-colour mode: nudge the second endpoint down one blue step (or the first up)
-            if n1 > 0:
-                n1 -= 1
-            else:
-                n0 += 1
+            # keep 4-colour mode: flip the blue LSB of one endpoint (n1 -= 1 borrowed into green when
+            # blue was 0 and left bright blue specks); the swap below restores the c0 > c1 order
+            n1 ^= 1
         if n0 < n1:
             n0, n1 = n1, n0
             idx ^= 0x55555555          # 0<->1, 2<->3
