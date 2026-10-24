@@ -206,7 +206,8 @@ def main():
 
     print(" DOL byte diff")
     allowed = [(dol.off(cc.ADDR_BLOB_LIS), dol.off(cc.ADDR_BLOB_LIS) + 4), (dol.off(cc.ADDR_BLOB_ADDI), dol.off(cc.ADDR_BLOB_ADDI) + 4),
-               (dol.off(cc.ADDR_MASTER + 515 * 16), dol.off(cc.ADDR_MASTER + 515 * 16) + 16)]
+               (dol.off(cc.ADDR_MASTER + 515 * 16), dol.off(cc.ADDR_MASTER + 515 * 16) + 16),
+               (dol.off(cc.ADDR_GAME_REL_DESC), dol.off(cc.ADDR_GAME_REL_DESC) + 16)]  # game.rel re-packed size
     for S, _ in slots:
         allowed += [(dol.off(cc.ADDR_SUBFILES + S * 19 * 16), dol.off(cc.ADDR_SUBFILES + S * 19 * 16) + 19 * 16),
                     (dol.off(cc.ADDR_MASTER + (54 + S * 7) * 16), dol.off(cc.ADDR_MASTER + (54 + S * 7) * 16) + 7 * 16),
@@ -240,8 +241,8 @@ def main():
               "chemistry column %d equals the source's" % S)
 
     print(" game.rel / fst.bin / other files")
-    rel = (disc.files / "game.rel").read_bytes()
-    prel = (pdisc.files / "game.rel").read_bytes()
+    rel = cc.load_game_rel(disc, dol)      # what the game loads (ZZZZ.dat), not files/game.rel
+    prel = cc.load_game_rel(pdisc, pdol)
     base, size = cc.rel_data_section(rel)
     allowed = []
     for off, rs in [cc.REL_VOICE] + cc.REL_TABLES:
@@ -255,7 +256,7 @@ def main():
     zent = [e for e, p in cc.fst_paths(pfst) if p == "ZZZZ.dat"][0]
     check(zent["size"] == new_zz, "fst.bin ZZZZ.dat size = %d" % zent["size"])
     check(not covered(diff_ranges(fst, pfst), [(zent["index"] * 12 + 8, zent["index"] * 12 + 12)]), "fst.bin differs only in that field")
-    for name in ("sys/boot.bin", "sys/bi2.bin", "sys/apploader.img", "files/menus.rel", "files/challenge.rel", "files/aaaa.dat", "files/opening.bnr"):
+    for name in ("sys/boot.bin", "sys/bi2.bin", "sys/apploader.img", "files/opening.bnr"):
         check((disc.root / name).read_bytes() == (pdisc.root / name).read_bytes(), "%s identical" % name)
 
     if args.iso and not args.patched:

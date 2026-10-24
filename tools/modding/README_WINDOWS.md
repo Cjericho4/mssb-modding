@@ -13,14 +13,22 @@ Files you need from the repo: `tools/modding/clone_character.py` and `tools/modd
 2. In the installer tick **"Add python.exe to PATH"** (the `py` launcher is installed by default).
 3. Open PowerShell and check: `py --version`
 
-## 2. Extract the disc in Dolphin
+## 2. Point it at your game
 
-1. Dolphin game list -> right-click *Mario Superstar Baseball (GYQE01)* -> **Properties**.
-2. **Filesystem** tab -> right-click **Disc** (the top node) -> **Extract Entire Disc...**
-3. Pick an empty folder, e.g. `C:\mssb\GYQE01`.  Afterwards it contains `sys\` (main.dol, boot.bin,
-   bi2.bin, apploader.img, fst.bin) and `files\` (ZZZZ.dat 429 MB, game.rel, menus.rel, ...).
+**Easiest: use your `.iso` directly.** Pass it as `--disc`; the patcher unpacks it itself, so you don't
+need to extract anything.  `.rvz`/`.nkit` images must be converted first: Dolphin/Rio -> right-click the
+game -> **Convert File...** -> format **ISO**.
 
-The patcher never modifies this folder; it is your clean copy.
+```powershell
+py .\clone_character.py --disc "C:\mssb\Mario Superstar Baseball (US).iso" --out "C:\mssb\marios" --iso "C:\mssb\marios.iso"
+```
+
+Alternatively, an extracted folder works too (Dolphin: right-click the game -> **Properties** ->
+**Filesystem** -> right-click **Disc** -> **Extract Entire Disc...**).  Note that the game's code
+modules (`game.rel`, `menus.rel`, `challenge.rel`) are *not* separate files on the disc: they are packed
+inside `files\aaaa.dat`, so an extraction never contains them, and the patcher doesn't need them.
+
+The patcher never modifies its input; it is your clean copy.
 
 ## 3. Baseline: boot the clean folder once
 
@@ -45,9 +53,11 @@ py .\clone_character.py --disc "C:\mssb\GYQE01" --out "C:\mssb\GYQE01-marios" --
     --slot BlueToad:blue --slot YellowToad:green --slot GreenToad:purple --slot PurpleToad:yellow
 ```
 
-(The four Toad slots are also the default if you give no `--slot`.)  It copies the folder (450 MB, takes a moment), appends the new model files to
-`files\ZZZZ.dat`, patches `sys\main.dol`, `sys\fst.bin`, `files\game.rel` and the stats block, and ends
-with a `Done.` line telling you which menu characters are now Marios.
+(The four Toad slots are also the default if you give no `--slot`.)  It copies or unpacks the game
+(450 MB, takes a moment), appends the new model files to `files\ZZZZ.dat`, re-packs `game.rel` inside
+`files\aaaa.dat` with the clone's voice/hitbox/timing rows (about 20 s), patches `sys\main.dol`,
+`sys\fst.bin` and the stats block, and ends with a `Done.` line telling you which menu characters are
+now Marios.  Every `--disc "C:\mssb\GYQE01"` below can be your `.iso` path instead.
 
 Options:
 * `--iso "C:\mssb\marios.iso"` additionally writes a bootable ISO (1.46 GB; slightly larger than a

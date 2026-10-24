@@ -43,6 +43,7 @@ import colorsys
 import shutil
 import struct
 import sys
+import tempfile
 from pathlib import Path
 
 # ----------------------------------------------------------------------------------------------
@@ -65,6 +66,8 @@ ADDR_MODELMAP = 0x800EEB18       # s16[54]
 ADDR_JUMPTABLE = 0x800EEC40      # u32[48]
 ADDR_ANIMPARAMS = 0x800FB798     # s16[15][54]
 ADDR_FAMILY = 0x800E8558         # u8[54][6] {family, baseID, uniqueIdx, isBase, isCaptain, colour}
+ADDR_REL_DESCS = (0x800E8AA8, 0x800E8AB8, 0x800E8AC8)  # DiskFileDesc for menus/game/challenge.rel
+ADDR_GAME_REL_DESC = ADDR_REL_DESCS[1]  # the RELs live LZSS-packed back to back in files/aaaa.dat, not in the FST
 ADDR_BLOB_LIS = 0x800227EC       # fn_800227E4: lis  r3, 0x4d      (3C 60 00 4D)
 ADDR_BLOB_ADDI = 0x800227F4      # fn_800227E4: addi r3, r3, 0x6600 (38 63 66 00)
 JUMPTABLE_CASES = 48
@@ -270,6 +273,63 @@ def lzss_compress(data, lb_bits=LZSS_LOOKBACK_BITS, rp_bits=LZSS_REPEAT_BITS, ma
     out = bw.finish()
     pad = (-len(out)) % 32
     return out + b"\0" * pad
+
+
+def lzss_compress_optimal(data, lb_bits=LZSS_LOOKBACK_BITS, rp_bits=LZSS_REPEAT_BITS, max_chain=256):
+    """Optimal-parse encoder (cheapest literal/match sequence, ~20 s for game.rel).  Packs tighter than
+    Nintendo's encoder, which game.rel needs to fit back into its slot in aaaa.dat."""
+    data = bytes(data)
+    n = len(data)
+    max_back = 1 << lb_bits
+    max_len = (1 << rp_bits) - 1 + 2
+    longest = [(0, 0)] * n   # (length, back) of the longest match at each position
+    heads = {}
+    for pos in range(n - 1):
+        key = data[pos:pos + 2]
+        chain = heads.get(key)
+        if chain:
+            limit = min(max_len, n - pos)
+            best_len = best_back = tries = 0
+            for cand in reversed(chain):
+                if pos - cand > max_back or tries >= max_chain:
+                    break
+                tries += 1
+                l = 2
+                while l < limit and data[cand + l] == data[pos + l]:
+                    l += 1
+                if l > best_len:
+                    best_len, best_back = l, pos - cand
+                    if l == limit:
+                        break
+            longest[pos] = (best_len, best_back)
+        lst = heads.setdefault(key, [])
+        lst.append(pos)
+        if len(lst) > 2 * max_chain:
+            del lst[:max_chain]
+    lit_bits, match_bits = 9, 1 + lb_bits + rp_bits
+    cost = [0] * (n + 1)
+    step = [1] * n
+    for pos in range(n - 1, -1, -1):
+        best = lit_bits + cost[pos + 1]
+        for l in range(2, longest[pos][0] + 1):
+            v = match_bits + cost[pos + l]
+            if v < best:
+                best, step[pos] = v, l
+        cost[pos] = best
+    bw = _BitWriter()
+    pos = 0
+    while pos < n:
+        l = step[pos]
+        if l == 1:
+            bw.write(1, 1)
+            bw.write(data[pos], 8)
+        else:
+            bw.write(0, 1)
+            bw.write(longest[pos][1] - 1, lb_bits)
+            bw.write(l - 2, rp_bits)
+        pos += l
+    out = bw.finish()
+    return out + b"\0" * ((-len(out)) % 32)
 
 
 # ----------------------------------------------------------------------------------------------
@@ -561,12 +621,17 @@ class Disc:
         self.root = Path(root)
         self.sys = self.root / "sys"
         self.files = self.root / "files"
-        for p in (self.sys / "main.dol", self.files / "ZZZZ.dat", self.files / "game.rel", self.sys / "fst.bin"):
+        for p in (self.sys / "main.dol", self.files / "ZZZZ.dat", self.sys / "fst.bin"):
             if not p.exists():
                 raise SystemExit("not an extracted GameCube disc folder (missing %s)" % p)
 
     def read_zzzz(self, off, size):
         with open(self.files / "ZZZZ.dat", "rb") as f:
+            f.seek(off)
+            return f.read(size)
+
+    def read_aaaa(self, off, size):
+        with open(self.files / "aaaa.dat", "rb") as f:
             f.seek(off)
             return f.read(size)
 
@@ -577,6 +642,15 @@ class Disc:
 def load_subfile(disc, dol, idx):
     flags, sizeflags, off, comp = dol.desc(ADDR_SUBFILES, idx)
     raw = disc.read_zzzz(off, comp)
+    if sizeflags & SIZE_COMPRESSED_BIT:
+        return lzss_decompress(raw, sizeflags & 0x0FFFFFFF)[0]
+    return raw[:sizeflags & 0x0FFFFFFF]
+
+
+def load_game_rel(disc, dol):
+    """game.rel as the game loads it: LZSS-packed in aaaa.dat via its DOL descriptor."""
+    flags, sizeflags, off, comp = dol.desc(ADDR_GAME_REL_DESC, 0)
+    raw = disc.read_aaaa(off, comp)
     if sizeflags & SIZE_COMPRESSED_BIT:
         return lzss_decompress(raw, sizeflags & 0x0FFFFFFF)[0]
     return raw[:sizeflags & 0x0FFFFFFF]
@@ -665,6 +739,64 @@ def patch_fst_size(fst, name, new_size):
             struct.pack_into(">I", fst, e["index"] * 12 + 8, new_size)
             return bytes(fst)
     raise SystemExit("%s not in fst.bin" % name)
+
+
+def dol_size(dol_hdr):
+    """End of the furthest section in a DOL header (7 text + 11 data sections)."""
+    offs = struct.unpack_from(">18I", dol_hdr, 0x00)
+    sizes = struct.unpack_from(">18I", dol_hdr, 0x90)
+    return max(o + s for o, s in zip(offs, sizes) if s)
+
+
+def extract_iso(iso_path, dest, log):
+    """Unpack a GameCube .iso into Dolphin's extracted layout (dest/sys + dest/files)."""
+    dest = Path(dest)
+    with open(iso_path, "rb") as f:
+        def read(off, n):
+            f.seek(off)
+            b = f.read(n)
+            if len(b) != n:
+                raise SystemExit("%s is truncated or not a GameCube disc image" % iso_path)
+            return b
+
+        boot = read(0, 0x440)
+        if struct.unpack_from(">I", boot, 0x1C)[0] != 0xC2339F3D:
+            raise SystemExit("%s is not a GameCube disc image (no disc magic); .rvz/.nkit images must be "
+                             "converted to .iso first (Dolphin: right-click the game -> Convert File -> ISO)" % iso_path)
+        dol_off, fst_off, fst_size = struct.unpack_from(">III", boot, 0x420)
+        apl_hdr = read(0x2440, 0x20)
+        apl_size = 0x20 + sum(struct.unpack_from(">II", apl_hdr, 0x14))
+        fst = read(fst_off, fst_size)
+        sysd, filesd = dest / "sys", dest / "files"
+        sysd.mkdir(parents=True)
+        filesd.mkdir()
+        (sysd / "boot.bin").write_bytes(boot)
+        (sysd / "bi2.bin").write_bytes(read(0x440, 0x2000))
+        (sysd / "apploader.img").write_bytes(read(0x2440, apl_size))
+        (sysd / "main.dol").write_bytes(read(dol_off, dol_size(read(dol_off, 0x100))))
+        (sysd / "fst.bin").write_bytes(fst)
+        log("extracting %s -> %s" % (iso_path, dest))
+        for e, path in fst_paths(fst):
+            out = filesd / path
+            out.parent.mkdir(parents=True, exist_ok=True)
+            f.seek(e["offset"])
+            left = e["size"]
+            with open(out, "wb") as g:
+                while left:
+                    b = f.read(min(left, 1 << 20))
+                    if not b:
+                        raise SystemExit("%s is truncated (%s)" % (iso_path, path))
+                    g.write(b)
+                    left -= len(b)
+
+
+def open_disc(path, log, scratch):
+    """--disc may be an extracted folder or a .iso; an ISO is unpacked into `scratch` first."""
+    path = Path(path)
+    if path.is_file():
+        extract_iso(path, scratch, log)
+        return Disc(scratch)
+    return Disc(path)
 
 
 def write_iso(disc_out, iso_path, log):
@@ -766,13 +898,26 @@ def preflight(disc, dol, log):
 
 def clone(args):
     log = print
-    src_disc = Disc(args.disc)
-    preflight(src_disc, Dol((src_disc.sys / "main.dol").read_bytes()), log)
     dry = args.dry_run
+    out = Path(args.out)
+    from_iso = Path(args.disc).is_file()
+    if from_iso and dry:
+        # ponytail: a dry run from an ISO still unpacks it (to a temp folder) to read the tables
+        tmp = tempfile.TemporaryDirectory()
+        src_disc = open_disc(args.disc, log, Path(tmp.name) / "disc")
+    elif from_iso:
+        if out.exists():
+            if not args.force:
+                raise SystemExit("%s exists; use --force to overwrite it (or delete it to start over)" % out)
+            shutil.rmtree(out)
+        src_disc = open_disc(args.disc, log, out)  # unpack straight into --out, then patch in place
+    else:
+        src_disc = Disc(args.disc)
+    preflight(src_disc, Dol((src_disc.sys / "main.dol").read_bytes()), log)
     if dry:
         log("DRY RUN: nothing will be written")
-    out = Path(args.out)
-    if dry:
+        disc = src_disc
+    elif from_iso:
         disc = src_disc
     else:
         if out.exists():
@@ -901,6 +1046,30 @@ def clone(args):
         dol.set_blob_alloc_size(len(blob))
         log("ARAM blob moved to ZZZZ.dat+0x%08X, size 0x%X -> 0x%X (fn_800227E4 immediates patched)" % (blob_off, blob_desc[3], len(blob)))
 
+    # --- game.rel gameplay tables: patched copy re-packed in place inside aaaa.dat (the game never
+    # reads a files/game.rel; that file only exists in decomp setups)
+    rel_patch = None
+    if not args.no_gameplay:
+        rel = bytearray(load_game_rel(disc, dol))
+        base, size = rel_data_section(rel)
+        for off, rs in [REL_VOICE] + REL_TABLES:
+            if off + NUM_CHARS * rs > size:
+                raise SystemExit("game.rel table at 0x%X is outside .data" % off)
+            for S, _ in report:
+                rel[base + off + S * rs:base + off + (S + 1) * rs] = rel[base + off + C * rs:base + off + (C + 1) * rs]
+        comp = lzss_compress_optimal(bytes(rel))
+        if lzss_decompress(comp, len(rel))[0] != bytes(rel):
+            raise SystemExit("internal error: LZSS round trip failed (game.rel)")
+        old = dol.desc(ADDR_GAME_REL_DESC, 0)
+        # room until the next REL (or the end of aaaa.dat): growing aaaa.dat would shift other disc files
+        room = min([dol.desc(a, 0)[2] for a in ADDR_REL_DESCS if dol.desc(a, 0)[2] > old[2]]
+                   + [(disc.files / "aaaa.dat").stat().st_size]) - old[2]
+        if len(comp) > room:
+            raise SystemExit("patched game.rel packs to %d B but only %d B fit in aaaa.dat; rerun with --no-gameplay" % (len(comp), room))
+        rel_patch = (old[2], comp)
+        dol.set_desc(ADDR_GAME_REL_DESC, 0, (old[0], SIZE_COMPRESSED_BIT | len(rel), old[2], len(comp)))
+        log("game.rel: copied voice/hitbox/timing tables, re-packed in place at aaaa.dat+0x%08X (%d B, room %d B)" % (old[2], len(comp), room))
+
     if dry:
         log("DRY RUN summary: %d B in %d chunks appended to ZZZZ.dat from 0x%08X; main.dol/stats/game.rel rows for slots %s" % (
             cursor - append_at, len(chunks), append_at, [S for S, _ in report]))
@@ -939,18 +1108,10 @@ def clone(args):
             f.write(stats)
         log("stats: copied %s's row and chemistry to %s" % (CHAR_NAMES[C], ", ".join(CHAR_NAMES[S] for S, _ in report)))
 
-    # --- game.rel gameplay tables
-    if not args.no_gameplay:
-        rel_path = disc.files / "game.rel"
-        rel = bytearray(rel_path.read_bytes())
-        base, size = rel_data_section(rel)
-        for off, rs in [REL_VOICE] + REL_TABLES:
-            if off + NUM_CHARS * rs > size:
-                raise SystemExit("game.rel table at 0x%X is outside .data" % off)
-            for S, _ in report:
-                rel[base + off + S * rs:base + off + (S + 1) * rs] = rel[base + off + C * rs:base + off + (C + 1) * rs]
-        rel_path.write_bytes(rel)
-        log("game.rel: copied voice/hitbox/timing tables")
+    if rel_patch:
+        with open(disc.files / "aaaa.dat", "r+b") as f:
+            f.seek(rel_patch[0])
+            f.write(rel_patch[1])
 
     # --- fst.bin and DOL
     fst = (disc.sys / "fst.bin").read_bytes()
@@ -969,12 +1130,13 @@ def clone(args):
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0], formatter_class=argparse.RawDescriptionHelpFormatter,
                                  epilog="""examples:
+  py clone_character.py --disc "C:\\mssb\\Mario Superstar Baseball (US).iso" --out "C:\\mssb\\marios" --iso "C:\\mssb\\marios.iso"
   py clone_character.py --disc "C:\\mssb\\GYQE01" --list-slots
   py clone_character.py --disc "C:\\mssb\\GYQE01" --out "C:\\mssb\\GYQE01-luigi" --source mario --slot Luigi:green
   py clone_character.py --disc "C:\\mssb\\GYQE01" --out "C:\\mssb\\GYQE01-marios" --source mario --slot BlueToad:blue --slot YellowToad:green --slot GreenToad:purple --slot PurpleToad:yellow
   py clone_character.py --disc ... --out ... --source 0 --slot 29:hue=0.62,sat=1.1 --slot 30:tint=00FF00:0.6 --iso "C:\\mssb\\marios.iso"
 recolour spec (after the slot and a colon): """ + Recolour.__doc__)
-    ap.add_argument("--disc", required=True, help="extracted disc folder (contains sys/ and files/)")
+    ap.add_argument("--disc", required=True, help="the game: a .iso file, or an extracted disc folder (contains sys/ and files/)")
     ap.add_argument("--out", help="output folder (created; never the input)")
     ap.add_argument("--source", default="mario", help="character to clone (name or id, default mario)")
     ap.add_argument("--slot", action="append", default=[], metavar="SLOT[:RECOLOUR]",
@@ -989,7 +1151,8 @@ recolour spec (after the slot and a colon): """ + Recolour.__doc__)
     ap.add_argument("--dry-run", action="store_true", help="print every planned edit (offsets, sizes, entries) without copying or writing anything")
     args = ap.parse_args(argv)
     if args.list_slots:
-        list_slots(Disc(args.disc))
+        with tempfile.TemporaryDirectory() as tmp:
+            list_slots(open_disc(args.disc, print, Path(tmp) / "disc"))
         return 0
     if not args.out and not args.dry_run:
         ap.error("--out is required (a new folder; the input is never modified)")
