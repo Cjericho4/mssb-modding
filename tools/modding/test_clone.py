@@ -61,6 +61,29 @@ def covered(ranges, allowed):
     return bad
 
 
+def portrait_luminance(tf, t):
+    """Decode a 50x50 CI8 + RGB5A3-TLUT portrait (8x4 tiles) to a list of luminance values (0 where transparent)."""
+    pal = [struct.unpack_from(">H", tf.data, t["tlut"] + i * 2)[0] for i in range(256)]
+    px = tf.pixels(t)
+    out = []
+    for y in range(t["h"]):
+        for x in range(t["w"]):
+            v = pal[px[((y // 4) * (cc.align(t["w"], 8) // 8) + x // 8) * 32 + (y % 4) * 8 + (x % 8)]]
+            if v & 0x8000:
+                out.append(0.3 * ((v >> 10) & 31) + 0.59 * ((v >> 5) & 31) + 0.11 * (v & 31))
+            else:
+                out.append((0.3 * ((v >> 8) & 15) + 0.59 * ((v >> 4) & 15) + 0.11 * (v & 15)) * 2 if (v >> 12) & 7 >= 4 else 0.0)
+    return out
+
+
+def correlation(a, b):
+    n = len(a)
+    ma, mb = sum(a) / n, sum(b) / n
+    sa = sum((x - ma) ** 2 for x in a) ** 0.5
+    sb = sum((x - mb) ** 2 for x in b) ** 0.5
+    return sum((x - ma) * (y - mb) for x, y in zip(a, b)) / (sa * sb + 1e-9)
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--disc", required=True)
@@ -94,6 +117,24 @@ def main():
     pfile = cc.TextureFile(cc.lzss_decompress(disc.read_zzzz(pdesc[2], pdesc[3]), pdesc[1] & 0x0FFFFFFF)[0])
     pors = pfile.portraits()
     check(len(set(pfile.pixels(t) + pfile.tlut(t) for t in pors)) == 54, "portrait file has 54 distinct 50x50 CI8 portraits (one per charID)")
+    # charID ordering proof: the 26 base cells are byte-identical to the unique-keyed 32-portrait
+    # file (checked elsewhere); for the colour variants, the most similar portrait (luminance
+    # correlation of the decoded CI8 image) must be another member of the same colour family.
+    lums = [portrait_luminance(pfile, t) for t in pors]
+    fams = {}
+    for c in range(54):
+        fam = dol.u8(cc.ADDR_FAMILY + c * 6)
+        if fam:
+            fams.setdefault(fam, []).append(c)
+    bad_order = []
+    for members in fams.values():
+        for v in members:
+            if dol.u8(cc.ADDR_FAMILY + v * 6 + 3):
+                continue  # the family base
+            best = max((c for c in range(54) if c != v), key=lambda c: correlation(lums[v], lums[c]))
+            if best not in members:
+                bad_order.append((v, best))
+    check(not bad_order, "portrait file is in charID order (every colour variant's nearest portrait is in its family)%s" % ("" if not bad_order else " bad: %r" % bad_order))
     rel0 = cc.load_game_rel(disc, dol)
     rbase, rsize = cc.rel_data_section(rel0)
     check(all(struct.unpack_from(">4I", rel0, rbase + o) == pdesc for o in cc.REL_PORTRAIT_DESCS), "game.rel portrait descriptor rows == the DOL's")
