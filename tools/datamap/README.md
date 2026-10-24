@@ -77,6 +77,11 @@ longer or shorter.
    file must be byte-identical, and the only changed bytes in `main.dol` and the RELs may be the
    descriptor rows the tool rewrote.
 
+`replace` works on files inside `ZZZZ.dat` and `aaaa.dat` (everything `list` shows without
+`--fst`). The FST files (`snd\my_snd_h\*.adp` music, `opening.bnr`) are listed with `--fst` and
+copied by `extract --fst`, but the tool doesn't replace them. To change music, swap the `.adp` in
+an extracted folder (Dolphin rebuilds the FST from the folder).
+
 Size limits to keep in mind: the ARAM blob lives in 16 MB of ARAM (retail 4.9 MB). A texture
 overlay (`master.33` to `master.53`) must stay exactly the size of the body texture archive it
 overwrites.

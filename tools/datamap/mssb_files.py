@@ -362,6 +362,7 @@ class Work:
         fst = cc.patch_fst_size(fst, "aaaa.dat", len(self.aaaa))
         (self.root / "sys" / "fst.bin").write_bytes(fst)
         self.zz.close()
+        d.close()
 
 
 def build_packed(f, data):
@@ -382,6 +383,9 @@ def apply_replace(work, file_id, data, reuse_gaps=False):
     f = cat.find(file_id)
     if f.id.startswith("blob."):
         raise SystemExit("blob.0 is the container of the master.* files: replace those instead")
+    if f.partial_only:
+        raise SystemExit("%s is only ever read partially (0x%X of 0x%X bytes); replacing it would change "
+                         "what the game reads, so it is not supported" % (f.id, f.size, f.packed))
     if len(data) > dm.SIZE_MASK:
         raise SystemExit("file too large")
     old_fmt = cat.sniff(f)[0]
@@ -449,10 +453,14 @@ def apply_replace(work, file_id, data, reuse_gaps=False):
     for r in f.refs:
         if r.desc == f.desc:
             continue
-        # a partial read of the same file (e.g. a 0x200-byte header read): move it, keep its length
-        nd = (r.desc[0], r.desc[1], new_off, r.desc[3] if r.desc[3] <= plen else plen)
+        if ct.is_partial(r.desc):
+            # a partial read of the same file (e.g. a 0x200-byte header read): move it, keep its length
+            nd = (r.desc[0], r.desc[1], new_off, max(plen, r.desc[1] & dm.SIZE_MASK))
+            updated.append(r.name + " (partial read, moved)")
+        else:
+            nd = new_desc                      # a full copy that differs only in rounding
+            updated.append(r.name)
         work.set_desc(r.image, r.file_off, nd)
-        updated.append(r.name + " (partial)")
     for img_name, fo in cat.copies(f.desc, f.container):
         work.set_desc(img_name, fo, new_desc)
         img = d.image(img_name)
@@ -600,10 +608,14 @@ def cmd_replace(args):
             log("verified %s" % out)
         else:
             log("verified %s" % out)
-        snapshot.disc.close()
     finally:
+        for obj in (locals().get("before"), locals().get("snapshot")):
+            if obj is not None:
+                obj.disc.close()
         if iso_out:
             shutil.rmtree(work_root.parent, ignore_errors=True)
+            if work_root.parent.exists():
+                log("warning: could not remove the work folder %s; delete it by hand" % work_root.parent)
     report.pop("rows", None)
     print(json.dumps(report, indent=1))
 

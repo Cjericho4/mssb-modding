@@ -374,6 +374,19 @@ class SyntheticDisc(unittest.TestCase):
         self.assertEqual(part.desc[2], f.offset)
         self.assertEqual(part.desc[1], 0x200)
 
+    def test_partial_only_refused(self):
+        work_root = self.tmp / "w"
+        shutil.copytree(self.s.root, work_root)
+        work = mf.Work(work_root)
+        f = work.cat.find("challenge_104f4.0")
+        self.assertFalse(f.partial_only)
+        f.refs = [r for r in f.refs if ct.is_partial(r.desc)]   # as if only the 0x200 read existed
+        self.assertTrue(f.partial_only)
+        with self.assertRaises(SystemExit):
+            mf.apply_replace(work, "challenge_104f4.0", self.s.f5)
+        work.zz.close()
+        work.disc.close()
+
     def test_replace_rel(self):
         out = self.tmp / "out"
         rel = bytearray(self.s.rels["challenge"])
@@ -428,6 +441,13 @@ class RealDisc(unittest.TestCase):
                     continue
                 extra.append(img.where(p))
         self.assertEqual(extra, [])
+
+    def test_descriptor_copies_agree(self):
+        # every file's rows carry one tuple, except the single partial read
+        multi = [f.id for f in self.cat.files.values() if len(set(r.desc for r in f.refs)) > 1]
+        self.assertEqual(multi, [])
+        partial = [f.id for f in self.cat.files.values() if any(ct.is_partial(r.desc) for r in f.refs)]
+        self.assertEqual(partial, ["partial_ch.0"])
 
     def test_coverage(self):
         cov, pad, gaps = self.cat.coverage("ZZZZ")

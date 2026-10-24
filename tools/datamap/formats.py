@@ -127,8 +127,7 @@ def musyx_chunks(b, size):
 def sniff(b, size, stored=False):
     """(format, summary) from the head bytes `b` of a file whose unpacked size is `size`."""
     if b[:5] == b"HVQM4":
-        w, h = (u16(b, 0x34), u16(b, 0x36)) if len(b) > 0x38 else (0, 0)
-        return "hvqm", "HVQM4 movie, %d frames" % u32(b, 0x18) if len(b) > 0x1C else "HVQM4 movie"
+        return "hvqm", "HVQM4 1.3 movie (stored, 0x%X bytes)" % size
     if len(b) >= 0x40 and 1 <= u32(b, 0) <= 3 and u32(b, 0x0C) in (17, 18, 19) and u32(b, 0x10) in (0x40, 0x4C):
         return "rel", "%s (REL id %d, %d sections)" % (REL_IDS.get(u32(b, 0), "?"), u32(b, 0), u32(b, 0x0C))
     if len(b) >= 4 and u32(b, 0) == ANIM_VERSION:
