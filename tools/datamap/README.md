@@ -69,7 +69,7 @@ longer or shorter.
 3. **Every** descriptor that names the file is updated. The common UI files, for example, have up
    to 8 copies across `main.dol`, `game.rel` and `challenge.rel`. When a REL changes, it's re-packed
    into `aaaa.dat` (this takes 15 to 40 seconds).
-4. For files inside the ARAM blob (`master.*`: character bodies, texture overlays, skeleton banks),
+4. For files inside the ARAM blob (`master.*`: character bodies, texture overlays, track-15 ANIM banks),
    the blob is moved to the end of `ZZZZ.dat` when a member grows. The blob descriptor and the
    hard-coded ARAM allocation size in `main.dol` are updated too.
 5. `sys\fst.bin` sizes are updated. For an ISO, a file that grew is moved past the last file.
