@@ -200,6 +200,13 @@ def main():
     pl = game.preview(1)
     check([r.name for r in pl.regions if r.default] == ["green (cap, shirt)"] and pl.after_png(spec) != pl.before_png,
           "Luigi's default region is his green, and the blue preview changes it")
+    pp = game.preview(38)
+    check(38 in g.SOURCES and [r.name for r in pp.regions if r.default] == ["green"] and pp.after_png(spec) != pp.before_png
+          and any(t["fmt"] == cc.TEX_FMT_CI4 for t in pp.body.textures),
+          "Petey (CI4 palette textures) is offered, his default region is his green, and the preview recolours it")
+    pb = game.preview(14)
+    check([r.name for r in pb.regions if r.default] == ["white (body)"] and pb.regions[0].tint and pb.after_png(spec) != pb.before_png,
+          "Boo's default is a tint of his white body, and the blue preview changes it")
     check(g.region_selection(pl.regions, [0]) is None and g.region_selection(pl.regions, [0, 1]) == [0, 1],
           "region checkboxes -> spec (defaults name no region)")
     check(g.colour_spec("blue", 0.5, regions=[1, 0]) == "hue=blue,keeplum=0.5,region=0/1", "region spec %s" % g.colour_spec("blue", 0.5, regions=[1, 0]))

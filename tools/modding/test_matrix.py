@@ -129,6 +129,25 @@ def region_texel_check(body, new, rc):
         if a != b and not rc.touches(t["index"]):
             problems.append("texture %d changed" % t["index"])
             continue
+        if t["fmt"] != cc.TEX_FMT_CMPR:
+            # CI (Petey): pixel indices untouched; a palette entry changes only if it is in the region
+            if a[:t["size"]] != b[:t["size"]]:
+                problems.append("tex %d: CI indices changed" % t["index"])
+            pa = cc.tlut_rgba(a[t["size"]:], t["tlut_fmt"])
+            pb = cc.tlut_rgba(b[t["size"]:], t["tlut_fmt"])
+            idx = cc.ci_indices(a, t)
+            for k, (ca, cb) in enumerate(zip(pa, pb)):
+                if ca[3] != cb[3]:
+                    problems.append("tex %d palette %d: transparency changed" % (t["index"], k))
+                if ca != cb and not rc._in_band(*colorsys.rgb_to_hsv(*[x / 255.0 for x in ca[:3]])):
+                    problems.append("tex %d palette %d: out-of-region colour changed" % (t["index"], k))
+            for i in idx:
+                skin_hit = cc.is_skin(*colorsys.rgb_to_hsv(*[x / 255.0 for x in pa[i][:3]]))
+                skin += skin_hit
+                if pa[i] != pb[i]:
+                    changed += 1
+                    skin_changed += skin_hit
+            continue
         for o in range(0, len(a), 8):
             c0, c1, ia = unpack(">HHI", a, o)
             pa = cc.cmpr_palette(c0, c1)
@@ -201,7 +220,8 @@ def main():
                   "%2d %s: in-match body = master %d + its own overlay %d (track 0 is a different retail model; %d/%d textures equal)"
                   % (c, name, body_entry, overlay, len(same), len(body.textures)))
         gl = cc.glove_textures(body)
-        check(len(gl) == 2, "%2d %s: two glove textures %s" % (c, name, sorted(gl)))
+        want = 0 if c == 38 else 2      # Petey holds the bat in his leaves: no glove
+        check(len(gl) == want, "%2d %s: %d glove textures %s" % (c, name, want, sorted(gl)))
         t = time.time()
         regions = cc.source_regions(disc, dol, c, body)
         timings.append(time.time() - t)
@@ -288,7 +308,7 @@ def write_sheets(folder, rows, per_sheet=2):
                 x0 = 8 + i * (panel_w * 2 + 12)
                 cv.text(x0, y, title, scale=2)
                 for t, tx, ty in lay:
-                    rgb = cc.decode_cmpr(cc.texture_bytes(g, t), t["w"], t["h"])
+                    rgb = cc.decode_texture(cc.texture_bytes(g, t), t)
                     cv.blit(x0 + tx * 2, y + 14 + ty * 2, t["w"], t["h"], rgb, 2)
                     if not spec:
                         lbl = str(t["index"])

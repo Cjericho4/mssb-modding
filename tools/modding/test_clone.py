@@ -357,6 +357,7 @@ def main():
         texbytes = set()
         for t in ref.textures:
             texbytes.update(range(t["data"], t["data"] + t["size"]))
+            texbytes.update(range(t["tlut"], t["tlut"] + 2 * t["colours"]))   # CI palettes (Petey)
         outside_same = all(new.data[i] == ref.data[i] for i in range(len(ref.data)) if i not in texbytes)
         check(outside_same, "%s: every byte outside the texture data is identical" % label)
         changed = sum(1 for i in texbytes if new.data[i] != ref.data[i])

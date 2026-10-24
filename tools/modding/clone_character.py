@@ -148,6 +148,8 @@ PORTRAIT_W = 50
 PORTRAIT_H = 50
 TEX_FMT_CI4 = 8
 TEX_FMT_CI8 = 9
+TEX_FMT_CMPR = 14
+TLUT_FMT_RGB565 = 1
 TLUT_FMT_RGB5A3 = 2
 
 # Menu art keyed by charID (.agent/character_select.md section 8).  Both files are LZSS-packed in
@@ -213,8 +215,8 @@ CHAR_NAMES = [
     "GreenShyGuy", "BlackShyGuy", "GrayDryBones", "GreenDryBones", "RedDryBones", "BlueDryBones",
     "FireBro", "BoomerangBro",
 ]
-# Petey's body has non-CMPR textures (formats 8): it can't be recoloured, so it can't be a source.
-UNSUPPORTED_SOURCES = frozenset({38})
+# Every character can be a source (Petey's CI4 textures are recoloured through their palettes).
+UNSUPPORTED_SOURCES = frozenset()
 FAMILY_NAMES = ["-", "Koopa", "Toad", "ShyGuy", "Paratroopa", "Pianta", "Noki", "Bros", "Magikoopa", "DryBones"]
 COLOUR_PRESETS = {
     "red": 0.0, "orange": 0.08, "yellow": 0.16, "green": 0.33, "cyan": 0.5, "blue": 0.62,
@@ -533,12 +535,22 @@ class Gpc:
             h = self.texture + 4 + i * 0x20
             data_off, clut_off, height, width = struct.unpack_from(">IIHH", self.data, h)
             fmt = self.data[h + 0x17]
+            colours = struct.unpack_from(">H", self.data, h + 0x18)[0]
             self.textures.append({"index": i, "hdr": h, "data": self.texture + data_off,
-                                  "clut": clut_off, "w": width, "h": height, "fmt": fmt})
+                                  "clut": clut_off, "w": width, "h": height, "fmt": fmt,
+                                  "tlut": self.texture + clut_off, "colours": colours, "tlut_fmt": self.data[h + 0x1A]})
         for t in self.textures:
-            if t["fmt"] != 14:
-                raise ValueError("texture %d is format %d, only CMPR (14) is supported" % (t["index"], t["fmt"]))
-            t["size"] = t["w"] * t["h"] // 2
+            if t["fmt"] == TEX_FMT_CMPR:
+                t["size"] = t["w"] * t["h"] // 2
+                t["colours"] = 0
+            elif t["fmt"] in (TEX_FMT_CI4, TEX_FMT_CI8) and t["tlut_fmt"] in (TLUT_FMT_RGB565, TLUT_FMT_RGB5A3):
+                # Petey's body: CI4 textures with a small RGB5A3 palette inside the archive
+                t["size"] = align(t["w"], 8) * align(t["h"], 8) // 2 if t["fmt"] == TEX_FMT_CI4 else align(t["w"], 8) * align(t["h"], 4)
+                if not 0 < t["colours"] <= (16 if t["fmt"] == TEX_FMT_CI4 else 256) or t["tlut"] + 2 * t["colours"] > self.layout:
+                    raise ValueError("texture %d: bad palette (%d colours at 0x%X)" % (t["index"], t["colours"], t["clut"]))
+            else:
+                raise ValueError("texture %d is format %d (palette format %d); only CMPR, CI4 and CI8 are supported"
+                                 % (t["index"], t["fmt"], t["tlut_fmt"]))
             if t["data"] + t["size"] > self.layout:
                 raise ValueError("texture %d runs past the archive" % t["index"])
 
@@ -726,15 +738,24 @@ class Recolour:
         self._texel_cache = {}
         return self
 
+    def _band_for(self, h, s, v):
+        """The selected Region a colour belongs to (None: not selected).  Only for resolved specs."""
+        # a colour inside several regions' boxes belongs to the one whose hue centre is nearest
+        # (and brightness/saturation): DK's fur box must not take his tie's reds
+        inside = [r for r in self.regions if r.contains(h, s, v)]
+        if not inside:
+            return None
+        best = min(inside, key=lambda r: r.distance(h, s, v))
+        return best if any(best is b for b in self.bands) else None
+
+    @property
+    def tinting(self):
+        """Every selected region is a tint region (white/grey/black body)."""
+        return self.bands is not None and all(b.tint is not None for b in self.bands)
+
     def _in_band(self, h, s, v=0.0):
         if self.bands is not None:
-            # a colour inside several regions' boxes belongs to the one whose hue centre is nearest
-            # (and brightness/saturation): DK's fur box must not take his tie's reds
-            inside = [r for r in self.regions if r.contains(h, s, v)]
-            if not inside:
-                return False
-            best = min(inside, key=lambda r: r.distance(h, s, v))
-            return any(best is b for b in self.bands)
+            return self._band_for(h, s, v) is not None
         if s < self.minsat:
             return False
         if self.all:
@@ -758,8 +779,11 @@ class Recolour:
         if not self.blockwise:
             return self
         rc = copy.copy(self)
-        widen = lambda r: Region(r.name, r.hue, r.width + 0.03, max(0.15, r.minsat - 0.2), 1.0, 0.0, 1.0, "lips" if r.keepskin else False,
-                                 r.skip, r.weight, r.rgb, r.sat, r.val)
+        def widen(r):
+            if r.tint is not None:   # a tint region is a brightness window: the portrait uses the same one
+                return r
+            return Region(r.name, r.hue, r.width + 0.03, max(0.15, r.minsat - 0.2), 1.0, 0.0, 1.0, "lips" if r.keepskin else False,
+                          r.skip, r.weight, r.rgb, r.sat, r.val, boost=r.boost, lumk=r.lumk)
         rc.bands = [widen(b) for b in self.bands]
         rc.regions = [b for b in rc.bands] + [widen(r) for r in self.regions if not any(r is b for b in self.bands)]
         rc._cache, rc._texel_cache = {}, {}
@@ -790,18 +814,34 @@ class Recolour:
         if self.solid is not None:
             return (self.solid >> 16) & 0xFF, (self.solid >> 8) & 0xFF, self.solid & 0xFF
         h, s, v = colorsys.rgb_to_hsv(r8 / 255.0, g8 / 255.0, b8 / 255.0)
-        hit = self._in_band(h, s, v) or (force and s >= 0.12 and not is_skin(h, s, v))
+        band = self._band_for(h, s, v) if self.bands is not None else None
+        if band is not None and band.tint is not None:
+            return self._colourise(band, r8, g8, b8, v)
+        if band is None and force and self.tinting:
+            # an endpoint of a block that shows mostly region colours (a 3-colour block whose texels
+            # are all the midpoint of two endpoints just outside the box): follow if it is close
+            for b in self.bands:
+                if s <= b.maxsat + 0.15 and b.minval - 0.1 <= v <= b.maxval + 0.1:
+                    return self._colourise(b, r8, g8, b8, v)
+        if self.bands is not None:
+            hit = band is not None or (force and not self.tinting and s >= 0.12 and not is_skin(h, s, v))
+        else:
+            hit = self._in_band(h, s, v) or (force and s >= 0.12 and not is_skin(h, s, v))
+        if hit and band is None and self.bands:
+            band = self.bands[0]          # a forced endpoint follows the (first) selected region's settings
         if hit:
             if self.hue is not None:
                 h = self.hue % 1.0
             s = min(1.0, s * self.sat)
+            if band is not None and band.boost != 1.0:
+                s = min(1.0, s * band.boost)
         rf, gf, bf = colorsys.hsv_to_rgb(h, s, v)
         if hit:
             if self.keeplum and self.hue is not None:
                 # same HSV value looks far brighter in green than in red: match the original's luma
                 # instead, so the shading gradients survive the hue change
                 lr, lg, lb = match_luma((rf, gf, bf), luma(r8 / 255.0, g8 / 255.0, b8 / 255.0))
-                k = self.keeplum
+                k = self.keeplum if band is None or band.lumk == 1.0 else self.keeplum * band.lumk
                 rf, gf, bf = rf + (lr - rf) * k, gf + (lg - gf) * k, bf + (lb - bf) * k
             rf, gf, bf = (min(1.0, x * self.val) for x in (rf, gf, bf))
         if self.tint is not None:
@@ -809,6 +849,20 @@ class Recolour:
             rf = rf * (1 - t) + ((self.tint >> 16) & 0xFF) / 255.0 * t
             gf = gf * (1 - t) + ((self.tint >> 8) & 0xFF) / 255.0 * t
             bf = bf * (1 - t) + (self.tint & 0xFF) / 255.0 * t
+        return int(round(rf * 255)), int(round(gf * 255)), int(round(bf * 255))
+
+    def _colourise(self, band, r8, g8, b8, v):
+        """A tint region's colour in the target hue: saturation band.tint at full strength from 80 %
+        of the region's typical brightness up, fading to none at black, so shading and dark details
+        (eye sockets, creases) survive.  A dark region (Black Shy Guy) is lifted a little so the hue shows."""
+        if self.hue is None:
+            return r8, g8, b8
+        k = min(1.0, max(0.0, (v - 0.04) / max(0.05, band.val * 0.8 - 0.04)))
+        s = min(1.0, band.tint * k * self.sat)
+        if band.val < 0.4:
+            v = min(1.0, v * (1.0 + 0.5 * k))
+        rf, gf, bf = colorsys.hsv_to_rgb(self.hue % 1.0, s, v)
+        rf, gf, bf = (min(1.0, x * self.val) for x in (rf, gf, bf))
         return int(round(rf * 255)), int(round(gf * 255)), int(round(bf * 255))
 
     def map565(self, c, force=False):
@@ -829,6 +883,8 @@ class Recolour:
             r8, g8, b8 = self.map_rgb8((r << 3) | (r >> 2), (g << 3) | (g >> 2), (b << 3) | (b >> 2))
             return 0x8000 | ((r8 >> 3) << 10) | ((g8 >> 3) << 5) | (b8 >> 3)
         a = (p >> 12) & 7
+        if a == 0 and self.tinting:
+            return p                     # invisible (a portrait's background): a tint would only show in tools
         r8, g8, b8 = self.map_rgb8(((p >> 8) & 0xF) * 17, ((p >> 4) & 0xF) * 17, (p & 0xF) * 17)
         return (a << 12) | ((r8 >> 4) << 8) | ((g8 >> 4) << 4) | (b8 >> 4)
 
@@ -864,6 +920,28 @@ def block_band_share(c0, c1, idx, rc):
     return inside / total if total else 0.0
 
 
+def block_shows_other_colour(c0, c1, idx, rc, share):
+    """Does a CMPR block show texels clearly unlike a tint region (strongly coloured, or far brighter
+    than a dark region: the white of Black Shy Guy's mask around his eye holes)?  A tint region leaves
+    such blocks alone when they are only partly region, so no ring is painted around an eye."""
+    pal = cmpr_palette(c0, c1)
+    n = [0, 0, 0, 0]
+    for sh in (24, 16, 8, 0):
+        cnt = _IDX_COUNTS[(idx >> sh) & 0xFF]
+        for i in range(4):
+            n[i] += cnt[i]
+    top = max(b.maxval for b in rc.bands)
+    strong = bright = 0
+    for i in range(4):
+        if n[i] and pal[i] is not None and not rc.texel_in_band(pal[i]):
+            h, s, v = colorsys.rgb_to_hsv(pal[i][0] / 255.0, pal[i][1] / 255.0, pal[i][2] / 255.0)
+            if s >= 0.4 and v >= 0.2:
+                strong += n[i]
+            elif v >= top + 0.35:
+                bright += n[i]
+    return strong >= 2 and share <= 0.5 or bright >= 2
+
+
 def block_mostly_in_band(c0, c1, idx, rc):
     return block_band_share(c0, c1, idx, rc) >= 0.5
 
@@ -875,7 +953,11 @@ def recolour_block(block, rc):
         share = block_band_share(c0, c1, idx, rc)
         if share == 0.0:
             return block                 # no texel shows a region colour: leave the block alone
+        if rc.tinting and share < 1.0 and block_shows_other_colour(c0, c1, idx, rc, share):
+            return block                 # an eye or a mouth with a little region colour: left whole
         force = share >= 0.5             # mostly region: both endpoints follow it
+        if rc.tinting:
+            force = share >= 0.999       # a tint only pulls in endpoints of blocks that show nothing else
     n0 = rc.map565(c0, force)
     n1 = rc.map565(c1, force)
     four = c0 > c1
@@ -895,10 +977,18 @@ def recolour_block(block, rc):
 
 
 def recolour_gpc(gpc, rc):
-    """Recolour the CMPR endpoints of every texture in place; headers and geometry untouched."""
+    """Recolour the CMPR endpoints (or the palette of a CI texture) of every texture in place; headers
+    and geometry untouched."""
     d = gpc.data
     for t in gpc.textures:
         if not rc.touches(t["index"]):
+            continue
+        if t["fmt"] != TEX_FMT_CMPR:
+            o = t["tlut"]
+            for k in range(t["colours"]):
+                p = struct.unpack_from(">H", d, o + 2 * k)[0]
+                q = rc.map_rgb5a3(p) if t["tlut_fmt"] == TLUT_FMT_RGB5A3 else rc.map565(p)
+                struct.pack_into(">H", d, o + 2 * k, q)
             continue
         start, end = t["data"], t["data"] + t["size"]
         for o in range(start, end, 8):
@@ -982,7 +1072,69 @@ def cmpr_colour_counts(data, counts=None):
 
 
 def texture_bytes(gpc, t):
-    return bytes(gpc.data[t["data"]:t["data"] + t["size"]])
+    """A texture's pixel data; for a CI texture followed by its palette (both change the look)."""
+    b = bytes(gpc.data[t["data"]:t["data"] + t["size"]])
+    if t["colours"]:
+        b += bytes(gpc.data[t["tlut"]:t["tlut"] + 2 * t["colours"]])
+    return b
+
+
+def tlut_rgba(tlut, tlut_fmt):
+    """[(r, g, b, a8)] of an RGB565 or RGB5A3 palette."""
+    out = []
+    for o in range(0, len(tlut), 2):
+        v = (tlut[o] << 8) | tlut[o + 1]
+        if tlut_fmt == TLUT_FMT_RGB565:
+            out.append(rgb565_to_rgb(v) + (255,))
+        elif v & 0x8000:
+            r, g, b = (v >> 10) & 31, (v >> 5) & 31, v & 31
+            out.append(((r << 3) | (r >> 2), (g << 3) | (g >> 2), (b << 3) | (b >> 2), 255))
+        else:
+            out.append((((v >> 8) & 15) * 17, ((v >> 4) & 15) * 17, (v & 15) * 17, ((v >> 12) & 7) * 255 // 7))
+    return out
+
+
+def ci_indices(data, t):
+    """Palette index of every texel of a CI4 (8x8 tiles) or CI8 (8x4 tiles) texture, row by row."""
+    w, h = t["w"], t["h"]
+    tw, th = (8, 8) if t["fmt"] == TEX_FMT_CI4 else (8, 4)
+    tiles_x = align(w, 8) // 8
+    out = bytearray(w * h)
+    for y in range(h):
+        for x in range(w):
+            k = ((y // th) * tiles_x + x // tw) * tw * th + (y % th) * tw + (x % tw)
+            out[y * w + x] = (data[k >> 1] >> (4 * (1 - (k & 1)))) & 15 if t["fmt"] == TEX_FMT_CI4 else data[k]
+    return out
+
+
+def decode_texture(data, t, checker=CHECKER):
+    """texture_bytes() of texture t -> RGB bytes, w*h*3 (transparent texels show a grey checkerboard)."""
+    if t["fmt"] == TEX_FMT_CMPR:
+        return decode_cmpr(data, t["w"], t["h"], checker)
+    pal = tlut_rgba(data[t["size"]:t["size"] + 2 * t["colours"]], t["tlut_fmt"])
+    w = t["w"]
+    out = bytearray()
+    for i, k in enumerate(ci_indices(data, t)):
+        r, g, b, a = pal[k]
+        c = checker[(((i % w) >> 3) ^ ((i // w) >> 3)) & 1]
+        out += bytes(((r * a + c[0] * (255 - a)) // 255, (g * a + c[1] * (255 - a)) // 255, (b * a + c[2] * (255 - a)) // 255))
+    return bytes(out)
+
+
+def texture_colour_counts(data, t, counts=None):
+    """{(r, g, b): texel count} of texture_bytes() of texture t (transparent texels left out)."""
+    if t["fmt"] == TEX_FMT_CMPR:
+        return cmpr_colour_counts(data, counts)
+    counts = {} if counts is None else counts
+    pal = tlut_rgba(data[t["size"]:t["size"] + 2 * t["colours"]], t["tlut_fmt"])
+    n = [0] * len(pal)
+    for k in ci_indices(data, t):
+        n[k] += 1
+    for (r, g, b, a), c in zip(pal, n):
+        if c and a >= 128:
+            key = bytes((r, g, b))
+            counts[key] = counts.get(key, 0) + c
+    return counts
 
 
 # ----------------------------------------------------------------------------------------------
@@ -1022,12 +1174,18 @@ HUE_NAMES = ((15, "red"), (40, "orange"), (70, "yellow"), (165, "green"), (195, 
 
 class Region:
     """A box in HSV space: hue within +-width of `hue`, saturation and value inside their limits,
-    optionally never skin.  `skip` = texture indices left alone (the gloves)."""
+    optionally never skin.  `skip` = texture indices left alone (the gloves).
+    tint=<0..1>: a white, grey or black (or very pale) region that has no hue to shift: its colours are
+    painted in the target hue at this saturation instead, scaled by brightness, so the shading stays
+    and the darkest parts stay dark (Boo, King Boo, Black Shy Guy, Gray Dry Bones).  A width of 0.5
+    or more means any hue.  boost: saturation multiplier for a pale region (Birdo's pink); lumk scales
+    keeplum for it (a light pink's brightness pushed onto blue or green washes it out to pastel)."""
     __slots__ = ("name", "hue", "width", "minsat", "maxsat", "minval", "maxval", "keepskin", "skip",
-                 "weight", "rgb", "sat", "val", "default", "blockwise")
+                 "weight", "rgb", "sat", "val", "default", "blockwise", "tint", "boost", "lumk")
 
     def __init__(self, name, hue, width, minsat=0.5, maxsat=1.0, minval=0.0, maxval=1.0, keepskin=True,
-                 skip=frozenset(), weight=0.0, rgb=None, sat=0.8, val=0.7, blockwise=True):
+                 skip=frozenset(), weight=0.0, rgb=None, sat=0.8, val=0.7, blockwise=True, tint=None, boost=1.0, lumk=1.0):
+        self.tint, self.boost, self.lumk = tint, boost, lumk
         self.name, self.hue, self.width = name, hue % 1.0, width
         self.minsat, self.maxsat, self.minval, self.maxval = minsat, maxsat, minval, maxval
         self.keepskin, self.skip, self.weight = keepskin, frozenset(skip), weight
@@ -1039,13 +1197,13 @@ class Region:
     def contains(self, h, s, v):
         if s < self.minsat or s > self.maxsat or v < self.minval or v > self.maxval:
             return False
-        if abs((h - self.hue + 0.5) % 1.0 - 0.5) > self.width:
+        if self.width < 0.5 and abs((h - self.hue + 0.5) % 1.0 - 0.5) > self.width:
             return False
         return not (self.keepskin and (is_skin_or_lips if self.keepskin == "lips" else is_skin)(h, s, v))
 
     def distance(self, h, s, v):
         """How far a colour is from this region's typical colour (hue counts 4x)."""
-        dh = abs((h - self.hue + 0.5) % 1.0 - 0.5) * 4
+        dh = abs((h - self.hue + 0.5) % 1.0 - 0.5) * 4 if self.width < 0.5 else 0.0
         return dh * dh + (s - self.sat) ** 2 + (v - self.val) ** 2
 
     @property
@@ -1075,10 +1233,28 @@ def hue_name(h, s, v):
 # region is exactly the band clone_character used before regions existed (byte-identical output).
 REGION_OVERRIDES = {
     0: [Region("red (cap, shirt)", 0.0, 0.035, 0.5, keepskin=False, blockwise=False)],
+    # Luigi's big cap emblem letter is a bluer green (hue 0.36-0.39) than his cap and shirt (0.29-0.33);
+    # it has too few texels to become a region of its own, so the detected box (0.28-0.34) left it green
+    1: [Region("green (cap, shirt)", 0.335, 0.07, 0.25, rgb=(30, 140, 30))],
     # Wario's tan skin (hue 30 deg, more saturated than most skin) touches his yellow cap's hues
-    10: [Region("yellow (cap, shirt)", 0.133, 0.027, 0.6, minval=0.5, rgb=(230, 190, 20))],
+    # (34 deg); the box starts in the valley at 39-40 deg, so the dark-gold brim shading at 37-38 deg is
+    # left whole instead of being split texel by texel (specks)
+    10: [Region("yellow (cap, shirt)", 0.136, 0.025, 0.6, minval=0.5, rgb=(230, 190, 20))],
     # Red Magikoopa's robe shades through orange into his yellow face without a gap in hue
     34: [Region("red (robe)", 0.005, 0.045, 0.8, rgb=(150, 20, 10))],
+    # Birdo's hot pink is light and only half saturated: a hue shift alone gives pastel blues/greens
+    17: [Region("pink", 0.901, 0.024, 0.54, minval=0.35, maxval=0.97, rgb=(220, 80, 170), sat=0.65, val=0.85, boost=1.25, lumk=0.25)],
+    # White, black and grey characters have no hue to shift: tint regions (see Region).  Boo and
+    # King Boo: the white body and face.  Their fangs are a faintly cyan white (saturation 0.05-0.1,
+    # also the solid 16x16 teeth texture) where the body is neutral (< 0.045), so the fangs, the dark
+    # eyes and the red mouth stay
+    14: [Region("white (body)", 0.0, 0.5, 0.0, 0.045, 0.6, 1.0, False, rgb=(236, 236, 240), sat=0.01, val=0.93, tint=0.55)],
+    37: [Region("white (body)", 0.0, 0.5, 0.0, 0.045, 0.6, 1.0, False, rgb=(236, 236, 240), sat=0.01, val=0.93, tint=0.55)],
+    # Black Shy Guy: the near-black robe (v 0.1-0.35); the white mask and the black eye holes stay
+    47: [Region("black (robe)", 0.0, 0.5, 0.0, 0.25, 0.07, 0.38, False, rgb=(52, 52, 56), sat=0.05, val=0.22, tint=0.8)],
+    # Gray Dry Bones: the very pale cyan shell (hue 185-200 deg, saturation 0.1-0.3); the bluish-grey
+    # bone around it (225-260 deg, saturation < 0.09) stays
+    48: [Region("light cyan (shell)", 0.535, 0.035, 0.09, 0.6, 0.3, 1.0, False, rgb=(190, 225, 230), sat=0.18, val=0.8, tint=0.6)],
 }
 # Which detected regions a slot recolours by default (words of their names, a|b = either; main
 # one first),
@@ -1108,6 +1284,7 @@ KEEP_TEXTURES = {
     39: {13: "mouth"},
     50: {0: "baseball", 8: "baseball"},           # red stitches
     52: {32: "flame (red shading into orange)"},
+    14: {11: "baseball"}, 37: {0: "baseball"},     # off-white like the tinted body
 }
 REGION_DEFAULTS = {
     3: ("red",),                                   # Diddy: cap and shirt (fur is region 1)
@@ -1116,6 +1293,7 @@ REGION_DEFAULTS = {
     9: ("green",), 19: ("green", "green 2"),                 # Bowser, Bowser Jr.: shell
     12: ("green",), 42: ("red",), 20: ("red",), 43: ("green",),   # Koopas / Paratroopas: shell
     21: ("cyan",), 22: ("pink|purple",), 23: ("yellow",),   # Piantas: body
+    26: ("green", "green 2"),                      # Green Noki: shell and its dark lower stripe
     27: ("green",), 52: ("red",), 53: ("blue",),  # Bros: helmet and shell
     29: ("blue",), 30: ("yellow",), 31: ("green",), 32: ("purple",),  # Toad colours: cap spots
     28: ("purple", "purple 2"),                    # Toadsworth: cap spots and coat
@@ -1176,7 +1354,7 @@ def detect_regions(gpc, char=None, keep=frozenset(), bins=72, min_share=0.015):
     counts = {}
     for t in gpc.textures:
         if t["index"] not in skip:
-            cmpr_colour_counts(texture_bytes(gpc, t), counts)
+            texture_colour_counts(texture_bytes(gpc, t), t, counts)
     total = float(sum(counts.values())) or 1.0
     cand = []
     hist = [0.0] * bins
@@ -1259,10 +1437,10 @@ def detect_regions(gpc, char=None, keep=frozenset(), bins=72, min_share=0.015):
     if ov:
         ov = [copy.copy(o) for o in ov]
         for o in ov:
-            o.skip = o.skip | skip if o.keepskin else o.skip   # Mario's band stays exactly as it was
+            o.skip = o.skip | skip if o.keepskin or o.tint is not None else o.skip   # Mario's band stays exactly as it was
             o.weight = sum(n for rgb, n in counts.items()
                            if o.contains(*colorsys.rgb_to_hsv(rgb[0] / 255.0, rgb[1] / 255.0, rgb[2] / 255.0))) / total
-        regions = ov + [r for r in regions if not any(_overlaps(r, o) for o in ov)]
+        regions = ov + [r for r in regions if not any(o.width < 0.5 and _overlaps(r, o) for o in ov)]
     want = REGION_DEFAULTS.get(char, ())
     picked = []
     for prefix in want:
@@ -1950,7 +2128,7 @@ def clone(args, log=print):
     # --- source data
     log("source: %d %s" % (C, CHAR_NAMES[C]))
     if C in UNSUPPORTED_SOURCES:
-        raise SystemExit("%s's model has textures that are not CMPR; it can't be recoloured or cloned" % CHAR_NAMES[C])
+        raise SystemExit("%s can't be cloned" % CHAR_NAMES[C])
     src_tracks = [Gpc(load_subfile(disc, dol, C * SUBFILE_TRACKS + t)) for t in (0, 1)]
     src_body = Gpc(effective_body(disc, dol, C))
     for g in src_tracks + [src_body]:

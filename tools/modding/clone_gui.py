@@ -37,7 +37,7 @@ DEFAULT_ROWS = [(29, "blue"), (30, "green"), (31, "purple"), (32, "yellow")]
 PRESETS = list(cc.COLOUR_PRESETS)     # red, orange, yellow, green, cyan, blue, purple, pink
 NEEDED_FREE_BYTES = 3_300_000_000     # working copy (~1.5 GB) + the new .iso (~1.5 GB)
 DISC_IMAGE_OTHER = (".rvz", ".nkit", ".gcz", ".wbfs", ".ciso", ".wia", ".tgc")
-# Sources whose models clone_character can't recolour (Petey's body has non-CMPR textures);
+# Sources clone_character refuses (none any more: Petey's CI4 textures are recoloured by palette);
 # test_gui_logic.py checks this list against the disc.
 UNSUPPORTED_SOURCES = set(cc.UNSUPPORTED_SOURCES)
 SOURCES = [c for c in range(cc.NUM_CHARS) if c not in UNSUPPORTED_SOURCES]
@@ -385,7 +385,7 @@ class SourcePreview:
         if rgb is None:
             if len(self._decoded) > 400:
                 self._decoded.clear()
-            rgb = self._decoded[data] = cc.decode_cmpr(data, t["w"], t["h"])
+            rgb = self._decoded[data] = cc.decode_texture(data, t)
         return rgb
 
     def _atlas(self, gpc):
