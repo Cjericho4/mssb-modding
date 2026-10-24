@@ -439,7 +439,11 @@ def run_job(job, log):
     partial = job.output_iso.with_name(job.output_iso.stem + ".partial.iso")
     try:
         log("working folder: %s" % work)
-        result = cc.clone(job_args(job, work / "disc", partial), log=log)
+
+        def patch_log(line):
+            if not line.startswith("Boot: "):     # the CLI's "open the folder" hint; the GUI hands out the .iso
+                log(line)
+        result = cc.clone(job_args(job, work / "disc", partial), log=patch_log)
         os.replace(str(partial), str(job.output_iso))
         log("saved %s" % job.output_iso)
         result["iso"] = job.output_iso
@@ -653,7 +657,7 @@ class App:
         lf.grid(row=3, column=0, columnspan=2, sticky="nsew", pady=(10, 0))
         lf.columnconfigure(0, weight=1)
         outer.rowconfigure(3, weight=1)
-        self.log_text = tk.Text(lf, height=8, wrap="word", state="disabled", font=("Consolas", 9))
+        self.log_text = tk.Text(lf, height=7, wrap="word", state="disabled", font=("Consolas", 9))
         self.log_text.grid(row=0, column=0, sticky="nsew")
         sb = ttk.Scrollbar(lf, command=self.log_text.yview)
         sb.grid(row=0, column=1, sticky="ns")
@@ -823,6 +827,7 @@ class App:
     def donor_changed(self, row):
         label = row["donor"].get()
         row["slot"] = next(c.id for c in self.choices if c.label == label)
+        self.schedule_preview()
 
     def colour_changed(self, row):
         v = row["colour_var"].get()
@@ -994,6 +999,7 @@ def selftest(argv):
         app = App(root)
         root.update()
         if game:
+            app.game_path.set(game)
             app.game_loaded(game, *load_game(game))
             if app.game is None:
                 print("selftest: game did not load: %s" % app.status.cget("text"))
