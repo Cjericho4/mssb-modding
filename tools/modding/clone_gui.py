@@ -482,30 +482,50 @@ def friendly_error(exc):
         busy = (" If that game is open in Dolphin or Rio, close it first." if getattr(exc, "errno", None) in (1, 13)
                 or getattr(exc, "winerror", None) == 32 else "")
         return "Couldn't read or write a file%s: %s.%s" % (where, exc.strerror or exc, busy), None
-    return ("Something went wrong while making the game. The technical details are in the log at the "
-            "bottom of the window.", "".join(traceback.format_exception(type(exc), exc, exc.__traceback__)))
+    return ("Something went wrong while making the game. The technical details are in the log on the "
+            "right of the window.", "".join(traceback.format_exception(type(exc), exc, exc.__traceback__)))
+
+
 
 
 # ----------------------------------------------------------------------------------------------
-# The window (tkinter is imported here, not at the top, so the logic above runs without it)
+# The window (tkinter is imported here, not at the top, so the logic above runs without it).
+# Its look (palette, fonts, panels, the red button, dialogs) lives in gui_theme.py.
 # ----------------------------------------------------------------------------------------------
-tk = ttk = filedialog = messagebox = colorchooser = None
+tk = ttk = filedialog = colorchooser = theme = None
+dialogs = None    # themed showinfo / showerror / askyesno, the same calls as tkinter.messagebox
 
 
 def _import_tk():
-    global tk, ttk, filedialog, messagebox, colorchooser
+    global tk, ttk, filedialog, colorchooser, theme
     import tkinter
-    from tkinter import ttk as _ttk, filedialog as _fd, messagebox as _mb, colorchooser as _cc
-    tk, ttk, filedialog, messagebox, colorchooser = tkinter, _ttk, _fd, _mb, _cc
+    from tkinter import ttk as _ttk, filedialog as _fd, colorchooser as _cc
+    import gui_theme
+    tk, ttk, filedialog, colorchooser, theme = tkinter, _ttk, _fd, _cc, gui_theme
 
 
 COLOUR_CHOICES = [c.capitalize() for c in PRESETS] + ["Custom…"]
 BAND_CHOICES = [("Reds only (Mario's hat and shirt)", BAND_REDS), ("Every strong colour", BAND_ALL)]
-GREEN, RED, GREY = "#1a7f37", "#c62828", "#666666"
+GREEN, RED, GREY, GOLD = "#22c55e", "#ef4444", "#8f8fa3", "#f5bb00"
+DONOR_WIDTH, COLOUR_WIDTH = 32, 12     # minimum widths; the slot list stretches
+
+
+def make_root():
+    """The Tk root with DPI awareness, the bundled fonts and the night theme (and `dialogs`)."""
+    global dialogs
+    theme.dpi_aware()
+    theme.load_private_fonts()
+    root = tk.Tk()
+    if os.environ.get("MSSB_GUI_SCALE"):          # for screenshots: pretend to be a high-DPI screen
+        root.tk.call("tk", "scaling", float(os.environ["MSSB_GUI_SCALE"]) * 96 / 72)
+    theme.init(root)
+    dialogs = theme.Dialogs(root)
+    return root
 
 
 class App:
     def __init__(self, root):
+        T, px = theme, theme.px
         self.root = root
         self.q = queue.Queue()
         self.game = None
@@ -515,161 +535,173 @@ class App:
         self._preview_job = None
         self._row_seq = 0
         root.title(APP_TITLE)
-        root.minsize(900, 640)
-        self.inputs = []               # ttk widgets disabled while patching / before a game is chosen
+        self.inputs = []               # widgets disabled while patching / before a game is chosen
 
-        style = ttk.Style(root)
-        style.configure("Big.TButton", font=("Segoe UI", 13, "bold"), padding=(16, 10))
-        style.configure("Head.TLabel", font=("Segoe UI", 15, "bold"))
-        style.configure("Step.TLabel", font=("Segoe UI", 10, "bold"))
+        self.scroller = T.Scroller(root)
+        self.scroller.pack(fill="both", expand=True)
+        page = self.page = T.Page(self.scroller.view, "MSSB Clone Maker", "Mario Superstar Baseball · USA",
+                                  "Make recoloured copies of a character.")
+        edge, gap = px(22), px(18)
+        page.columnconfigure(0, weight=1)
+        page.rowconfigure(0, minsize=page.header_h + px(4))
+        page.rowconfigure(4, weight=1)
+        left = dict(column=0, sticky="new", padx=(edge, gap // 2))
 
-        outer = ttk.Frame(root, padding=12)
-        outer.grid(sticky="nsew")
-        root.columnconfigure(0, weight=1)
-        root.rowconfigure(0, weight=1)
-        outer.columnconfigure(0, weight=1)
-        outer.rowconfigure(2, weight=1)
-
-        ttk.Label(outer, text=APP_TITLE, style="Head.TLabel").grid(row=0, column=0, columnspan=2, sticky="w")
-        ttk.Label(outer, text="Make recoloured copies of a character in Mario Superstar Baseball (USA).").grid(
-            row=1, column=0, columnspan=2, sticky="w", pady=(0, 8))
-
-        left = ttk.Frame(outer)
-        left.grid(row=2, column=0, sticky="nsew")
-        left.columnconfigure(0, weight=1)
-        right = ttk.Frame(outer, padding=(16, 0, 0, 0))
-        right.grid(row=2, column=1, sticky="n")
-
-        # 1. game
-        r = 0
-        ttk.Label(left, text="1. Your game", style="Step.TLabel").grid(row=r, column=0, sticky="w")
-        r += 1
-        g = ttk.Frame(left)
-        g.grid(row=r, column=0, sticky="ew")
-        g.columnconfigure(2, weight=1)
-        self.btn_iso = ttk.Button(g, text="Choose your game (.iso)…", command=self.choose_iso)
+        # 01 game
+        card = page.add_card(T.Card(page, "Your game", chip="01"), row=1, pady=(edge - px(4), gap), **left)
+        b = card.body
+        b.columnconfigure(2, weight=1)
+        self.btn_iso = ttk.Button(b, text="Choose your game (.iso)…", command=self.choose_iso)
         self.btn_iso.grid(row=0, column=0, sticky="w")
-        self.btn_dir = ttk.Button(g, text="or a folder…", command=self.choose_folder)
-        self.btn_dir.grid(row=0, column=1, sticky="w", padx=(6, 0))
+        self.btn_dir = ttk.Button(b, text="or a folder…", command=self.choose_folder)
+        self.btn_dir.grid(row=0, column=1, sticky="w", padx=(px(8), 0))
         self.game_path = tk.StringVar()
-        ttk.Entry(g, textvariable=self.game_path, state="readonly").grid(row=0, column=2, sticky="ew", padx=(8, 0))
-        self.status = tk.Label(left, text="No game chosen yet.", fg=GREY, anchor="w", justify="left", wraplength=560)
-        self.status.grid(row=r + 1, column=0, sticky="ew", pady=(4, 10))
-        r += 2
+        ttk.Entry(b, textvariable=self.game_path, state="readonly", style="Path.TEntry", font=T.F["mono"],
+                  takefocus=0).grid(row=0, column=2, sticky="ew", padx=(px(8), 0))
+        self.status = tk.Label(b, text="No game chosen yet.", fg=GREY, bg=T.PANEL, font=T.F["medium"],
+                               anchor="w", justify="left", wraplength=px(600))
+        self.status.grid(row=1, column=0, columnspan=3, sticky="ew", pady=(px(10), 0))
 
-        # 2. source
-        ttk.Label(left, text="2. Character to clone", style="Step.TLabel").grid(row=r, column=0, sticky="w")
-        r += 1
+        # 02 character + clones (+ advanced)
+        card = page.add_card(T.Card(page, "Clones", chip="02"), row=2, pady=(0, gap), **left)
+        T.section(card.right, "Character to clone", row=0, column=0, pady=(0, 0))
         self.source_var = tk.StringVar(value=pretty_name(0))
-        self.cb_source = ttk.Combobox(left, textvariable=self.source_var, state="readonly", width=24,
+        self.cb_source = ttk.Combobox(card.right, textvariable=self.source_var, state="readonly", width=18,
                                       values=[pretty_name(c) for c in SOURCES])
-        self.cb_source.grid(row=r, column=0, sticky="w", pady=(2, 10))
+        self.cb_source.grid(row=0, column=1, sticky="e", padx=(px(12), 0))
         self.cb_source.bind("<<ComboboxSelected>>", lambda e: self.source_changed())
         self.inputs.append(self.cb_source)
-        r += 1
+        b = card.body
+        b.columnconfigure(0, weight=1)
 
-        # 3. clones
-        ttk.Label(left, text="3. Clones (each one takes over a character slot)", style="Step.TLabel").grid(row=r, column=0, sticky="w")
-        r += 1
-        self.rows_frame = ttk.Frame(left)
-        self.rows_frame.grid(row=r, column=0, sticky="ew")
+        self.rows_frame = ttk.Frame(b)
+        self.rows_frame.grid(row=2, column=0, sticky="ew")
+        self.rows_frame.columnconfigure(0, weight=1)
         hdr = ttk.Frame(self.rows_frame)
-        hdr.grid(row=0, column=0, sticky="w")
-        ttk.Label(hdr, text="Preview", width=8).grid(row=0, column=0)
-        ttk.Label(hdr, text="Slot it takes over", width=46).grid(row=0, column=1, sticky="w")
-        ttk.Label(hdr, text="Colour").grid(row=0, column=2, sticky="w")
-        self.no_game_hint = ttk.Label(self.rows_frame, text="Choose your game first.", foreground=GREY)
-        self.no_game_hint.grid(row=1, column=0, sticky="w", pady=4)
-        r += 1
-        self.btn_add = ttk.Button(left, text="+ Add a clone", command=self.add_row)
-        self.btn_add.grid(row=r, column=0, sticky="w", pady=(4, 10))
-        self.inputs.append(self.btn_add)
-        r += 1
+        hdr.grid(row=0, column=0, sticky="ew", pady=(0, px(6)))
+        hdr.columnconfigure(1, weight=1)
+        heads = [T.section(hdr, t, row=0, column=i, pady=(0, 0)) for i, t in
+                 enumerate(("Preview", "Slot it takes over", "Colour"))]
+        probes = [ttk.Combobox(b, width=DONOR_WIDTH), ttk.Combobox(b, width=COLOUR_WIDTH),
+                  ttk.Button(b, text="×", style="Icon.TButton", width=2)]
+        # column widths shared by the header and every row: view, slot (stretches), colour, swatch, remove
+        self._cols = [max(heads[0].winfo_reqwidth(), px(24)) + px(12), probes[0].winfo_reqwidth() + px(8),
+                      probes[1].winfo_reqwidth(), px(26 + 10), probes[2].winfo_reqwidth() + px(8)]
+        for w in probes:
+            w.destroy()
+        for i, w in enumerate(self._cols):
+            hdr.columnconfigure(i, minsize=w)
+        self.no_game_hint = ttk.Label(self.rows_frame, text="Choose your game first.", style="Muted.TLabel")
+        self.no_game_hint.grid(row=1, column=0, sticky="w", pady=px(4))
         self.preview_row = tk.IntVar(value=-1)
 
-        # 5. advanced (collapsed)
+        bar = tk.Frame(b, bg=T.PANEL)
+        bar.grid(row=3, column=0, sticky="ew", pady=(px(10), 0))
+        bar.columnconfigure(1, weight=1)
+        self.btn_add = ttk.Button(bar, text="+ Add a clone", command=self.add_row)
+        self.btn_add.grid(row=0, column=0, sticky="w")
+        self.inputs.append(self.btn_add)
         self.adv_open = False
-        self.btn_adv = ttk.Button(left, text="▸ Advanced options", command=self.toggle_advanced)
-        self.btn_adv.grid(row=r, column=0, sticky="w")
-        r += 1
-        self.adv = ttk.Frame(left, padding=(16, 4, 0, 4))
-        self.adv.grid(row=r, column=0, sticky="ew")
-        self.adv_row = r
+        self.btn_adv = ttk.Button(bar, text="Advanced options  ▸", command=self.toggle_advanced)
+        self.btn_adv.grid(row=0, column=2, sticky="e")
+
+        self.adv = ttk.Frame(b)
+        self.adv.grid(row=4, column=0, sticky="ew")
+        self.adv.columnconfigure(1, weight=1)
+        tk.Frame(self.adv, bg=T.LINE, height=1).grid(row=0, column=0, columnspan=3, sticky="ew", pady=(px(14), px(12)))
+        T.section(self.adv, "Advanced", red=True, row=1, column=0, columnspan=3, pady=(0, 4))
         self.ui_source = tk.BooleanVar(value=True)
         self.copy_stats = tk.BooleanVar(value=True)
         self.keep_work = tk.BooleanVar(value=False)
         self.keeplum = tk.DoubleVar(value=0.5)
         self.band = tk.StringVar(value=BAND_CHOICES[0][0])
         self.chk_ui = ttk.Checkbutton(self.adv, variable=self.ui_source)
-        self.chk_ui.grid(row=0, column=0, columnspan=3, sticky="w")
+        self.chk_ui.grid(row=2, column=0, columnspan=3, sticky="w")
         self.chk_stats = ttk.Checkbutton(self.adv, variable=self.copy_stats)
-        self.chk_stats.grid(row=1, column=0, columnspan=3, sticky="w")
-        ttk.Label(self.adv, text="Keep shading:").grid(row=2, column=0, sticky="w", pady=(4, 0))
-        self.scale = ttk.Scale(self.adv, from_=0.0, to=1.0, variable=self.keeplum, length=180,
+        self.chk_stats.grid(row=3, column=0, columnspan=3, sticky="w")
+        T.section(self.adv, "Keep shading", row=4, column=0, pady=(10, 0))
+        self.scale = ttk.Scale(self.adv, from_=0.0, to=1.0, variable=self.keeplum, length=px(220),
                                command=lambda v: self.keeplum_changed())
-        self.scale.grid(row=2, column=1, sticky="w", pady=(4, 0))
-        self.keeplum_lbl = ttk.Label(self.adv, text="0.50")
-        self.keeplum_lbl.grid(row=2, column=2, sticky="w", padx=(6, 0), pady=(4, 0))
-        ttk.Label(self.adv, text="(higher keeps the light and dark areas of the original; lower is brighter and flatter)",
-                  foreground=GREY).grid(row=3, column=0, columnspan=3, sticky="w")
-        ttk.Label(self.adv, text="Colours to change:").grid(row=4, column=0, sticky="w", pady=(4, 0))
+        self.scale.grid(row=4, column=1, sticky="w", padx=(px(14), 0), pady=(px(10), 0))
+        self.keeplum_lbl = ttk.Label(self.adv, text="0.50", font=T.F["mono"])
+        self.keeplum_lbl.grid(row=4, column=2, sticky="e", pady=(px(10), 0))
+        ttk.Label(self.adv, text="Higher keeps the light and dark areas of the original; lower is brighter and flatter.",
+                  style="Muted.TLabel").grid(row=5, column=0, columnspan=3, sticky="w", pady=(px(2), 0))
+        T.section(self.adv, "Colours to change", row=6, column=0, pady=(12, 0))
         self.cb_band = ttk.Combobox(self.adv, textvariable=self.band, state="readonly", width=32,
                                     values=[b[0] for b in BAND_CHOICES])
-        self.cb_band.grid(row=4, column=1, columnspan=2, sticky="w", pady=(4, 0))
+        self.cb_band.grid(row=6, column=1, columnspan=2, sticky="w", padx=(px(14), 0), pady=(px(12), 0))
         self.cb_band.bind("<<ComboboxSelected>>", lambda e: self.schedule_preview())
         self.chk_keep = ttk.Checkbutton(self.adv, text="Keep the working folder (for troubleshooting)", variable=self.keep_work)
-        self.chk_keep.grid(row=5, column=0, columnspan=3, sticky="w", pady=(4, 0))
+        self.chk_keep.grid(row=7, column=0, columnspan=3, sticky="w", pady=(px(10), 0))
         self.inputs += [self.chk_ui, self.chk_stats, self.scale, self.cb_band, self.chk_keep]
         self.adv.grid_remove()
         self.update_source_labels()
-        r += 1
 
-        # 6. save + create
-        ttk.Label(left, text="4. Save the new game as", style="Step.TLabel").grid(row=r, column=0, sticky="w", pady=(10, 0))
-        r += 1
-        s = ttk.Frame(left)
-        s.grid(row=r, column=0, sticky="ew")
-        s.columnconfigure(0, weight=1)
+        # 03 save + create
+        card = page.add_card(T.Card(page, "Save the new game as", chip="03"), row=3, pady=(0, edge), **left)
+        b = card.body
+        b.columnconfigure(0, weight=1)
         self.out_path = tk.StringVar()
-        self.ent_out = ttk.Entry(s, textvariable=self.out_path)
+        self.ent_out = ttk.Entry(b, textvariable=self.out_path, font=T.F["mono"])
         self.ent_out.grid(row=0, column=0, sticky="ew")
-        self.btn_out = ttk.Button(s, text="Save as…", command=self.choose_output)
-        self.btn_out.grid(row=0, column=1, padx=(6, 0))
+        self.btn_out = ttk.Button(b, text="Save as…", command=self.choose_output)
+        self.btn_out.grid(row=0, column=1, padx=(px(8), 0))
         self.inputs += [self.ent_out, self.btn_out]
-        r += 1
-        c = ttk.Frame(left)
-        c.grid(row=r, column=0, sticky="ew", pady=(12, 0))
-        c.columnconfigure(1, weight=1)
-        self.btn_go = ttk.Button(c, text="Create patched game", style="Big.TButton", command=self.create)
-        self.btn_go.grid(row=0, column=0, sticky="w")
+        self.btn_go = T.AngledButton(b, "Create patched game", self.create)
+        self.btn_go.grid(row=0, column=2, sticky="e", padx=(px(16), 0))
         self.inputs.append(self.btn_go)
-        self.progress = ttk.Progressbar(c, mode="indeterminate", length=200)
-        self.progress.grid(row=0, column=1, sticky="ew", padx=(12, 0))
-        r += 1
+        self.progress = ttk.Progressbar(b, mode="indeterminate", length=px(160))
+        self.progress.grid(row=1, column=0, columnspan=3, sticky="ew", pady=(px(14), px(2)))
+        self.progress.grid_remove()      # shown while the game is being made
 
-        # preview (right column)
-        ttk.Label(right, text="Preview", style="Step.TLabel").grid(row=0, column=0, sticky="w")
-        self.preview_caption = ttk.Label(right, text="", foreground=GREY, wraplength=280, justify="left")
-        self.preview_caption.grid(row=1, column=0, sticky="w")
-        ttk.Label(right, text="Before").grid(row=2, column=0, sticky="w", pady=(6, 0))
-        self.img_before = tk.Label(right, width=256, height=256, bg="#dddddd", text="", relief="flat")
-        self.img_before.grid(row=3, column=0, sticky="w")
-        ttk.Label(right, text="After").grid(row=4, column=0, sticky="w", pady=(6, 0))
-        self.img_after = tk.Label(right, width=256, height=256, bg="#dddddd", text="")
-        self.img_after.grid(row=5, column=0, sticky="w")
-
-        # log
-        lf = ttk.Frame(outer)
-        lf.grid(row=3, column=0, columnspan=2, sticky="nsew", pady=(10, 0))
+        # preview + log (right column, full height)
+        card = page.add_card(T.Card(page, "Preview"), row=1, column=1, rowspan=4, sticky="nsew",
+                             padx=(gap // 2, edge), pady=(edge - px(4), edge))
+        self.preview_chip = T.Chip(card.right, pretty_name(0), "neutral")
+        self.preview_chip.grid(row=0, column=0)
+        b = card.body
+        b.rowconfigure(5, weight=1)
+        side = 256 * max(1, int(T.S))      # whole-number zoom keeps the texels square
+        self._blank = tk.PhotoImage(width=side, height=side)
+        self.preview_caption = ttk.Label(b, text="The character's main texture, before and after.",
+                                         style="Muted.TLabel", wraplength=2 * side + px(16), justify="left")
+        self.preview_caption.grid(row=0, column=0, columnspan=2, sticky="w", pady=(0, px(10)))
+        T.section(b, "Before", row=1, column=0)
+        T.section(b, "After", row=1, column=1, pady=(0, 6))
+        self.img_before = tk.Label(b, image=self._blank, text="No preview yet", compound="center", fg=GREY,
+                                   font=T.F["small"], bg=T.FIELD, bd=0, highlightthickness=1,
+                                   highlightbackground=T.LINE)
+        self.img_before.grid(row=2, column=0, sticky="nw")
+        self.img_after = tk.Label(b, image=self._blank, text="", compound="center", fg=GREY, font=T.F["small"],
+                                  bg=T.FIELD, bd=0, highlightthickness=1, highlightbackground=T.LINE)
+        self.img_after.grid(row=2, column=1, sticky="nw", padx=(px(16), 0))
+        self.img_after.grid_configure(sticky="nw")
+        tk.Frame(b, bg=T.LINE, height=1).grid(row=3, column=0, columnspan=2, sticky="ew", pady=px(16))
+        T.section(b, "Log", red=True, row=4, column=0)
+        lf = tk.Frame(b, bg=T.FIELD, highlightthickness=1, highlightbackground=T.LINE)
+        lf.grid(row=5, column=0, columnspan=2, sticky="nsew")
         lf.columnconfigure(0, weight=1)
-        outer.rowconfigure(3, weight=1)
-        self.log_text = tk.Text(lf, height=7, wrap="word", state="disabled", font=("Consolas", 9))
+        lf.rowconfigure(0, weight=1)
+        self.log_text = tk.Text(lf, height=5, width=10, wrap="word", state="disabled", font=T.F["mono"],
+                                bg=T.FIELD, fg=T.LOG_TEXT, bd=0, highlightthickness=0, relief="flat",
+                                padx=px(10), pady=px(8), insertbackground=T.TEXT,
+                                selectbackground=T.mix(T.FIELD, T.RED, 0.4), selectforeground=T.TEXT)
         self.log_text.grid(row=0, column=0, sticky="nsew")
+        self.log_text.tag_configure("err", foreground=RED)
+        self.log_text.tag_configure("ok", foreground=GREEN)
+        self.log_text.tag_configure("head", foreground=T.TEXT)
         sb = ttk.Scrollbar(lf, command=self.log_text.yview)
-        sb.grid(row=0, column=1, sticky="ns")
+        sb.grid(row=0, column=1, sticky="ns", padx=(0, px(3)), pady=px(3))
         self.log_text.configure(yscrollcommand=sb.set)
 
         self.set_enabled(False)
+        root.update_idletasks()
+        w, h = page.winfo_reqwidth(), page.winfo_reqheight()
+        self.scroller.host(page)
+        sw, sh = root.winfo_screenwidth(), root.winfo_screenheight() - px(80)
+        root.minsize(min(w, sw), min(h, sh, px(560)))       # shorter than the content: it scrolls
+        root.geometry("%dx%d" % (min(max(w, px(1320)), sw), min(max(h, px(780)), sh)))
         root.protocol("WM_DELETE_WINDOW", self.on_close)
         root.after(100, self.poll)
 
@@ -683,9 +715,15 @@ class App:
         for w in (self.btn_iso, self.btn_dir):
             w.state(["disabled"] if self.busy else ["!disabled"])
 
+    def set_status(self, text, colour, pill, pill_colour):
+        self.status.configure(text=text, fg=colour)
+        self.page.set_pill(pill, pill_colour)
+
     def log(self, line):
+        tag = ("err" if line.startswith("ERROR") else "ok" if line.startswith(("saved ", "selftest")) else
+               "head" if line.startswith("----") else ())
         self.log_text.configure(state="normal")
-        self.log_text.insert("end", line + "\n")
+        self.log_text.insert("end", line + "\n", tag)
         self.log_text.see("end")
         self.log_text.configure(state="disabled")
 
@@ -710,7 +748,16 @@ class App:
             self.adv.grid()
         else:
             self.adv.grid_remove()
-        self.btn_adv.configure(text=("▾" if self.adv_open else "▸") + " Advanced options")
+        self.btn_adv.configure(text="Advanced options  " + ("▾" if self.adv_open else "▸"))
+        self.fit_height()
+
+    def fit_height(self):
+        """Grow the window (within the screen) when its content no longer fits; past that it scrolls."""
+        self.root.update_idletasks()
+        need = self.page.winfo_reqheight()
+        room = self.root.winfo_screenheight() - theme.px(80)
+        if self.root.winfo_height() < min(need, room):
+            self.root.geometry("%dx%d" % (self.root.winfo_width(), min(need, room)))
 
     # ---------------------------------------------------------------- game
     def choose_iso(self):
@@ -726,7 +773,7 @@ class App:
 
     def start_load(self, path):
         self.game_path.set(path)
-        self.status.configure(text="Checking the game…", fg=GREY)
+        self.set_status("Checking the game…", GREY, "Checking the game…", GOLD)
         self.set_enabled(False)
         self.btn_iso.state(["disabled"])
         self.btn_dir.state(["disabled"])
@@ -747,7 +794,8 @@ class App:
         self.game = game if ok else None
         if game is not None and not ok:
             game.close()
-        self.status.configure(text=("✔ " if ok else "✖ ") + msg, fg=GREEN if ok else RED)
+        self.set_status(("✔ " if ok else "✖ ") + msg, GREEN if ok else RED,
+                        "GYQE01 ready" if ok else "Game not usable", GREEN if ok else RED)
         if not ok:
             self.set_enabled(False)
             return
@@ -782,11 +830,12 @@ class App:
     def add_row(self, slot=None, colour=None):
         if self.game is None:
             return
+        px = theme.px
         used = {r["slot"] for r in self.rows}
         if slot is None:
             slot = next_free_slot(self.choices, used)
             if slot is None:
-                messagebox.showinfo(APP_TITLE, "Every available slot already has a clone.")
+                dialogs.showinfo(APP_TITLE, "Every available slot already has a clone.")
                 return
         if colour is None:
             taken = {r["colour"] for r in self.rows}
@@ -794,24 +843,27 @@ class App:
         self._row_seq += 1
         row = {"id": self._row_seq, "slot": slot, "colour": colour}
         f = ttk.Frame(self.rows_frame)
-        f.grid(row=len(self.rows) + 1, column=0, sticky="w", pady=1)
+        f.grid(row=len(self.rows) + 1, column=0, sticky="ew", pady=px(3))
+        for i, w in enumerate(self._cols):
+            f.columnconfigure(i, minsize=w)
+        f.columnconfigure(1, weight=1)
         row["frame"] = f
         rb = ttk.Radiobutton(f, variable=self.preview_row, value=row["id"], command=self.schedule_preview)
-        rb.grid(row=0, column=0, padx=(18, 18))
+        rb.grid(row=0, column=0, sticky="w")
         labels = [c.label for c in self.choices]
         row["donor"] = tk.StringVar(value=self.choice(slot).label)
-        cb = ttk.Combobox(f, textvariable=row["donor"], values=labels, state="readonly", width=50)
-        cb.grid(row=0, column=1, sticky="w")
+        cb = ttk.Combobox(f, textvariable=row["donor"], values=labels, state="readonly", width=DONOR_WIDTH)
+        cb.grid(row=0, column=1, sticky="ew", padx=(0, px(8)))
         cb.bind("<<ComboboxSelected>>", lambda e, row=row: self.donor_changed(row))
         row["colour_var"] = tk.StringVar(value=colour_label(colour))
-        cc_ = ttk.Combobox(f, textvariable=row["colour_var"], values=COLOUR_CHOICES, state="readonly", width=16)
-        cc_.grid(row=0, column=2, sticky="w", padx=(6, 0))
+        cc_ = ttk.Combobox(f, textvariable=row["colour_var"], values=COLOUR_CHOICES, state="readonly", width=COLOUR_WIDTH)
+        cc_.grid(row=0, column=2, sticky="w")
         cc_.bind("<<ComboboxSelected>>", lambda e, row=row: self.colour_changed(row))
-        sw = tk.Label(f, width=3, bg=colour_swatch(colour), relief="solid", borderwidth=1)
-        sw.grid(row=0, column=3, padx=(6, 0))
+        sw = theme.Swatch(f, colour_swatch(colour))
+        sw.grid(row=0, column=3, padx=(px(10), 0))
         row["swatch"] = sw
-        rm = ttk.Button(f, text="Remove", width=8, command=lambda row=row: self.remove_row(row))
-        rm.grid(row=0, column=4, padx=(6, 0))
+        rm = ttk.Button(f, text="×", style="Icon.TButton", width=2, command=lambda row=row: self.remove_row(row))
+        rm.grid(row=0, column=4, padx=(px(8), 0))
         row["widgets"] = [rb, cb, cc_, rm]
         self.rows.append(row)
         if len(self.rows) == 1:
@@ -844,12 +896,13 @@ class App:
         else:
             row["colour"] = v.lower()
         row["colour_var"].set(colour_label(row["colour"]))
-        row["swatch"].configure(bg=colour_swatch(row["colour"]))
+        row["swatch"].set(colour_swatch(row["colour"]))
         self.preview_row.set(row["id"])
         self.schedule_preview()
 
     def source_changed(self):
         self.update_source_labels()
+        self.preview_chip.set(pretty_name(self.source()))
         if self.game is not None:
             self.rebuild_rows()
             self.set_enabled(not self.busy)
@@ -877,18 +930,17 @@ class App:
         except BaseException as e:  # noqa: B902
             self.preview_caption.configure(text="No preview for %s: %s" % (pretty_name(self.source()), e))
             for lbl in (self.img_before, self.img_after):
-                lbl.configure(image="")
+                lbl.configure(image=self._blank, text="")
                 lbl.image = None
             return
-        zoom = max(1, 256 // max(pv.w, pv.h))
-        imgs = []
+        zoom = max(1, 256 * max(1, int(theme.S)) // max(pv.w, pv.h))
         for lbl, png in ((self.img_before, before), (self.img_after, after)):
             img = tk.PhotoImage(data=png_base64(png))
             if zoom > 1:
                 img = img.zoom(zoom)
-            lbl.configure(image=img, width=img.width(), height=img.height())
+            lbl.configure(image=img, text="")
             lbl.image = img            # keep a reference or Tk shows nothing
-            imgs.append(img)
+        self.preview_chip.set(pretty_name(self.source()))
         self.preview_caption.configure(text="%s's main texture as %s (%s)" % (
             pretty_name(self.source()), self.choice(row["slot"]).name, colour_label(row["colour"])))
 
@@ -917,12 +969,14 @@ class App:
             job = self.make_job()
             validate_job(job)
         except BaseException as e:  # noqa: B902
-            messagebox.showerror(APP_TITLE, friendly_error(e)[0])
+            dialogs.showerror(APP_TITLE, friendly_error(e)[0])
             return
-        if job.output_iso.exists() and not messagebox.askyesno(APP_TITLE, "%s already exists. Replace it?" % job.output_iso.name):
+        if job.output_iso.exists() and not dialogs.askyesno(APP_TITLE, "%s already exists. Replace it?" % job.output_iso.name):
             return
         self.busy = True
         self.set_enabled(False)
+        self.page.set_pill("Creating the game…", GOLD)
+        self.progress.grid()
         self.progress.start(12)
         self.log("---- creating %s" % job.output_iso)
         self.log("this takes a few minutes (copying 1.4 GB twice and packing the new files)")
@@ -948,16 +1002,18 @@ class App:
                 elif kind == "done":
                     self.finish()
                     result, hint = msg[1], msg[2]
+                    self.page.set_pill("Game created", GREEN)
                     extra = "\n\nThe working folder was kept: %s" % result["work"] if result.get("work") else ""
-                    messagebox.showinfo("Done!", "Saved to %s.\n\nOpen it in Dolphin or Project Rio: File → Open…\n\n%s%s"
-                                        % (result["iso"], hint, extra))
+                    dialogs.showinfo("Done!", "Saved to %s.\n\nOpen it in Dolphin or Project Rio: File → Open…\n\n%s%s"
+                                     % (result["iso"], hint, extra))
                 elif kind == "error":
                     self.finish()
                     message, details = msg[1], msg[2]
+                    self.page.set_pill("Not created", RED)
                     self.log("ERROR: " + message)
                     if details:
                         self.log("details:\n" + details)
-                    messagebox.showerror("Couldn't create the patched game", message)
+                    dialogs.showerror("Couldn't create the patched game", message)
         except queue.Empty:
             pass
         self.root.after(100, self.poll)
@@ -965,38 +1021,32 @@ class App:
     def finish(self):
         self.busy = False
         self.progress.stop()
+        self.progress.grid_remove()
         self.set_enabled(self.game is not None)
 
     def on_close(self):
-        if self.busy and not messagebox.askyesno(APP_TITLE, "The game is still being made. Quit anyway?\n\n"
-                                                 "A half-finished working folder named MSSB-Clone-Maker-work-… "
-                                                 "will be left next to the output; you can delete it."):
+        if self.busy and not dialogs.askyesno(APP_TITLE, "The game is still being made. Quit anyway?\n\n"
+                                              "A half-finished working folder named MSSB-Clone-Maker-work-… "
+                                              "will be left next to the output; you can delete it."):
             return
         if self.game is not None:
             self.game.close()
         self.root.destroy()
 
 
-def _dpi_aware():
-    if sys.platform == "win32":
-        try:
-            import ctypes
-            ctypes.windll.shcore.SetProcessDpiAwareness(1)
-        except Exception:
-            pass
-
-
 def run_gui():
     _import_tk()
-    _dpi_aware()
-    root = tk.Tk()
+    root = make_root()
     App(root)
+    theme.dark_title_bar(root)
     root.mainloop()
 
 
 def selftest(argv):
     """Build the window, optionally load a game and render a preview, then close.  Exit code 0 = OK.
-    Used by the Windows build (the .exe) and for screenshots:  clone_gui.py --selftest [--game P] [--hold S]"""
+    Used by the Windows build (the .exe) and for screenshots:
+        clone_gui.py --selftest [--game P] [--hold S] [--expect-fonts]
+    --expect-fonts fails unless Rajdhani / Inter / JetBrains Mono were loaded (bundled or installed)."""
     game = hold = None
     if "--game" in argv:
         game = argv[argv.index("--game") + 1]
@@ -1004,9 +1054,16 @@ def selftest(argv):
         hold = float(argv[argv.index("--hold") + 1])
     try:
         _import_tk()
-        root = tk.Tk()
+        root = make_root()
         app = App(root)
+        dark = theme.dark_title_bar(root)
         root.update()
+        print("selftest: scale %.2f, fonts %s, dark title bar %s" % (
+            theme.S, "fallback for " + ", ".join(theme.FONT_FALLBACK) if theme.FONT_FALLBACK else "bundled",
+            "on" if dark else "off"))
+        if "--expect-fonts" in argv and theme.FONT_FALLBACK:
+            print("selftest: the bundled fonts did not load")
+            return 1
         if game:
             app.game_path.set(game)
             app.game_loaded(game, *load_game(game))
