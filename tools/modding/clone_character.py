@@ -420,7 +420,7 @@ class Recolour:
         sat=<mult> val=<mult>  multiply saturation / brightness (applied to matched colours)
         tint=RRGGBB[:strength]  blend every colour towards RRGGBB (strength 0..1, default 0.5)
         solid=RRGGBB       replace every colour (debug)
-        tex=0,1,2          only touch these texture indices (default: all)
+        tex=0/1/2          only touch these texture indices, slash-separated (default: all)
     A bare preset name (blue, green, ...) is shorthand for hue=<preset>."""
 
     def __init__(self, spec):
