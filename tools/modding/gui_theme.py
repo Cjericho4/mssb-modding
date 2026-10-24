@@ -726,17 +726,18 @@ class Page(tk.Canvas):
             r, g = self.r, px(4)
             n = r + g
             border = RED_LINE if hot else LINE
-            box = sd_box(g, g, g + 4 * r, g + 4 * r, r)         # a big box; we keep one corner of it
-            inner = sd_box(g + 1, g + 1, g + 4 * r - 1, g + 4 * r - 1, r - 1)
-            layers = []
-            if hot:
-                layers.append((lambda x, y: box(x, y) - g, RED, 0.06))
-                layers.append((lambda x, y: box(x, y) - g / 2, RED, 0.08))
-            layers += [(box, border, 1), (inner, PANEL, 1)]
-            tl = paint(n, n, layers)
-            imgs = {"nw": tl}
-            for name, fx, fy in (("ne", True, False), ("sw", False, True), ("se", True, True)):
-                imgs[name] = _flip(tl, n, fx, fy)
+            big = 4 * r                                           # a big box; each image keeps one corner of it
+            imgs = {}
+            for name, x0, y0 in (("nw", g, g), ("ne", n - g - big, g), ("sw", g, n - g - big),
+                                 ("se", n - g - big, n - g - big)):
+                box = sd_box(x0, y0, x0 + big, y0 + big, r)
+                inner = sd_box(x0 + 1, y0 + 1, x0 + big - 1, y0 + big - 1, r - 1)
+                layers = []
+                if hot:
+                    layers.append((lambda x, y, box=box: box(x, y) - g, RED, 0.06))
+                    layers.append((lambda x, y, box=box: box(x, y) - g / 2, RED, 0.08))
+                layers += [(box, border, 1), (inner, PANEL, 1)]
+                imgs[name] = paint(n, n, layers)
             self._corner_cache[key] = imgs
         return self._corner_cache[key]
 
@@ -850,13 +851,6 @@ class Scroller(tk.Frame):
             return
         up = e.num == 4 or getattr(e, "delta", 0) > 0
         self.view.yview_scroll(-3 if up else 3, "units")
-
-
-def _flip(img, n, fx, fy):
-    """Mirror a square PhotoImage (Tk 8.6 copy -subsample -1 mirrors)."""
-    out = tk.PhotoImage(width=n, height=n)
-    out.tk.call(out, "copy", img, "-subsample", -1 if fx else 1, -1 if fy else 1)
-    return out
 
 
 # ----------------------------------------------------------------------------------------------
