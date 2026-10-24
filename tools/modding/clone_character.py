@@ -1070,8 +1070,10 @@ def preflight(disc, dol, log):
     log("preflight: clean retail GYQE01 dump")
 
 
-def clone(args):
-    log = print
+def clone(args, log=print):
+    """Run the patch described by `args` (see main()); `log` gets every progress line.  Returns
+    {"source": C, "slots": [(S, spec), ...], "out": Path, "iso": Path|None, "dry_run": bool}.
+    Errors are raised as SystemExit(<plain message>), as on the command line."""
     dry = args.dry_run
     out = Path(args.out)
     from_iso = Path(args.disc).is_file()
@@ -1274,7 +1276,7 @@ def clone(args):
         log("DRY RUN summary: %d B in %d chunks appended to ZZZZ.dat from 0x%08X; %d in-place rewrite(s); main.dol/stats/game.rel rows for slots %s" % (
             cursor - append_at, len(chunks), append_at, len(inplace), [S for S, _ in report]))
         log("DRY RUN: no files written")
-        return
+        return {"source": C, "slots": [(S, rc.spec) for S, rc in report], "out": out, "iso": None, "dry_run": True}
 
     # --- write ZZZZ.dat: in-place rewrites, then the appendix
     with open(zz_path, "r+b") as f:
@@ -1327,6 +1329,8 @@ def clone(args):
     if ui_source:
         log("Menus, HUD and the announcer show/say %s for these slots (grid cells of main characters included)." % CHAR_NAMES[C])
     log("Boot: Dolphin -> File -> Open -> %s" % (out / "sys" / "main.dol"))
+    return {"source": C, "slots": [(S, rc.spec) for S, rc in report], "out": out,
+            "iso": Path(args.iso) if args.iso else None, "dry_run": False}
 
 
 def main(argv=None):
