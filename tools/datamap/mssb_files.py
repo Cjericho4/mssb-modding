@@ -464,9 +464,10 @@ def apply_replace(work, file_id, data, reuse_gaps=False):
     return report
 
 
-def write_iso(src_root, iso_path, orig_fst):
+def write_iso(src_root, iso_path, orig_fst, base_iso=None):
     """Write an ISO from a disc folder.  Files that grew are moved past the last file (the FST
-    offsets are patched); everything else keeps its retail position."""
+    offsets are patched); everything else keeps its retail position.  With `base_iso` (the input
+    image) the output starts as a copy of it, so the filler data between files stays identical."""
     sysd = Path(src_root) / "sys"
     filesd = Path(src_root) / "files"
     boot = bytearray((sysd / "boot.bin").read_bytes())
@@ -486,7 +487,9 @@ def write_iso(src_root, iso_path, orig_fst):
     dol_off, fst_off, fst_size = struct.unpack_from(">III", boot, 0x420)
     if len(fst) != fst_size:
         raise SystemExit("fst.bin size changed")
-    with open(iso_path, "wb") as out:
+    if base_iso:
+        shutil.copyfile(str(base_iso), str(iso_path))
+    with open(iso_path, "r+b" if base_iso else "wb") as out:
         out.write(boot)
         out.seek(0x440)
         out.write((sysd / "bi2.bin").read_bytes())
@@ -506,7 +509,10 @@ def write_iso(src_root, iso_path, orig_fst):
             with open(src, "rb") as g:
                 shutil.copyfileobj(g, out, 1 << 20)
             end = max(end, e["offset"] + size)
-        out.truncate(max(dm.align(end, 0x8000), 0x57058000))
+        if not base_iso:
+            out.truncate(max(dm.align(end, 0x8000), 0x57058000))
+        elif out.seek(0, 2) < end:
+            out.truncate(dm.align(end, 0x8000))
     (sysd / "fst.bin").write_bytes(bytes(fst))
 
 
@@ -589,7 +595,7 @@ def cmd_replace(args):
             log("  descriptor updated: %s" % name)
         if iso_out:
             log("writing %s ..." % out)
-            write_iso(work_root, out, orig_fst)
+            write_iso(work_root, out, orig_fst, base_iso=src if src.is_file() else None)
             verify(snapshot, out, report, data)
             log("verified %s" % out)
         else:
