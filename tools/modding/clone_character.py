@@ -160,8 +160,8 @@ TLUT_FMT_RGB5A3 = 2
 #   grid portrait file (UI slot 9): select-grid portrait, sequence 0x19, texture 4+c (50x50 CI8).
 # The descriptor tuples also live in menus.rel (grid x9), game.rel (x5 each) and challenge.rel (x1
 # each); they are only rewritten when a file has to be moved (see place_menu_file()).
-ADDR_MENU_COMMON_DESC = 0x800E8BF8   # lbl_800E8AA8+0x150 (also lbl_800EEFD0+0xF0)
-ADDR_MENU_GRID_DESC = 0x800E8CD8     # lbl_800E8AA8+0x230 (also lbl_800EEFD0+0x1D0)
+ADDR_MENU_COMMON_DESC = 0x800E8BF8   # res table 0x800E8B08+0xF0 (also res_dol2 lbl_800EEFD0+0xF0)
+ADDR_MENU_GRID_DESC = 0x800E8CD8     # res table 0x800E8B08+0x1D0 (also res_dol2 lbl_800EEFD0+0x1D0)
 # retail copies of each descriptor tuple: (main.dol, menus.rel, game.rel, challenge.rel)
 MENU_DESC_COPIES = {ADDR_MENU_COMMON_DESC: (2, 0, 5, 1), ADDR_MENU_GRID_DESC: (2, 9, 5, 1)}
 MENU_COMMON_RETAIL = (0x40B, 0x40106568, 0x1A9FE800, 0x68C10)
