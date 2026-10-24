@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Recolour test matrix for clone_character.py (stdlib only).
 
-    py test_matrix.py --disc <extracted retail disc> [--sheet DIR] [--patches] [--work DIR] [--chars 0,1,2]
+    py test_matrix.py --disc <extracted retail disc> [--sheet DIR] [--patches] [--menu-art DIR] [--work DIR] [--chars 0,1,2]
 
 For every cloneable character:
   * its in-match body (ARAM body + overlay) is the model the patch recolours, and its textures equal
@@ -12,7 +12,9 @@ For every cloneable character:
     lost transparency);
   * Mario's default output is byte-identical to the pre-region band (from=0 width=0.035 minsat=0.5).
 --sheet writes contact-sheet PNGs (every body texture before, -> blue, -> green) for a human to look
-at.  --patches also runs full patches (CLI and GUI code paths) and checks each with test_clone.py.
+at.  --patches also runs full patches (CLI and GUI code paths) and checks each with test_clone.py and
+inspect_menu_ui.py.  --menu-art DIR patches Mario -> Toads and Mario -> Luigi and writes a before/after
+sheet of the donors' roster name, mini picture and grid portrait.
 """
 import argparse
 import colorsys
@@ -170,6 +172,8 @@ def main():
     ap.add_argument("--chars", help="comma-separated charIDs (default: every cloneable one)")
     ap.add_argument("--patches", action="store_true", help="also run the sampled full patches (slow)")
     ap.add_argument("--work", default=str(HERE.parents[1] / ".scratch" / "matrix"))
+    ap.add_argument("--menu-art", metavar="DIR", help="patch Mario -> Toads and Mario -> Luigi, validate the menu files and write a before/after "
+                    "sheet of the donors' name, mini picture and grid portrait into DIR (slow)")
     ap.add_argument("--only", help="with --patches: comma-separated subset of mario,%s,gui" % ",".join(p[0] for p in CLI_PATCHES))
     args = ap.parse_args()
     disc = cc.Disc(args.disc)
@@ -240,6 +244,9 @@ def main():
 
     if args.patches:
         run_patches(args)
+    if args.menu_art:
+        print("5. menu art: patched menu files validate; before/after sheet")
+        menu_art_run(args)
 
     print()
     if FAILS:
@@ -294,6 +301,12 @@ def write_sheets(folder, rows, per_sheet=2):
 
 
 def test_clone(disc, patched, source, slots, ui):
+    import inspect_menu_ui as im
+    try:
+        im.validate(patched, log=lambda l: None)
+        check(True, "%s: menu files validate (all 162 name/picture/portrait mappings)" % Path(patched).name)
+    except (ValueError, SystemExit) as e:
+        check(False, "%s: menu files: %s" % (Path(patched).name, e))
     cmd = [sys.executable, str(HERE / "test_clone.py"), "--disc", str(disc), "--patched", str(patched),
            "--source", str(source), "--ui", ui]
     for sl in slots:
@@ -349,6 +362,81 @@ def write_portraits(folder, disc, dol, chars):
     p = folder / "portraits.png"
     p.write_bytes(cv.png())
     print("   wrote %s" % p)
+
+
+def decode_ci(tf, t, bg=(24, 24, 30)):
+    """RGB bytes of a CI4 (8x8 tiles) or CI8 (8x4 tiles) texture with an RGB565 or RGB5A3 palette,
+    alpha-blended over bg."""
+    pal = []
+    for i in range(t["colours"]):
+        v = struct.unpack_from(">H", tf.data, t["tlut"] + i * 2)[0]
+        if t["tlut_fmt"] == 0:
+            rgb, a = (((v >> 11) & 31) * 255 // 31, ((v >> 5) & 63) * 255 // 63, (v & 31) * 255 // 31), 255
+        elif v & 0x8000:
+            rgb, a = (((v >> 10) & 31) * 255 // 31, ((v >> 5) & 31) * 255 // 31, (v & 31) * 255 // 31), 255
+        else:
+            rgb, a = (((v >> 8) & 15) * 17, ((v >> 4) & 15) * 17, (v & 15) * 17), ((v >> 12) & 7) * 255 // 7
+        pal.append(bytes((c * a + b * (255 - a)) // 255 for c, b in zip(rgb, bg)))
+    px = tf.pixels(t)
+    w, h = t["w"], t["h"]
+    tw, th = (8, 8) if t["fmt"] == cc.TEX_FMT_CI4 else (8, 4)
+    tiles_x = cc.align(w, 8) // 8
+    out = []
+    for y in range(h):
+        for x in range(w):
+            k = ((y // th) * tiles_x + x // tw) * tw * th + (y % th) * tw + (x % tw)
+            v = px[k // 2] >> (4 * (1 - k % 2)) & 15 if t["fmt"] == cc.TEX_FMT_CI4 else px[k]
+            out.append(pal[v])
+    return b"".join(out)
+
+
+def menu_art_sheet(path, disc, rows):
+    """Before/after sheet of donors' preview name, mini picture and grid portrait.
+    rows: [(title, patched folder, [donor charIDs])]."""
+    import inspect_menu_ui as im
+    before = im.validate(disc, log=lambda l: None)
+    lines = sum(1 + len(d) for _, _, d in rows)
+    cv = Canvas(8 + 2 * (2 * (111 + 52 + 50 + 24) + 40) + 120, 12 + lines * 132)
+    y = 8
+    for title, folder, donors in rows:
+        after = im.validate(folder, log=lambda l: None)
+        cv.text(8, y, title, (255, 220, 120), 2)
+        y += 20
+        for S in donors:
+            cv.text(8, y + 4, "%d %s" % (S, cc.CHAR_NAMES[S]), scale=1)
+            x = 128
+            for label, (ct, gt, amap) in (("before", before), ("after", after)):
+                cv.text(x, y + 4, label, (150, 150, 160), 1)
+                xx = x
+                for kind, tf in (("name", ct), ("mini", ct), ("grid", gt)):
+                    t = tf.textures[amap[kind][S]]
+                    cv.blit(xx, y + 14, t["w"], t["h"], decode_ci(tf, t), 2)
+                    xx += 2 * t["w"] + 12
+                x += 2 * (111 + 52 + 50) + 76
+            y += 132
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(cv.png())
+    print("   wrote %s" % path)
+
+
+def menu_art_run(args):
+    """Patch the default four-Toad config and Mario -> Luigi:green, validate both menu files and
+    write the before/after sheet into args.menu_art."""
+    import shutil
+    import inspect_menu_ui as im
+    work = Path(args.work) / "menu_art"
+    rows = []
+    for title, slots, donors in (("Mario -> four Toads (default)", [], [29, 30, 31, 32]), ("Mario -> Luigi:green", ["Luigi:green"], [1])):
+        out = work / ("toads" if not slots else "luigi")
+        cc.main(["--disc", args.disc, "--out", str(out), "--force"] + sum([["--slot", s] for s in slots], []))
+        try:
+            im.validate(out, log=lambda l: None)
+            check(True, "%s: patched menu files validate (all 162 mappings)" % title)
+        except (ValueError, SystemExit) as e:
+            check(False, "%s: patched menu files: %s" % (title, e))
+        rows.append((title, out, donors))
+    menu_art_sheet(Path(args.menu_art) / "menu_art.png", args.disc, rows)
+    shutil.rmtree(str(work))
 
 
 def run_patches(args):
