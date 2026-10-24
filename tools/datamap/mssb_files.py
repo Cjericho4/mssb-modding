@@ -13,6 +13,8 @@ address every file by a stable id such as `res.15` (the menu common file) or `su
     py mssb_files.py replace  <disc> <id> <file> --out <folder|game.iso> [--reuse-gaps]
     py mssb_files.py coverage <disc>                 [--probe]
     py mssb_files.py tables
+    py mssb_files.py text-export <disc> <id> <out.txt>    (text banks: text_menu.0, menu_1ff84.1, ...)
+    py mssb_files.py text-import <in.txt> <out.bin>       (then `replace` the bank with out.bin)
 
 <disc> is an extracted disc folder (Dolphin: right-click -> Properties -> Filesystem -> Extract
 Entire Disc, giving sys/ and files/) or a .iso.  The input is never written to.
@@ -273,7 +275,7 @@ def slot_end(cat, f, reuse_gaps):
 def find_gap(cat, need):
     """First unreferenced ZZZZ gap (sector aligned) that holds `need` bytes, or None."""
     for a, b in cat.coverage("ZZZZ")[2]:
-        a = dm.align(a, dm.SECTOR)
+        a = max(dm.align(a, dm.SECTOR), dm.SECTOR)      # offset 0 is never used by a descriptor
         if b - a >= need:
             return a
     return None
@@ -291,6 +293,7 @@ class Work:
         self.dirty_rels = set()
         self.dol_dirty = False
         self.changes = []          # (container, start, end) byte ranges written
+        self.rows = set()          # (image, file_off) of every descriptor row rewritten
 
     def zz_size(self):
         self.zz.seek(0, 2)
@@ -314,6 +317,7 @@ class Work:
         if tuple(img.desc_at(file_off)) == tuple(new):
             return
         img.set_desc(file_off, new)
+        self.rows.add((image_name, file_off))
         if image_name == "dol":
             self.dol_dirty = True
         else:
@@ -456,6 +460,7 @@ def apply_replace(work, file_id, data, reuse_gaps=False):
         updated.append(names[0] if names else img.where(fo))
     report["new_offset"] = new_off
     report["descriptors"] = updated
+    report["rows"] = sorted(work.rows)
     return report
 
 
@@ -524,39 +529,26 @@ def verify(before, after_root, report, data):
             continue
         if before.disc.read(f.container, f.offset, f.packed) != d2.read(g.container, g.offset, g.packed):
             bad.append("%s: bytes changed" % f.id)
-    # module images may only differ inside 16-byte descriptor rows
+    # module images may only differ inside the descriptor rows the replace rewrote
+    rows = set(tuple(r) for r in report.get("rows", []))
     for img in before.disc.images():
         img2 = d2.image(img.name)
-        if img.name == "dol":
-            allowed = [(d2.dol.ram_off(dm.BLOB_LIS), 4), (d2.dol.ram_off(dm.BLOB_ADDI), 4)]
-        else:
-            allowed = []
         if report["container"] == "aaaa" and img.name == {"rel.0": "menus", "rel.1": "game",
                                                             "rel.2": "challenge"}.get(report["id"]):
             continue
-        if len(img.data) != len(img2.data):
+        allowed = [(fo, 16) for (n, fo) in rows if n == img.name]
+        if img.name == "dol":
+            allowed += [(d2.dol.ram_off(dm.BLOB_LIS), 4), (d2.dol.ram_off(dm.BLOB_ADDI), 4)]
+        a, b = img.data, img2.data
+        if len(a) != len(b):
             bad.append("%s changed size" % img.name)
             continue
-        i = 0
-        a, b = img.data, img2.data
-        while True:
-            i = next((k for k in range(i, len(a), 4) if a[k:k + 4] != b[k:k + 4]), None) if a != b else None
-            if i is None:
+        if a == b:
+            continue
+        for k in range(0, len(a), 4):
+            if a[k:k + 4] != b[k:k + 4] and not any(lo <= k < lo + n for lo, n in allowed):
+                bad.append("%s: unexpected change at %s" % (img.name, img.where(k)))
                 break
-            row = i - (i % 4)
-            ok = any(lo <= i < lo + n for lo, n in allowed)
-            if not ok:
-                # the word must sit in a row that is a descriptor before and after
-                for start in range(row - 12, row + 1, 4):
-                    if dm.plausible(struct.unpack_from(">4I", a, start), 1 << 31) or \
-                            struct.unpack_from(">4I", a, start)[0] in (0, 0x40B, 0x50E):
-                        if dm.plausible(struct.unpack_from(">4I", b, start), 1 << 31, absolute=False):
-                            ok = True
-                            break
-            if not ok:
-                bad.append("%s: unexpected change at %s" % (img.name, img.where(i)))
-                break
-            i += 4
     for name in rep_names:
         g = cat2.by_id.get(name)
         if g is None or g is not f2 and g.offset != f2.offset:
@@ -589,6 +581,7 @@ def cmd_replace(args):
         snapshot.cat = ct.Catalog(snapshot.disc)
         report = apply_replace(before, args.id, data, reuse_gaps=args.reuse_gaps)
         before.finish()
+        report["rows"] = sorted(before.rows)
         verify(snapshot, work_root, report, data)
         log("replaced %s: %s, 0x%X bytes (0x%X packed) at 0x%X" % (
             report["id"], report["placement"], report["size"], report["packed"], report["new_offset"] or 0))
@@ -605,7 +598,33 @@ def cmd_replace(args):
     finally:
         if iso_out:
             shutil.rmtree(work_root.parent, ignore_errors=True)
+    report.pop("rows", None)
     print(json.dumps(report, indent=1))
+
+
+# ----------------------------------------------------------------------------------------------
+# text banks
+# ----------------------------------------------------------------------------------------------
+def cmd_text_export(args):
+    d, cat = open_catalog(args.disc)
+    f = cat.find(args.id)
+    if cat.sniff(f)[0] != "text":
+        raise SystemExit("%s is not a text bank (text banks: %s)" % (
+            f.id, ", ".join(g.id for g in cat.files.values() if cat.sniff(g)[0] == "text")))
+    data = cat.data(f)
+    text = fm.text_export(data)
+    if fm.text_import(text) != data:
+        raise SystemExit("internal error: %s does not round-trip through the text format" % f.id)
+    with open(args.out, "w", encoding="utf-8", newline="\n") as fh:
+        fh.write(text)
+    log("wrote %d strings to %s (edit, then: text-import %s new.bin; replace <disc> %s new.bin --out ...)" % (
+        dm.u16(data, 0), args.out, args.out, f.id))
+
+
+def cmd_text_import(args):
+    data = fm.text_import(Path(args.txt).read_text(encoding="utf-8"))
+    Path(args.out).write_bytes(data)
+    log("wrote %s (%d strings, 0x%X bytes)" % (args.out, dm.u16(data, 0), len(data)))
 
 
 # ----------------------------------------------------------------------------------------------
@@ -640,12 +659,20 @@ def main(argv=None):
     s.add_argument("disc")
     s.add_argument("--probe", action="store_true", help="look for known magics inside the gaps")
     sub.add_parser("tables", help="every descriptor table this tool knows")
+    s = sub.add_parser("text-export", help="text bank -> editable UTF-8 text")
+    s.add_argument("disc")
+    s.add_argument("id")
+    s.add_argument("out")
+    s = sub.add_parser("text-import", help="edited text -> text bank binary (feed it to replace)")
+    s.add_argument("txt")
+    s.add_argument("out")
     args = p.parse_args(argv)
     if not args.cmd:
         p.print_help()
         return 1
     {"list": cmd_list, "info": cmd_info, "extract": cmd_extract, "replace": cmd_replace,
-     "coverage": cmd_coverage, "tables": cmd_tables}[args.cmd](args)
+     "coverage": cmd_coverage, "tables": cmd_tables, "text-export": cmd_text_export,
+     "text-import": cmd_text_import}[args.cmd](args)
     return 0
 
 

@@ -193,31 +193,96 @@ def _texarc_head(b, size, base=0):
 # ----------------------------------------------------------------------------------------------
 # Details for `info` (whole file)
 # ----------------------------------------------------------------------------------------------
-TEXT_CHARS = {}
+# Glyph codes of the text banks, decoded from the retail strings (lossless: anything else is {XXXX}).
+TEXT_GLYPHS = {0x00: "!", 0x01: '"', 0x06: "'", 0x07: "(", 0x08: ")", 0x0B: ",", 0x0C: "-", 0x0D: ".", 0x1E: "?"}
+TEXT_GLYPHS.update({0x0F + i: chr(ord("0") + i) for i in range(10)})
+TEXT_GLYPHS.update({0x20 + i: chr(ord("A") + i) for i in range(26)})
+TEXT_GLYPHS.update({0x3E + i: chr(ord("a") + i) for i in range(26)})
+TEXT_CODES = {v: k for k, v in TEXT_GLYPHS.items()}
+TEXT_END, TEXT_NEWLINE, TEXT_SPACE = 0x4000, 0x4001, 0x4002
 
 
 def _text_char(c):
-    if 0x20 <= c <= 0x39:
-        return chr(ord("A") + c - 0x20)
-    if 0x3E <= c <= 0x57:
-        return chr(ord("a") + c - 0x3E)
-    if 0x14 <= c <= 0x1D:
-        return chr(ord("0") + c - 0x14)
-    return {0x00: " ", 0x06: "'", 0x0B: ",", 0x0C: "-", 0x0D: ".", 0x1E: "?", 0x1F: "!"}.get(c, "{%02X}" % c)
+    return TEXT_GLYPHS.get(c, "{%04X}" % c)
 
 
 def decode_text(b, start, end):
-    """Best-effort decode of one string: 16-bit codes, 0x40xx = control (shown as <xx>)."""
+    """One string as editable text: 0x4001 -> \\n, 0x4002 -> space, other 0x40xx -> <xx>
+    (colour/voice/box codes), unknown glyphs -> {XXXX}.  Stops at the 0x4000 terminator."""
     out = []
     for o in range(start, end - 1, 2):
         c = u16(b, o)
-        if c == 0x4000:
+        if c == TEXT_END:
             break
-        if c & 0xFF00 == 0x4000:
-            out.append(" " if c == 0x4002 else ("\\n" if c == 0x4001 else "<%02X>" % (c & 0xFF)))
+        if c == TEXT_NEWLINE:
+            out.append("\\n")
+        elif c == TEXT_SPACE:
+            out.append(" ")
+        elif c & 0xFF00 == 0x4000:
+            out.append("<%02X>" % (c & 0xFF))
         else:
             out.append(_text_char(c))
     return "".join(out)
+
+
+def encode_text(s):
+    codes = []
+    i = 0
+    while i < len(s):
+        ch = s[i]
+        if s.startswith("\\n", i):
+            codes.append(TEXT_NEWLINE)
+            i += 2
+        elif ch == " ":
+            codes.append(TEXT_SPACE)
+            i += 1
+        elif ch == "<" and s[i + 3:i + 4] == ">":
+            codes.append(0x4000 | int(s[i + 1:i + 3], 16))
+            i += 4
+        elif ch == "{" and s[i + 5:i + 6] == "}":
+            codes.append(int(s[i + 1:i + 5], 16))
+            i += 6
+        elif ch in TEXT_CODES:
+            codes.append(TEXT_CODES[ch])
+            i += 1
+        else:
+            raise ValueError("character %r at column %d has no glyph (use {XXXX} for raw codes)" % (ch, i + 1))
+    codes.append(TEXT_END)
+    return struct.pack(">%dH" % len(codes), *codes)
+
+
+def text_export(b):
+    """Text bank -> UTF-8 text: a header line, then one '<index>\t<string>' line per string."""
+    n = u16(b, 0)
+    offs = struct.unpack_from(">%dI" % n, b, 4)
+    lines = ["#mssb-text strings=%d magic=0x%04X" % (n, u16(b, 2))]
+    for i in range(n):
+        end = offs[i + 1] if i + 1 < n else len(b)
+        lines.append("%d\t%s" % (i, decode_text(b, offs[i], end)))
+    return "\n".join(lines) + "\n"
+
+
+def text_import(text):
+    """Inverse of text_export (strings may change length; the offset table is rebuilt)."""
+    lines = [l for l in text.splitlines() if l and not l.startswith("#")]
+    head = [l for l in text.splitlines() if l.startswith("#mssb-text")]
+    magic = TEXT_MAGIC
+    if head and "magic=" in head[0]:
+        magic = int(head[0].split("magic=")[1].split()[0], 16)
+    strings = {}
+    for l in lines:
+        idx, _, body = l.partition("\t")
+        strings[int(idx)] = encode_text(body)
+    n = len(strings)
+    if sorted(strings) != list(range(n)):
+        raise ValueError("string indices must be 0..%d with no gaps" % (n - 1))
+    out = bytearray(struct.pack(">HH", n, magic))
+    pos = 4 + 4 * n
+    blob = bytearray()
+    for i in range(n):
+        out += struct.pack(">I", pos + len(blob))
+        blob += strings[i]
+    return bytes(out + blob)
 
 
 def describe(fmt, b):
@@ -281,7 +346,8 @@ def describe(fmt, b):
     elif fmt == "text":
         n = u16(b, 0)
         offs = struct.unpack_from(">%dI" % n, b, 4)
-        lines.append("%d strings (16-bit glyph codes; 0x40xx = control codes: 4001 newline, 4002 space)" % n)
+        lines.append("%d strings (16-bit glyph codes; 0x40xx = control codes: 4001 newline, 4002 space); "
+                     "edit with text-export / text-import" % n)
         for i in range(n):
             end = offs[i + 1] if i + 1 < n else size
             lines.append("  %4d: %s" % (i, decode_text(b, offs[i], end)[:120]))
