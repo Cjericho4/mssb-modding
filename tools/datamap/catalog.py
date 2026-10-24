@@ -48,7 +48,7 @@ TABLES = [
     _t("res", "dol", 0x800E8B08, 62, "ZZZZ", "common UI resources (resource id 0..61)",
        "resource id: 0 HUD, 1 HUD portraits (charID->30+c), 5 lineup portraits, 6..13 fullscreen "
        "screens, 15 menu common (names/mini images), 16..28 captain/team emblems, 29 select-grid "
-       "portraits, 30 title/main menu, 45..61 640x256 stills",
+       "portraits, 30 title/main menu, 38..44 stadium art (38 + stadium), 45..61 640x256 stills",
        "fn_800097A0 / fn_80035838(desc, slot); the same 62 rows are copied into game.rel/challenge.rel"),
     _t("res_dol2", "dol", 0x800EEFD0, 62, "ZZZZ", "common UI resources (copy 2)",
        "resource id (same as res)", "fn_80020278 / fn_80020388: res_dol2[lbl_803CB7CC[stadium] + 0x26]"),
