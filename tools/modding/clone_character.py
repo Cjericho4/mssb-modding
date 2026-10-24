@@ -730,17 +730,58 @@ def parse_slot_spec(spec):
     return parse_char(slot), Recolour(rc if rc else "hue=blue")
 
 
+RETAIL_DOL_SIZE = 1139968
+RETAIL_ZZZZ_SIZE = 450041856
+RETAIL_BLOB_DESC = (0, 0x004D6600, 0x1A15E800, 0x004D6600)
+
+
+def preflight(disc, dol, log):
+    """Make sure --disc is an unmodified GYQE01 dump; explains the most likely mistakes."""
+    problems = []
+    dol_size = (disc.sys / "main.dol").stat().st_size
+    if dol_size != RETAIL_DOL_SIZE:
+        problems.append("sys/main.dol is %d bytes, retail GYQE01 is %d (wrong game/region or modified DOL)" % (dol_size, RETAIL_DOL_SIZE))
+    zz = disc.zzzz_size()
+    if zz != RETAIL_ZZZZ_SIZE:
+        problems.append("files/ZZZZ.dat is %d bytes, retail is %d (%s)" % (zz, RETAIL_ZZZZ_SIZE,
+                        "already patched: point --disc at the clean extraction" if zz > RETAIL_ZZZZ_SIZE else "truncated extraction"))
+    try:
+        if dol.desc(ADDR_MASTER, MASTER_BLOB_ENTRY) != RETAIL_BLOB_DESC:
+            problems.append("main.dol blob descriptor is not retail (already patched DOL?)")
+        if dol.blob_alloc_size() != RETAIL_BLOB_DESC[3]:
+            problems.append("main.dol ARAM allocation already patched")
+        if dol.desc(ADDR_SUBFILES, 0)[2] != 0x09439000 or dol.pair(0) != (0, -1):
+            problems.append("main.dol character tables do not look like retail GYQE01")
+    except ValueError as e:
+        problems.append(str(e))
+    boot = disc.sys / "boot.bin"
+    if boot.exists() and boot.read_bytes()[:6] != b"GYQE01":
+        problems.append("sys/boot.bin game id is %r, expected GYQE01 (USA)" % boot.read_bytes()[:6])
+    if problems:
+        for p in problems:
+            log("preflight: " + p)
+        raise SystemExit("--disc must be a clean, complete Dolphin extraction of the USA disc (GYQE01)")
+    log("preflight: clean retail GYQE01 dump")
+
+
 def clone(args):
     log = print
     src_disc = Disc(args.disc)
+    preflight(src_disc, Dol((src_disc.sys / "main.dol").read_bytes()), log)
+    dry = args.dry_run
+    if dry:
+        log("DRY RUN: nothing will be written")
     out = Path(args.out)
-    if out.exists():
-        if not args.force:
-            raise SystemExit("%s exists; use --force to overwrite it" % out)
-        shutil.rmtree(out)
-    log("copying %s -> %s (this includes the 450 MB ZZZZ.dat)" % (src_disc.root, out))
-    shutil.copytree(src_disc.root, out)
-    disc = Disc(out)
+    if dry:
+        disc = src_disc
+    else:
+        if out.exists():
+            if not args.force:
+                raise SystemExit("%s exists; use --force to overwrite it (or delete it to start over)" % out)
+            shutil.rmtree(out)
+        log("copying %s -> %s (this includes the 450 MB ZZZZ.dat)" % (src_disc.root, out))
+        shutil.copytree(src_disc.root, out)
+        disc = Disc(out)
 
     dol = Dol((disc.sys / "main.dol").read_bytes())
     C = parse_char(args.source)
@@ -860,6 +901,12 @@ def clone(args):
         dol.set_blob_alloc_size(len(blob))
         log("ARAM blob moved to ZZZZ.dat+0x%08X, size 0x%X -> 0x%X (fn_800227E4 immediates patched)" % (blob_off, blob_desc[3], len(blob)))
 
+    if dry:
+        log("DRY RUN summary: %d B in %d chunks appended to ZZZZ.dat from 0x%08X; main.dol/stats/game.rel rows for slots %s" % (
+            cursor - append_at, len(chunks), append_at, [S for S, _ in report]))
+        log("DRY RUN: no files written")
+        return
+
     # --- write ZZZZ.dat appendix
     with open(zz_path, "r+b") as f:
         for off, b in chunks:
@@ -939,12 +986,17 @@ recolour spec (after the slot and a colon): """ + Recolour.__doc__)
     ap.add_argument("--no-gameplay", action="store_true", help="keep the donor's game.rel/DOL gameplay tables")
     ap.add_argument("--list-slots", action="store_true", help="print the slot table and exit")
     ap.add_argument("--force", action="store_true", help="overwrite --out if it exists")
+    ap.add_argument("--dry-run", action="store_true", help="print every planned edit (offsets, sizes, entries) without copying or writing anything")
     args = ap.parse_args(argv)
     if args.list_slots:
         list_slots(Disc(args.disc))
         return 0
+    if not args.out and not args.dry_run:
+        ap.error("--out is required (a new folder; the input is never modified)")
+    if args.out and Path(args.out).resolve() == Path(args.disc).resolve():
+        ap.error("--out must be a different folder from --disc")
     if not args.out:
-        ap.error("--out is required")
+        args.out = str(Path(args.disc).parent / "dry-run")
     clone(args)
     return 0
 

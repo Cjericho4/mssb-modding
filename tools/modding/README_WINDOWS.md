@@ -63,6 +63,17 @@ Options:
   it the clones look like plain Mario in matches.
 * `--no-stats` / `--no-gameplay`: keep the donor's stats / timing tables instead of Mario's.
 * `--force`: overwrite `--out`.
+* `--dry-run`: print every planned edit (ZZZZ.dat offsets and sizes, master entries, pairs, rows) and
+  write nothing.  Also runs the preflight check that `--disc` is a clean, complete USA dump.
+
+Verify an output folder you already made (same `--source`/`--slot` as when you made it):
+
+```powershell
+py .\test_clone.py --disc "C:\mssb\GYQE01" --patched "C:\mssb\GYQE01-marios" --source mario --slot Luigi:green
+```
+
+Start over / undo: delete the output folder (or re-run with `--force`).  The extracted input is never
+modified; the patcher refuses to run if `--disc` is already patched or `--out` equals `--disc`.
 
 Optional self-check (runs the patcher into a scratch folder and verifies everything it wrote; takes
 about a minute):
@@ -137,5 +148,23 @@ Reading a crash in Dolphin:
   culprit.
 * Wrong colours but no crash: play with the spec, e.g. `hue=0.62,width=0.08` to widen the band of reds
   that gets recoloured, `all=1` to recolour everything.
+
+### Symptom -> what to try next
+
+| Symptom | Meaning | Next step |
+|---|---|---|
+| `preflight: ...` error from the patcher | `--disc` is not a clean USA (GYQE01) extraction, or already patched | re-extract the disc in Dolphin into an empty folder |
+| Clean folder (step 3) does not boot | Dolphin folder-boot, not the patch | use `--iso` and open the .iso |
+| Patched folder hangs on the Nintendo/Namco logos or the first loading screen | blob move / ARAM size patch (fn_800227E4) | re-run with `--no-aram-overlay`; if that boots, report "blob" |
+| Boots, menus fine, hang when a match starts loading | LZSS stream error on an appended file, or blob | `--no-aram-overlay`; then `--no-gameplay`; report which one helped |
+| Panic `PC = 0x800233A0` | body file read from the wrong disc offset/size | make sure you booted the **patched** `sys\main.dol`; try `--iso` |
+| Clone shows as plain Mario in matches, coloured in menus/replays | overlay not applied (pair / master entry) | report; the data-only part still proved the clone |
+| Clone has black/garbled textures, others fine | overlay archive | `--no-aram-overlay` to confirm, report |
+| Crash when the clone swings/catches | sub-item (bat/glove) alias | `--no-gameplay` first (timing tables), then report |
+| Roster screen refuses the Toad or shows odd stats | stats row | `--no-stats` |
+| Colours wrong but stable | recolour spec | widen the band `hue=0.62,width=0.08`, or `all=1` |
+
+Always run `test_clone.py --patched <folder> ...` on a failing folder first: if it does not say
+`ALL CHECKS PASSED`, the folder was altered after patching (e.g. a half-finished copy).
 
 Undo: delete the output folder (and the ISO).  The extracted input was never touched.

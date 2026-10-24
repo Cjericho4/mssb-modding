@@ -64,10 +64,11 @@ def covered(ranges, allowed):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--disc", required=True)
-    ap.add_argument("--work", required=True)
+    ap.add_argument("--work", default=".clone_test_work", help="scratch folder for the patched copy (unused with --patched)")
     ap.add_argument("--source", default="mario")
     ap.add_argument("--slot", action="append", default=[])
     ap.add_argument("--iso", action="store_true", help="also write and verify an ISO (1.5 GB)")
+    ap.add_argument("--patched", help="verify this already-patched folder instead of running the patcher (give the same --source/--slot you used)")
     args = ap.parse_args()
 
     disc = cc.Disc(args.disc)
@@ -97,15 +98,19 @@ def main():
     check(len(ov) == body.archive_size, "overlay 34 length (%d) == texture archive size of body 13 (%d)" % (len(ov), body.archive_size))
     check(cc.load_master(disc, dol, 0) == cc.load_subfile(disc, dol, 0), "master[0] == Mario track 0")
 
-    print("3. run the patcher")
     work = Path(args.work)
-    out = work / "patched"
-    argv = ["--disc", args.disc, "--out", str(out), "--source", args.source, "--force"]
-    for s in args.slot:
-        argv += ["--slot", s]
-    if args.iso:
-        argv += ["--iso", str(work / "patched.iso")]
-    cc.main(argv)
+    if args.patched:
+        print("3. verifying existing folder %s" % args.patched)
+        out = Path(args.patched)
+    else:
+        print("3. run the patcher")
+        out = work / "patched"
+        argv = ["--disc", args.disc, "--out", str(out), "--source", args.source, "--force"]
+        for s in args.slot:
+            argv += ["--slot", s]
+        if args.iso:
+            argv += ["--iso", str(work / "patched.iso")]
+        cc.main(argv)
 
     print("4. verify the patched disc")
     pdisc = cc.Disc(out)
@@ -253,7 +258,7 @@ def main():
     for name in ("sys/boot.bin", "sys/bi2.bin", "sys/apploader.img", "files/menus.rel", "files/challenge.rel", "files/aaaa.dat", "files/opening.bnr"):
         check((disc.root / name).read_bytes() == (pdisc.root / name).read_bytes(), "%s identical" % name)
 
-    if args.iso:
+    if args.iso and not args.patched:
         print(" iso")
         with open(work / "patched.iso", "rb") as iso:
             boot = iso.read(0x440)
