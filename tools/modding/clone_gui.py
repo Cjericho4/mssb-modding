@@ -20,6 +20,7 @@ import struct
 import sys
 import tempfile
 import threading
+import time
 import traceback
 import zlib
 from argparse import Namespace
@@ -38,7 +39,7 @@ NEEDED_FREE_BYTES = 3_300_000_000     # working copy (~1.5 GB) + the new .iso (~
 DISC_IMAGE_OTHER = (".rvz", ".nkit", ".gcz", ".wbfs", ".ciso", ".wia", ".tgc")
 # Sources whose models clone_character can't recolour (Petey's body has non-CMPR textures);
 # test_gui_logic.py checks this list against the disc.
-UNSUPPORTED_SOURCES = {38}
+UNSUPPORTED_SOURCES = set(cc.UNSUPPORTED_SOURCES)
 SOURCES = [c for c in range(cc.NUM_CHARS) if c not in UNSUPPORTED_SOURCES]
 BAND_REDS = "reds"
 BAND_ALL = "all"
@@ -158,6 +159,7 @@ class Game:
         self.disc = open_disc(path)
         self.dol = cc.Dol((self.disc.sys / "main.dol").read_bytes())
         self._previews = {}
+        self._lock = threading.Lock()
 
     def check(self):
         """(ok, message) from clone_character.preflight."""
@@ -169,9 +171,14 @@ class Game:
         return True, GAME_OK
 
     def preview(self, source):
-        if source not in self._previews:
-            self._previews[source] = SourcePreview(self, source)
-        return self._previews[source]
+        """SourcePreview for `source` (slow the first time: call it off the UI thread)."""
+        with self._lock:
+            if source not in self._previews:
+                self._previews[source] = SourcePreview(self, source)
+            return self._previews[source]
+
+    def cached_preview(self, source):
+        return self._previews.get(source)
 
     def close(self):
         if isinstance(self.disc, IsoDisc):
@@ -294,49 +301,57 @@ def colour_label(colour):
     return "Custom %s" % colour.upper() if is_custom(colour) else colour.capitalize()
 
 
-def colour_spec(colour, keeplum=0.5, band=BAND_REDS):
-    """Recolour spec string for clone_character (the same text the --slot option takes)."""
+def colour_spec(colour, keeplum=0.5, band=BAND_REDS, regions=None):
+    """Recolour spec string for clone_character (the same text the --slot option takes).
+    regions: indices of the source's colour regions to change, or None for its default ones (the
+    spec then names no band and clone_character picks the defaults: Mario's reds, Luigi's green...)."""
     hue = colour if not is_custom(colour) else "%.3f" % colour_hue(colour)
     spec = "hue=%s,keeplum=%s" % (hue, ("%.2f" % keeplum).rstrip("0").rstrip(".") or "0")
     if band == BAND_ALL:
         spec += ",all=1"
+    elif regions is not None:
+        spec += ",region=" + "/".join(str(i) for i in sorted(regions))
     cc.Recolour(spec)  # validate
     return spec
 
 
+def region_selection(regions, ticked):
+    """Ticked region indices -> the regions= argument of colour_spec (None when they are exactly the
+    defaults, so a default clone's spec stays plain "hue=...,keeplum=...")."""
+    ticked = sorted(set(ticked))
+    if ticked == [i for i, r in enumerate(regions) if r.default]:
+        return None
+    return ticked
+
+
+def region_label(r):
+    return r.name[:1].upper() + r.name[1:]
+
+
 # ----------------------------------------------------------------------------------------------
-# Preview: decode the source's main body texture (CMPR) before/after the real recolour code
+# Preview: every body texture of the source, before and after the real recolour code
 # ----------------------------------------------------------------------------------------------
+decode_cmpr = cc.decode_cmpr
+PREVIEW_WIDTH = 256          # atlas width in texels (textures packed in shelves, tallest first)
+ATLAS_BG = b"\x10\x10\x1a"   # the gaps between textures (the theme's SURFACE)
+
+
 def largest_texture(gpc):
     return max(gpc.textures, key=lambda t: (t["w"] * t["h"], -t["index"]))
 
 
-def decode_cmpr(data, w, h):
-    """GameCube CMPR (8x8 tiles of four DXT1 blocks) -> RGB bytes; transparent pixels on a grey checker."""
-    out = bytearray(w * h * 3)
-    o = 0
-    for ty in range(0, h, 8):
-        for tx in range(0, w, 8):
-            for by, bx in ((0, 0), (0, 4), (4, 0), (4, 4)):
-                c0, c1, idx = struct.unpack_from(">HHI", data, o)
-                o += 8
-                a = cc.rgb565_to_rgb(c0)
-                b = cc.rgb565_to_rgb(c1)
-                if c0 > c1:
-                    pal = (a, b, tuple((2 * x + y) // 3 for x, y in zip(a, b)), tuple((x + 2 * y) // 3 for x, y in zip(a, b)))
-                else:
-                    pal = (a, b, tuple((x + y) // 2 for x, y in zip(a, b)), None)
-                for i in range(16):
-                    y = ty + by + (i >> 2)
-                    x = tx + bx + (i & 3)
-                    if x >= w or y >= h:
-                        continue
-                    col = pal[(idx >> (30 - 2 * i)) & 3]
-                    if col is None:
-                        col = (0x99, 0x99, 0x99) if ((x >> 3) ^ (y >> 3)) & 1 else (0xCC, 0xCC, 0xCC)
-                    p = (y * w + x) * 3
-                    out[p:p + 3] = bytes(col)
-    return bytes(out)
+def atlas_layout(textures, width=PREVIEW_WIDTH, gap=2):
+    """Shelf-pack textures (tallest first) into `width` texels: ([(texture, x, y)], height)."""
+    order = sorted(textures, key=lambda t: (-t["h"], -t["w"], t["index"]))
+    x = y = shelf = 0
+    out = []
+    for t in order:
+        if x and x + t["w"] > width:
+            x, y, shelf = 0, y + shelf + gap, 0
+        out.append((t, x, y))
+        x += t["w"] + gap
+        shelf = max(shelf, t["h"])
+    return out, y + shelf
 
 
 def png_bytes(w, h, rgb):
@@ -350,33 +365,86 @@ def png_bytes(w, h, rgb):
 
 
 class SourcePreview:
-    """The source's in-match body (ARAM body + overlay), largest texture, decoded once."""
+    """The source's in-match body (ARAM body + overlay): its colour regions, and every texture packed
+    into one atlas image, before and after a recolour spec.  Slow to build (it unpacks the body), so
+    the window builds it on its preview thread; Game.preview() caches one per source."""
 
     def __init__(self, game, source):
-        body = cc.Gpc(cc.effective_body(game.disc, game.dol, source))
-        t = largest_texture(body)
         self.source = source
-        self.w, self.h, self.tex_index = t["w"], t["h"], t["index"]
-        self.blocks = bytes(body.data[t["data"]:t["data"] + t["size"]])
-        self.before_png = png_bytes(self.w, self.h, decode_cmpr(self.blocks, self.w, self.h))
+        self.body = cc.Gpc(cc.effective_body(game.disc, game.dol, source))
+        self.regions = cc.source_regions(game.disc, game.dol, source, self.body)
+        self.layout, self.h = atlas_layout(self.body.textures)
+        self.w = PREVIEW_WIDTH
+        self.tex_count = len(self.body.textures)
+        self._decoded = {}                     # texture bytes -> decoded RGB (unchanged ones are shared)
+        self.before_png = png_bytes(self.w, self.h, self._atlas(self.body))
         self._after = {}
 
-    def recoloured_blocks(self, spec):
-        rc = cc.Recolour(spec)
-        if rc.tex is not None and self.tex_index not in rc.tex:
-            return self.blocks
-        return b"".join(cc.recolour_block(self.blocks[o:o + 8], rc) for o in range(0, len(self.blocks), 8))
+    def _decode(self, data, t):
+        rgb = self._decoded.get(data)
+        if rgb is None:
+            if len(self._decoded) > 400:
+                self._decoded.clear()
+            rgb = self._decoded[data] = cc.decode_cmpr(data, t["w"], t["h"])
+        return rgb
+
+    def _atlas(self, gpc):
+        w = self.w
+        out = bytearray(ATLAS_BG * (w * self.h))
+        for t, x, y in self.layout:
+            rgb = self._decode(cc.texture_bytes(gpc, t), t)
+            row = t["w"] * 3
+            for yy in range(t["h"]):
+                o = ((y + yy) * w + x) * 3
+                out[o:o + row] = rgb[yy * row:(yy + 1) * row]
+        return bytes(out)
+
+    def recoloured(self, spec):
+        """The body recoloured by `spec` exactly as the patch does it (regions bound to this source)."""
+        g = cc.Gpc(bytes(self.body.data))
+        cc.recolour_gpc(g, cc.Recolour(spec).resolve(self.regions))
+        return g
 
     def after_png(self, spec):
         if spec not in self._after:
             if len(self._after) > 32:
                 self._after.clear()
-            self._after[spec] = png_bytes(self.w, self.h, decode_cmpr(self.recoloured_blocks(spec), self.w, self.h))
+            self._after[spec] = png_bytes(self.w, self.h, self._atlas(self.recoloured(spec)))
         return self._after[spec]
 
 
 def png_base64(png):
     return base64.b64encode(png).decode("ascii")
+
+
+class PreviewWorker:
+    """One background thread for the slow preview work (unpacking a body, finding its colours,
+    recolouring and packing the atlas), so the window never waits for it.  Requests coalesce: only
+    the newest waiting one runs.  Each result goes to post(("preview", request, result or error))."""
+
+    def __init__(self, post):
+        self.post = post
+        self._cv = threading.Condition()
+        self._next = None
+        threading.Thread(target=self._run, daemon=True).start()
+
+    def request(self, req, fn):
+        with self._cv:
+            self._next = (req, fn)
+            self._cv.notify()
+
+    def _run(self):
+        while True:
+            with self._cv:
+                while self._next is None:
+                    self._cv.wait()
+                req, fn = self._next
+                self._next = None
+            try:
+                res = fn()
+            except BaseException as e:  # noqa: B902 - shown in the preview caption
+                res = e
+            self.post(("preview", req, res))
 
 
 # ----------------------------------------------------------------------------------------------
@@ -505,7 +573,6 @@ def _import_tk():
 
 
 COLOUR_CHOICES = [c.capitalize() for c in PRESETS] + ["Custom…"]
-BAND_CHOICES = [("Reds only (Mario's hat and shirt)", BAND_REDS), ("Every strong colour", BAND_ALL)]
 GREEN, RED, GREY, GOLD = "#22c55e", "#ef4444", "#8f8fa3", "#f5bb00"
 DONOR_WIDTH, COLOUR_WIDTH = 32, 12     # minimum widths; the slot list stretches
 
@@ -533,7 +600,12 @@ class App:
         self.rows = []                 # dicts: frame, donor (StringVar), colour (str), widgets
         self.busy = False
         self._preview_job = None
+        self._preview_seq = 0          # newest preview request; older results are dropped
         self._row_seq = 0
+        self.regions = []              # colour regions of self.regions_source (from its SourcePreview)
+        self.regions_source = None
+        self.region_vars = []
+        self.worker = PreviewWorker(self.q.put)
         root.title(APP_TITLE)
         self.inputs = []               # widgets disabled while patching / before a game is chosen
 
@@ -573,6 +645,15 @@ class App:
         self.inputs.append(self.cb_source)
         b = card.body
         b.columnconfigure(0, weight=1)
+
+        # the source's colour regions: which of its colours the clones change
+        self.regions_frame = tk.Frame(b, bg=T.PANEL)
+        self.regions_frame.grid(row=1, column=0, sticky="ew", pady=(0, px(12)))
+        T.section(self.regions_frame, "Colours to change", row=0, column=0, pady=(0, 4))
+        self.regions_box = tk.Frame(self.regions_frame, bg=T.PANEL)
+        self.regions_box.grid(row=1, column=0, sticky="w")
+        self.regions_hint = ttk.Label(self.regions_box, text="Choose your game first.", style="Muted.TLabel")
+        self.regions_hint.grid(row=0, column=0, sticky="w")
 
         self.rows_frame = ttk.Frame(b)
         self.rows_frame.grid(row=2, column=0, sticky="ew")
@@ -614,7 +695,6 @@ class App:
         self.copy_stats = tk.BooleanVar(value=True)
         self.keep_work = tk.BooleanVar(value=False)
         self.keeplum = tk.DoubleVar(value=0.5)
-        self.band = tk.StringVar(value=BAND_CHOICES[0][0])
         self.chk_ui = ttk.Checkbutton(self.adv, variable=self.ui_source)
         self.chk_ui.grid(row=2, column=0, columnspan=3, sticky="w")
         self.chk_stats = ttk.Checkbutton(self.adv, variable=self.copy_stats)
@@ -627,14 +707,9 @@ class App:
         self.keeplum_lbl.grid(row=4, column=2, sticky="e", pady=(px(10), 0))
         ttk.Label(self.adv, text="Higher keeps the light and dark areas of the original; lower is brighter and flatter.",
                   style="Muted.TLabel").grid(row=5, column=0, columnspan=3, sticky="w", pady=(px(2), 0))
-        T.section(self.adv, "Colours to change", row=6, column=0, pady=(12, 0))
-        self.cb_band = ttk.Combobox(self.adv, textvariable=self.band, state="readonly", width=32,
-                                    values=[b[0] for b in BAND_CHOICES])
-        self.cb_band.grid(row=6, column=1, columnspan=2, sticky="w", padx=(px(14), 0), pady=(px(12), 0))
-        self.cb_band.bind("<<ComboboxSelected>>", lambda e: self.schedule_preview())
         self.chk_keep = ttk.Checkbutton(self.adv, text="Keep the working folder (for troubleshooting)", variable=self.keep_work)
         self.chk_keep.grid(row=7, column=0, columnspan=3, sticky="w", pady=(px(10), 0))
-        self.inputs += [self.chk_ui, self.chk_stats, self.scale, self.cb_band, self.chk_keep]
+        self.inputs += [self.chk_ui, self.chk_stats, self.scale, self.chk_keep]
         self.adv.grid_remove()
         self.update_source_labels()
 
@@ -662,9 +737,10 @@ class App:
         self.preview_chip.grid(row=0, column=0)
         b = card.body
         b.rowconfigure(5, weight=1)
-        side = 256 * max(1, int(T.S))      # whole-number zoom keeps the texels square
+        self._zoom = max(1, int(T.S))      # whole-number zoom keeps the texels square
+        side = PREVIEW_WIDTH * self._zoom
         self._blank = tk.PhotoImage(width=side, height=side)
-        self.preview_caption = ttk.Label(b, text="The character's main texture, before and after.",
+        self.preview_caption = ttk.Label(b, text="All of the character's textures, before and after.",
                                          style="Muted.TLabel", wraplength=2 * side + px(16), justify="left")
         self.preview_caption.grid(row=0, column=0, columnspan=2, sticky="w", pady=(0, px(10)))
         T.section(b, "Before", row=1, column=0)
@@ -707,9 +783,10 @@ class App:
 
     # ---------------------------------------------------------------- helpers
     def set_enabled(self, on):
-        for w in self.inputs + [w for row in self.rows for w in row["widgets"]]:
+        for w in self.inputs + [w for row in self.rows for w in row["widgets"]] + getattr(self, "_region_checks", []):
             try:
-                w.state(["!disabled"] if on else ["disabled"])
+                if w.instate(["disabled"]) == on:          # only touch widgets that change (each one
+                    w.state(["!disabled"] if on else ["disabled"])   # is a relayout of the page)
             except Exception:
                 pass
         for w in (self.btn_iso, self.btn_dir):
@@ -731,11 +808,14 @@ class App:
         names = [pretty_name(c) for c in range(cc.NUM_CHARS)]
         return names.index(self.source_var.get()) if self.source_var.get() in names else 0
 
-    def band_value(self):
-        return dict(BAND_CHOICES).get(self.band.get(), BAND_REDS)
+    def region_ticks(self):
+        return [i for i, v in enumerate(self.region_vars) if v.get()]
 
     def spec_for(self, colour):
-        return colour_spec(colour, round(self.keeplum.get(), 2), self.band_value())
+        sel = None
+        if self.regions_source == self.source() and self.region_vars:
+            sel = region_selection(self.regions, self.region_ticks())
+        return colour_spec(colour, round(self.keeplum.get(), 2), regions=sel)
 
     def update_source_labels(self):
         n = pretty_name(self.source())
@@ -801,31 +881,47 @@ class App:
             return
         self.out_path.set(str(default_output(path)))
         self.rebuild_rows(reset=True)
+        self._clear_regions(None)
         self.set_enabled(True)
-        self.schedule_preview()
+        self.show_regions()
+        self.schedule_preview(now=True)
 
     # ---------------------------------------------------------------- rows
     def rebuild_rows(self, reset=False):
+        """Fit the clone rows to the current source: keep (or, on reset, replace with the defaults)
+        the rows' slots and colours, reusing the row widgets (creating widgets is the slow part)."""
         src = self.source()
         self.choices = donor_choices(self.game.dol, src)
         valid = {c.id for c in self.choices}
-        old = [] if reset else [(r["slot"], r["colour"]) for r in self.rows]
-        for row in self.rows:
-            row["frame"].destroy()
-        self.rows = []
         self.no_game_hint.grid_remove()
-        wanted = default_rows(self.choices) if reset or not old else []
-        used = set()
-        for slot, colour in old:
-            if slot not in valid or slot in used:
-                slot = next_free_slot(self.choices, used)
-            if slot is not None:
-                wanted.append((slot, colour))
-                used.add(slot)
-        for slot, colour in wanted:
+        if reset or not self.rows:
+            wanted = default_rows(self.choices)
+        else:
+            wanted, used = [], set()
+            for r in self.rows:
+                slot = r["slot"] if r["slot"] in valid and r["slot"] not in used else next_free_slot(self.choices, used)
+                if slot is not None:
+                    wanted.append((slot, r["colour"]))
+                    used.add(slot)
+        while len(self.rows) > len(wanted):
+            self.rows.pop()["frame"].destroy()
+        labels = tuple(c.label for c in self.choices)
+        for row, (slot, colour) in zip(self.rows, wanted):
+            if row.get("labels") != labels:
+                row["donor_cb"].configure(values=labels)
+                row["labels"] = labels
+            self.set_row(row, slot, colour)
+        for slot, colour in wanted[len(self.rows):]:
             self.add_row(slot, colour)
-        if self.rows:
+        if self.rows and self.preview_row.get() not in [r["id"] for r in self.rows]:
             self.preview_row.set(self.rows[0]["id"])
+
+    def set_row(self, row, slot, colour):
+        row["slot"], row["colour"] = slot, colour
+        for var, value in ((row["donor"], self.choice(slot).label), (row["colour_var"], colour_label(colour))):
+            if var.get() != value:
+                var.set(value)
+        row["swatch"].set(colour_swatch(colour))
 
     def add_row(self, slot=None, colour=None):
         if self.game is None:
@@ -850,11 +946,13 @@ class App:
         row["frame"] = f
         rb = ttk.Radiobutton(f, variable=self.preview_row, value=row["id"], command=self.schedule_preview)
         rb.grid(row=0, column=0, sticky="w")
-        labels = [c.label for c in self.choices]
         row["donor"] = tk.StringVar(value=self.choice(slot).label)
-        cb = ttk.Combobox(f, textvariable=row["donor"], values=labels, state="readonly", width=DONOR_WIDTH)
+        cb = ttk.Combobox(f, textvariable=row["donor"], values=[c.label for c in self.choices], state="readonly",
+                          width=DONOR_WIDTH)
         cb.grid(row=0, column=1, sticky="ew", padx=(0, px(8)))
         cb.bind("<<ComboboxSelected>>", lambda e, row=row: self.donor_changed(row))
+        row["donor_cb"] = cb
+        row["labels"] = tuple(c.label for c in self.choices)
         row["colour_var"] = tk.StringVar(value=colour_label(colour))
         cc_ = ttk.Combobox(f, textvariable=row["colour_var"], values=COLOUR_CHOICES, state="readonly", width=COLOUR_WIDTH)
         cc_.grid(row=0, column=2, sticky="w")
@@ -906,43 +1004,125 @@ class App:
         if self.game is not None:
             self.rebuild_rows()
             self.set_enabled(not self.busy)
-            self.schedule_preview()
+            self.show_regions()
+            self.schedule_preview(now=True)
 
     def keeplum_changed(self):
         self.keeplum_lbl.configure(text="%.2f" % self.keeplum.get())
         self.schedule_preview()
 
+    # ---------------------------------------------------------------- colour regions
+    def show_regions(self):
+        """Checkboxes for the source's colour regions (the defaults ticked), once its SourcePreview
+        exists; until then a "finding its colours" note."""
+        src = self.source()
+        pv = self.game.cached_preview(src) if self.game is not None else None
+        if pv is None:
+            if self.regions_source is not None or not self.regions_hint.winfo_ismapped():
+                self._clear_regions("Finding %s's colours…" % pretty_name(src))
+            return
+        if self.regions_source == src:
+            return
+        self._clear_regions(None)
+        self.regions, self.regions_source = pv.regions, src
+        px = theme.px
+        for i, r in enumerate(pv.regions[:6]):
+            v = tk.BooleanVar(value=r.default)
+            cell = tk.Frame(self.regions_box, bg=theme.PANEL)
+            cell.grid(row=i // 3, column=i % 3, sticky="w", padx=(0, px(18)), pady=(0, px(2)))
+            tk.Frame(cell, bg=r.swatch, width=px(14), height=px(14), highlightthickness=1,
+                     highlightbackground=theme.SOFT_LINE).grid(row=0, column=0, padx=(0, px(6)))
+            chk = ttk.Checkbutton(cell, text=region_label(r), variable=v,
+                                  command=lambda i=i: self.regions_changed(i))
+            chk.grid(row=0, column=1, sticky="w")
+            if self.busy:
+                chk.state(["disabled"])
+            self.region_vars.append(v)
+            self._region_widgets.append(cell)
+            self._region_checks.append(chk)
+        if not pv.regions:
+            self._clear_regions("%s has no colours that can be changed." % pretty_name(src))
+
+    def _clear_regions(self, note):
+        for w in getattr(self, "_region_widgets", []):
+            w.destroy()
+        self._region_widgets, self._region_checks, self.region_vars = [], [], []
+        self.regions, self.regions_source = [], None
+        if note:
+            self.regions_hint.configure(text=note)
+            self.regions_hint.grid()
+        else:
+            self.regions_hint.grid_remove()
+
+    def regions_changed(self, i):
+        if not any(v.get() for v in self.region_vars):
+            self.region_vars[i].set(True)        # at least one colour has to change
+            return
+        self.schedule_preview()
+
     # ---------------------------------------------------------------- preview
-    def schedule_preview(self):
+    def schedule_preview(self, now=False):
+        """Ask for a new preview; quick successive changes (dragging the slider) coalesce."""
         if self._preview_job is not None:
             self.root.after_cancel(self._preview_job)
-        self._preview_job = self.root.after(150, self.render_preview)
+        self._preview_job = self.root.after(1 if now else 40, self.request_preview)
 
-    def render_preview(self):
+    def request_preview(self):
         self._preview_job = None
         row = next((r for r in self.rows if r["id"] == self.preview_row.get()), None)
         if self.game is None or row is None:
             return
-        try:
-            pv = self.game.preview(self.source())
-            spec = self.spec_for(row["colour"])
-            before, after = pv.before_png, pv.after_png(spec)
-        except BaseException as e:  # noqa: B902
-            self.preview_caption.configure(text="No preview for %s: %s" % (pretty_name(self.source()), e))
+        game, src = self.game, self.source()
+        spec = self.spec_for(row["colour"])
+        self._preview_seq += 1
+        req = {"seq": self._preview_seq, "source": src, "slot": row["slot"], "colour": row["colour"], "spec": spec}
+        if game.cached_preview(src) is None:
+            self.preview_caption.configure(text="Loading %s's textures…" % pretty_name(src))
+
+        def work():
+            pv = game.preview(src)
+            return pv, pv.after_png(spec)
+        self.worker.request(req, work)
+
+    def preview_done(self, req, res):
+        if self.game is None:
+            return
+        if req["source"] == self.source():
+            self.show_regions()
+        self._preview_done_seq = req["seq"]
+        if req["seq"] != self._preview_seq:
+            return                                   # a newer request is on its way
+        if isinstance(res, BaseException):
+            self.preview_caption.configure(text="No preview for %s: %s" % (pretty_name(req["source"]), res))
             for lbl in (self.img_before, self.img_after):
                 lbl.configure(image=self._blank, text="")
                 lbl.image = None
             return
-        zoom = max(1, 256 * max(1, int(theme.S)) // max(pv.w, pv.h))
-        for lbl, png in ((self.img_before, before), (self.img_after, after)):
-            img = tk.PhotoImage(data=png_base64(png))
-            if zoom > 1:
-                img = img.zoom(zoom)
-            lbl.configure(image=img, text="")
-            lbl.image = img            # keep a reference or Tk shows nothing
-        self.preview_chip.set(pretty_name(self.source()))
-        self.preview_caption.configure(text="%s's main texture as %s (%s)" % (
-            pretty_name(self.source()), self.choice(row["slot"]).name, colour_label(row["colour"])))
+        pv, after = res
+        if getattr(self, "_shown_before", None) is not pv:
+            img = tk.PhotoImage(data=png_base64(pv.before_png))
+            img = img.zoom(self._zoom) if self._zoom > 1 else img
+            self.img_before.configure(image=img, text="")
+            self.img_before.image = img
+            self._shown_before = pv
+        img = tk.PhotoImage(data=png_base64(after))
+        img = img.zoom(self._zoom) if self._zoom > 1 else img
+        self.img_after.configure(image=img, text="")
+        self.img_after.image = img             # keep a reference or Tk shows nothing
+        self.preview_chip.set(pretty_name(req["source"]))
+        rc = cc.Recolour(req["spec"]).resolve(pv.regions)
+        self.preview_caption.configure(text="All %d textures of %s, before and as %s in %s (changes: %s)" % (
+            pv.tex_count, pretty_name(req["source"]), self.choice(req["slot"]).name if any(
+                c.id == req["slot"] for c in self.choices) else pretty_name(req["slot"]),
+            colour_label(req["colour"]), rc.describe()))
+
+    def render_preview(self, timeout=60):
+        """Synchronous preview (selftest, tests): request one and wait for its result."""
+        self.request_preview()
+        end = time.time() + timeout
+        while time.time() < end and getattr(self, "_preview_done_seq", None) != self._preview_seq:
+            self.root.update()
+            time.sleep(0.01)
 
     # ---------------------------------------------------------------- output + run
     def choose_output(self):
@@ -993,30 +1173,34 @@ class App:
     def poll(self):
         try:
             while True:
-                msg = self.q.get_nowait()
-                kind = msg[0]
-                if kind == "log":
-                    self.log(msg[1])
-                elif kind == "game":
-                    self.game_loaded(*msg[1:])
-                elif kind == "done":
-                    self.finish()
-                    result, hint = msg[1], msg[2]
-                    self.page.set_pill("Game created", GREEN)
-                    extra = "\n\nThe working folder was kept: %s" % result["work"] if result.get("work") else ""
-                    dialogs.showinfo("Done!", "Saved to %s.\n\nOpen it in Dolphin or Project Rio: File → Open…\n\n%s%s"
-                                     % (result["iso"], hint, extra))
-                elif kind == "error":
-                    self.finish()
-                    message, details = msg[1], msg[2]
-                    self.page.set_pill("Not created", RED)
-                    self.log("ERROR: " + message)
-                    if details:
-                        self.log("details:\n" + details)
-                    dialogs.showerror("Couldn't create the patched game", message)
+                self.handle(self.q.get_nowait())
         except queue.Empty:
             pass
-        self.root.after(100, self.poll)
+        self.root.after(25, self.poll)
+
+    def handle(self, msg):
+        kind = msg[0]
+        if kind == "log":
+            self.log(msg[1])
+        elif kind == "preview":
+            self.preview_done(msg[1], msg[2])
+        elif kind == "game":
+            self.game_loaded(*msg[1:])
+        elif kind == "done":
+            self.finish()
+            result, hint = msg[1], msg[2]
+            self.page.set_pill("Game created", GREEN)
+            extra = "\n\nThe working folder was kept: %s" % result["work"] if result.get("work") else ""
+            dialogs.showinfo("Done!", "Saved to %s.\n\nOpen it in Dolphin or Project Rio: File → Open…\n\n%s%s"
+                             % (result["iso"], hint, extra))
+        elif kind == "error":
+            self.finish()
+            message, details = msg[1], msg[2]
+            self.page.set_pill("Not created", RED)
+            self.log("ERROR: " + message)
+            if details:
+                self.log("details:\n" + details)
+            dialogs.showerror("Couldn't create the patched game", message)
 
     def finish(self):
         self.busy = False

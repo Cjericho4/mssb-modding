@@ -698,6 +698,13 @@ class Recolour:
         d = abs((h - self.band_from + 0.5) % 1.0 - 0.5)
         return d <= self.band_width
 
+    def describe(self):
+        if self.bands is not None:
+            return " + ".join(b.name for b in self.bands)
+        if self.all:
+            return "every strong colour"
+        return "hue %.3f +- %.3f" % (self.band_from, self.band_width)
+
     def touches(self, tex_index):
         """Does this spec recolour texture `tex_index` of a body?"""
         return (self.tex is None or tex_index in self.tex) and tex_index not in self.skip_tex
@@ -1013,6 +1020,21 @@ REGION_OVERRIDES = {
 # where the biggest coloured cluster is not the character's own colour: the turtles' yellow skin,
 # the colour variants' shared base colours (a Blue Toad's brown vest), Pianta palm hair.  Every
 # entry is checked against the contact sheet of test_matrix.py.
+# Friendlier names for the main characters' regions (what the colour is on the model).
+REGION_NAMES = {
+    1: {"green": "green (cap, shirt)", "blue": "blue (overalls)"},
+    2: {"brown": "brown (fur)", "red": "red (tie)"},
+    3: {"red": "red (cap, shirt)", "brown": "brown (fur)"},
+    4: {"light pink": "pink (dress)", "red": "dark pink (dress)", "yellow": "yellow (hair)"},
+    5: {"orange": "orange/yellow (dress)"},
+    6: {"green": "green (body)", "orange": "orange (shoes)"},
+    7: {"red": "red (cap, shirt)", "blue": "blue (overalls)"},
+    8: {"green": "green (cap, shirt)", "blue": "blue (overalls)"},
+    9: {"green": "green (shell)", "yellow": "yellow (belly)"},
+    10: {"purple": "purple (overalls)"},
+    11: {"purple": "purple (cap, shirt)"},
+    12: {"green": "green (shell)"}, 42: {"red": "red (shell)"}, 20: {"red": "red (shell)"}, 43: {"green": "green (shell)"},
+}
 # Textures no region touches for one character, beyond the gloves (same colours as the outfit):
 KEEP_TEXTURES = {
     5: {8: "hair (the same orange as the dress)"},
@@ -1186,6 +1208,9 @@ def detect_regions(gpc, char=None, keep=frozenset(), bins=72, min_share=0.015):
         picked = [regions[0]]
     for r in picked:
         r.default = True
+    names = REGION_NAMES.get(char, {})
+    for r in regions:
+        r.name = names.get(r.name, r.name)
     return picked + [r for r in regions if r not in picked]
 
 
@@ -1484,6 +1509,14 @@ def write_iso(disc_out, iso_path, log):
 # ----------------------------------------------------------------------------------------------
 # Listing
 # ----------------------------------------------------------------------------------------------
+def list_regions(disc, c):
+    dol = Dol((disc.sys / "main.dol").read_bytes())
+    print("colour regions of %d %s (use region=N in a recolour spec; default = the ones marked *):" % (c, CHAR_NAMES[c]))
+    for i, r in enumerate(source_regions(disc, dol, c)):
+        print("  %s%d  %-22s %s  %5.1f%% of the body texels   from=%.3f width=%.3f minsat=%.2f minval=%.2f maxval=%.2f"
+              % ("*" if r.default else " ", i, r.name, r.swatch, 100 * r.weight, r.hue, r.width, r.minsat, r.minval, r.maxval))
+
+
 def list_slots(disc):
     dol = Dol((disc.sys / "main.dol").read_bytes())
     default_case = dol.u32(ADDR_JUMPTABLE)  # Mario's entry is the switch default
@@ -1607,12 +1640,19 @@ def clone(args, log=print):
 
     # --- source data
     log("source: %d %s" % (C, CHAR_NAMES[C]))
+    if C in UNSUPPORTED_SOURCES:
+        raise SystemExit("%s's model has textures that are not CMPR; it can't be recoloured or cloned" % CHAR_NAMES[C])
     src_tracks = [Gpc(load_subfile(disc, dol, C * SUBFILE_TRACKS + t)) for t in (0, 1)]
     src_body = Gpc(effective_body(disc, dol, C))
     for g in src_tracks + [src_body]:
         g.check()
     log("  track0 %d B, track1 %d B, ARAM body %d B, texture archive %d B (%d textures)" % (
         len(src_tracks[0].data), len(src_tracks[1].data), len(src_body.data), src_body.archive_size, src_body.tex_count))
+    regions = source_regions(disc, dol, C, src_body)
+    log("  colour regions: " + "; ".join("%d %s%s" % (i, r.name, " (default)" if r.default else "")
+                                         for i, r in enumerate(regions)))
+    for S, rc in clones:
+        rc.resolve(regions)
 
     # --- new disc data: appended to ZZZZ.dat
     zz_path = disc.files / "ZZZZ.dat"
@@ -1660,7 +1700,7 @@ def clone(args, log=print):
         log("ui: donor (menus, HUD and announcer keep the donor's name/portrait/call-out)")
 
     for S, rc in clones:
-        log("clone -> slot %d %s  (%s)" % (S, CHAR_NAMES[S], rc.spec))
+        log("clone -> slot %d %s  (%s; recolours %s)" % (S, CHAR_NAMES[S], rc.spec, rc.describe()))
         # subfile rows: tracks 2..18 alias the source
         for t in range(2, SUBFILE_TRACKS):
             dol.set_desc(ADDR_SUBFILES, S * SUBFILE_TRACKS + t, dol.desc(ADDR_SUBFILES, C * SUBFILE_TRACKS + t))
@@ -1815,6 +1855,7 @@ def main(argv=None):
                                  epilog="""examples:
   py clone_character.py --disc "C:\\mssb\\Mario Superstar Baseball (US).iso" --out "C:\\mssb\\marios" --iso "C:\\mssb\\marios.iso"
   py clone_character.py --disc "C:\\mssb\\GYQE01" --list-slots
+  py clone_character.py --disc "C:\\mssb\\GYQE01" --list-regions --source luigi
   py clone_character.py --disc "C:\\mssb\\GYQE01" --out "C:\\mssb\\GYQE01-luigi" --source mario --slot Luigi:green
   py clone_character.py --disc "C:\\mssb\\GYQE01" --out "C:\\mssb\\GYQE01-marios" --source mario --slot BlueToad:blue --slot YellowToad:green --slot GreenToad:purple --slot PurpleToad:yellow
   py clone_character.py --disc ... --out ... --source 0 --slot 29:hue=0.62,sat=1.1 --slot 30:tint=00FF00:0.6 --iso "C:\\mssb\\marios.iso"
@@ -1832,12 +1873,18 @@ recolour spec (after the slot and a colon): """ + Recolour.__doc__)
     ap.add_argument("--no-stats", action="store_true", help="keep the donor's stats instead of copying the source's")
     ap.add_argument("--no-gameplay", action="store_true", help="keep the donor's game.rel/DOL gameplay tables")
     ap.add_argument("--list-slots", action="store_true", help="print the slot table and exit")
+    ap.add_argument("--list-regions", action="store_true",
+                    help="print the colour regions of --source (for region=) and exit")
     ap.add_argument("--force", action="store_true", help="overwrite --out if it exists")
     ap.add_argument("--dry-run", action="store_true", help="print every planned edit (offsets, sizes, entries) without copying or writing anything")
     args = ap.parse_args(argv)
-    if args.list_slots:
+    if args.list_slots or args.list_regions:
         with tempfile.TemporaryDirectory() as tmp:
-            list_slots(open_disc(args.disc, print, Path(tmp) / "disc"))
+            disc = open_disc(args.disc, print, Path(tmp) / "disc")
+            if args.list_slots:
+                list_slots(disc)
+            else:
+                list_regions(disc, parse_char(args.source))
         return 0
     if not args.out and not args.dry_run:
         ap.error("--out is required (a new folder; the input is never modified)")

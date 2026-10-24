@@ -186,13 +186,20 @@ def sd_convex(pts):
     return lambda x, y: max((x - ax) * nx + (y - ay) * ny for ax, ay, nx, ny in edges)
 
 
-def paint(w, h, layers):
-    """layers: [(sdf, colour, opacity)] composited in order over transparent.  -> PhotoImage."""
+def paint(w, h, layers, bg=PANEL):
+    """layers: [(sdf, colour, opacity)] composited in order over `bg` (opaque), or over transparent
+    when bg is None.  -> PhotoImage.  Opaque images matter for speed: Tk blends partly transparent
+    photo pixels in software on every redraw (reading the window back on X11), which made each
+    relayout of the page cost 70-230 ms; every themed widget sits on a known colour anyway."""
     buf = bytearray(w * h * 4)
     cols = [(f, rgb(c), a) for f, c, a in layers]
+    base = rgb(bg) if bg is not None else None
     for y in range(h):
         for x in range(w):
-            r = g = b = a = 0.0
+            if base is None:
+                r = g = b = a = 0.0
+            else:
+                (r, g, b), a = base, 1.0
             for f, (cr, cg, cb), op in cols:
                 cov = 0.5 - f(x + 0.5, y + 0.5)
                 if cov <= 0:
@@ -209,18 +216,42 @@ def paint(w, h, layers):
     return tk.PhotoImage(data=base64.b64encode(_png_rgba(w, h, buf)).decode("ascii"))
 
 
-def rounded(w, h, r, fill, border=None, bw=1.0):
+def rounded(w, h, r, fill, border=None, bw=1.0, bg=PANEL):
     layers = []
     if border:
         layers.append((sd_box(0, 0, w, h, r), border, 1.0))
         layers.append((sd_box(bw, bw, w - bw, h - bw, max(r - bw, 0)), fill, 1.0))
     else:
         layers.append((sd_box(0, 0, w, h, r), fill, 1.0))
-    return paint(w, h, layers)
+    return paint(w, h, layers, bg)
 
 
-def mark_image(size):
-    """The app mark: a white baseball with red seams on a red tile."""
+def widen(img, b, w=240, h=64):
+    """A 9-slice image (corners b x b) re-laid to w x h with Tk's own image copy (tiling the edges
+    and the middle).  ttk draws an "image" element by tiling its stretchable middle: from a
+    17-pixel image that is hundreds of copies for every combobox redraw (~30 ms each); from a
+    widget-sized one it is a handful."""
+    n = img.width()
+    out = tk.PhotoImage(width=w, height=h)
+    m = n - b
+
+    def cp(fx0, fy0, fx1, fy1, tx0, ty0, tx1, ty1):
+        out.tk.call(out, "copy", img, "-from", fx0, fy0, fx1, fy1, "-to", tx0, ty0, tx1, ty1)
+    cp(0, 0, b, b, 0, 0, b, b)
+    cp(m, 0, n, b, w - b, 0, w, b)
+    cp(0, m, b, n, 0, h - b, b, h)
+    cp(m, m, n, n, w - b, h - b, w, h)
+    cp(b, 0, m, b, b, 0, w - b, b)
+    cp(b, m, m, n, b, h - b, w - b, h)
+    cp(0, b, b, m, 0, b, b, h - b)
+    cp(m, b, n, m, w - b, b, w, h - b)
+    cp(b, b, m, m, b, b, w - b, h - b)
+    return out
+
+
+def mark_image(size, bg=None):
+    """The app mark: a white baseball with red seams on a red tile (transparent corners for the
+    window icon, or on `bg`)."""
     s = size / 32.0
     ball = sd_circle(16 * s, 16 * s, 11 * s)
     tile = sd_box(0, 0, size, size, 7 * s)
@@ -228,7 +259,7 @@ def mark_image(size):
     def seam(cx):
         ring = sd_circle(cx * s, 16 * s, 10.5 * s)
         return lambda x, y: max(abs(ring(x, y)) - 1.1 * s, ball(x, y))
-    return paint(size, size, [(tile, RED, 1.0), (ball, TEXT, 1.0), (seam(1.5), RED, 1.0), (seam(30.5), RED, 1.0)])
+    return paint(size, size, [(tile, RED, 1.0), (ball, TEXT, 1.0), (seam(1.5), RED, 1.0), (seam(30.5), RED, 1.0)], bg)
 
 
 # ----------------------------------------------------------------------------------------------
@@ -263,12 +294,13 @@ def _build_style(root):
     n = 2 * r + 3
 
     def btn_images(fill, border):
-        return _keep(rounded(n, n, r, fill, border))
+        return _keep(widen(rounded(n, n, r, fill, border), r + 1))
     b_norm, b_hover = btn_images(SURFACE, LINE), btn_images(HOVER, RED_LINE)
     b_press, b_dis = btn_images(PRESS, RED), btn_images(PANEL, LINE)
     b_focus = btn_images(SURFACE, mix(LINE, FOCUS, 0.55))
     st.element_create("Night.button", "image", b_norm, ("disabled", b_dis), ("pressed", b_press),
-                      ("active", b_hover), ("focus", b_focus), border=r + 1, sticky="nsew", padding=0)
+                      ("active", b_hover), ("focus", b_focus), border=r + 1, sticky="nsew", padding=0,
+                      width=n, height=n)      # the images are widened (see widen()); keep the small size
     st.layout("TButton", [("Night.button", {"sticky": "nsew", "children": [
         ("Button.padding", {"sticky": "nsew", "children": [("Button.label", {"sticky": "nsew"})]})]})])
     st.configure("TButton", padding=(px(12), px(6)), font=F["medium"], foreground=TEXT, anchor="center")
@@ -279,18 +311,19 @@ def _build_style(root):
     # fields: entries and comboboxes
     fr = px(7)
     fn = 2 * fr + 3
-    f_norm = _keep(rounded(fn, fn, fr, FIELD, LINE))
-    f_hover = _keep(rounded(fn, fn, fr, FIELD, SOFT_LINE))
-    f_focus = _keep(rounded(fn, fn, fr, FIELD, FOCUS))
-    f_dis = _keep(rounded(fn, fn, fr, PANEL, LINE))
+    f_norm = _keep(widen(rounded(fn, fn, fr, FIELD, LINE), fr + 1, 480))
+    f_hover = _keep(widen(rounded(fn, fn, fr, FIELD, SOFT_LINE), fr + 1, 480))
+    f_focus = _keep(widen(rounded(fn, fn, fr, FIELD, FOCUS), fr + 1, 480))
+    f_dis = _keep(widen(rounded(fn, fn, fr, PANEL, LINE), fr + 1, 480))
     st.element_create("Night.field", "image", f_norm, ("disabled", f_dis), ("focus", f_focus),
-                      ("hover", f_hover), border=fr + 1, sticky="nsew", padding=0)
+                      ("hover", f_hover), border=fr + 1, sticky="nsew", padding=0, width=fn, height=fn)
     st.layout("TEntry", [("Night.field", {"sticky": "nsew", "children": [
         ("Entry.padding", {"sticky": "nsew", "children": [("Entry.textarea", {"sticky": "nsew"})]})]})])
     st.configure("TEntry", padding=(px(10), px(6)), foreground=TEXT, selectbackground=mix(FIELD, RED, 0.45))
     st.map("TEntry", foreground=[("disabled", DIM), ("readonly", MUTED)])
     # readonly entries (the game path) take no focus ring
-    st.element_create("Night.rofield", "image", f_norm, ("disabled", f_dis), border=fr + 1, sticky="nsew", padding=0)
+    st.element_create("Night.rofield", "image", f_norm, ("disabled", f_dis), border=fr + 1, sticky="nsew", padding=0,
+                      width=fn, height=fn)
     st.layout("Path.TEntry", [("Night.rofield", {"sticky": "nsew", "children": [
         ("Entry.padding", {"sticky": "nsew", "children": [("Entry.textarea", {"sticky": "nsew"})]})]})])
     st.configure("Path.TEntry", padding=(px(10), px(6)), foreground=MUTED, selectbackground=mix(FIELD, RED, 0.45))
@@ -443,6 +476,7 @@ class Chip(tk.Canvas):
 
     def __init__(self, parent, text, tone="red", bg=PANEL):
         tk.Canvas.__init__(self, parent, bg=bg, highlightthickness=0, bd=0)
+        self.bg = bg
         self._key = None
         self.set(text, tone)
 
@@ -455,7 +489,7 @@ class Chip(tk.Canvas):
         f = F["chip"]
         w = int(round(tracked_width(f, self.text, 0.10))) + px(12)
         h = f.metrics("linespace") + px(4)
-        self.img = rounded(w, h, px(4), fill, line)
+        self.img = rounded(w, h, px(4), fill, line, bg=self.bg)
         self.delete("all")
         self.configure(width=w, height=h)
         self.create_image(0, 0, image=self.img, anchor="nw")
@@ -470,11 +504,22 @@ class Swatch(tk.Canvas):
     def __init__(self, parent, colour, bg=PANEL):
         self.size = px(26)
         tk.Canvas.__init__(self, parent, width=self.size, height=self.size, bg=bg, highlightthickness=0, bd=0)
+        self.bg = bg
+        self._colour = None
         self.set(colour)
 
+    _cache = {}
+
     def set(self, colour):
+        if colour == self._colour:
+            return
+        self._colour = colour
         s = self.size
-        self.img = paint(s, s, [(sd_box(0, 0, s, s, px(6)), SOFT_LINE, 1), (sd_box(px(3), px(3), s - px(3), s - px(3), px(4)), colour, 1)])
+        key = (s, colour, self.bg)
+        if key not in Swatch._cache:
+            Swatch._cache[key] = paint(s, s, [(sd_box(0, 0, s, s, px(6)), SOFT_LINE, 1),
+                                              (sd_box(px(3), px(3), s - px(3), s - px(3), px(4)), colour, 1)], self.bg)
+        self.img = Swatch._cache[key]
         self.delete("all")
         self.create_image(0, 0, image=self.img, anchor="nw")
 
@@ -494,7 +539,7 @@ class AngledButton(tk.Canvas):
         self._states = set()
         self._hover = self._down = False
         shape = sd_convex([(self.cut, 0), (w, 0), (w - self.cut, h), (0, h)])
-        self.imgs = {k: paint(w, h, [(shape, c, 1)]) for k, c in
+        self.imgs = {k: paint(w, h, [(shape, c, 1)], bg) for k, c in
                      (("normal", RED), ("hover", FOCUS), ("press", mix(RED, "#000000", 0.18)),
                       ("disabled", mix(PANEL, RED, 0.22)))}
         self.bg_item = self.create_image(0, 0, anchor="nw")
@@ -561,6 +606,21 @@ class AngledButton(tk.Canvas):
 # ----------------------------------------------------------------------------------------------
 # The page: ambient red wash, header, rounded hairline panels
 # ----------------------------------------------------------------------------------------------
+def _wash_rgb(u, v):
+    """Page background colour at relative position (u = x/w - 0.5, v = y/h)."""
+    dr = math.hypot(u / 1.2, (v + 0.1) / 0.8)
+    dg = math.hypot(u / 1.2, (v - 1.1) / 0.6)
+    ar = 0.16 * max(0.0, 1 - dr / 0.68)
+    ag = 0.05 * max(0.0, 1 - dg / 0.55)
+    return tuple(int(p + (rc - p) * ar + (gc - p) * ag + 0.5) for p, rc, gc in zip(rgb(PAGE), rgb(RED), rgb(GOLD)))
+
+
+def wash_colour(x, y, w, h):
+    """The wash colour under page pixel (x, y), rounded so nearby spots share cached images."""
+    c = _wash_rgb(x / max(w, 1) - 0.5, y / max(h, 1))
+    return hexc(tuple(v & ~1 for v in c))
+
+
 def wash_png(w, h, z):
     """The page background at 1/z size: a red bleed from the top and a faint gold one from the bottom
     (CSS: radial-gradient(120% 80% at 50% -10%, red/.16, transparent 68%) +
@@ -572,12 +632,7 @@ def wash_png(w, h, z):
         v = (y + 0.5) * z / h
         row = bytearray(b"\0")
         for x in range(ww):
-            u = (x + 0.5) * z / w - 0.5
-            dr = math.hypot(u / 1.2, (v + 0.1) / 0.8)
-            dg = math.hypot(u / 1.2, (v - 1.1) / 0.6)
-            ar = 0.16 * max(0.0, 1 - dr / 0.68)
-            ag = 0.05 * max(0.0, 1 - dg / 0.55)
-            row += bytes(int(p + (rc - p) * ar + (gc - p) * ag + 0.5) for p, rc, gc in zip(page, red, gold))
+            row += bytes(_wash_rgb((x + 0.5) * z / w - 0.5, v))
         rows.append(bytes(row))
 
     def chunk(tag, body):
@@ -642,9 +697,9 @@ class Page(tk.Canvas):
         self.inset = px(5)
         self._corner_cache = {}
         # header
-        self.mark = mark_image(px(30))
         x = px(24)
         cy = self.header_h // 2
+        self.mark = mark_image(px(30), wash_colour(x, cy, px(1320), px(780)))
         self.create_image(x, cy, image=self.mark, anchor="w")
         x += px(30) + px(12)
         tf, kf = F["title"], F["kicker"]
@@ -678,7 +733,9 @@ class Page(tk.Canvas):
         f = F["medium"]
         h = px(30)
         w = f.measure(text) + px(46)
-        self._pill_img = rounded(w, h, h / 2, mix(PAGE, SURFACE, 0.85), LINE)
+        W, H = max(self.winfo_width(), px(1320)), max(self.winfo_height(), px(780))
+        self._pill_bg = wash_colour(W - px(24) - w / 2, self.header_h // 2, W, H)
+        self._pill_img = rounded(w, h, h / 2, mix(PAGE, SURFACE, 0.85), LINE, bg=self._pill_bg)
         self.itemconfigure(self.pill_bg, image=self._pill_img)
         self.itemconfigure(self.pill_text, text=text)
         self.itemconfigure(self.pill_dot, fill=colour)
@@ -698,6 +755,9 @@ class Page(tk.Canvas):
     # ---- wash + layout
     def _resized(self, e):
         self.coords(self.header_line, 0, self.header_h - 1, e.width, self.header_h - 1)
+        W, H = max(e.width, px(1320)), max(e.height, px(780))
+        if wash_colour(W - px(24) - self._pill_w / 2, self.header_h // 2, W, H) != self._pill_bg:
+            self.set_pill(*self._pill)
         self._place_pill()
         if self._wash_job is not None:
             self.after_cancel(self._wash_job)
@@ -720,25 +780,23 @@ class Page(tk.Canvas):
         self.cards.append(card)
         return card
 
-    def _corners(self, hot):
-        key = hot
+    def _corner(self, hot, name, bg):
+        """One rounded panel corner, opaque on the wash colour `bg` under it."""
+        key = (hot, name, bg)
         if key not in self._corner_cache:
             r, g = self.r, px(4)
             n = r + g
             border = RED_LINE if hot else LINE
             big = 4 * r                                           # a big box; each image keeps one corner of it
-            imgs = {}
-            for name, x0, y0 in (("nw", g, g), ("ne", n - g - big, g), ("sw", g, n - g - big),
-                                 ("se", n - g - big, n - g - big)):
-                box = sd_box(x0, y0, x0 + big, y0 + big, r)
-                inner = sd_box(x0 + 1, y0 + 1, x0 + big - 1, y0 + big - 1, r - 1)
-                layers = []
-                if hot:
-                    layers.append((lambda x, y, box=box: box(x, y) - g, RED, 0.06))
-                    layers.append((lambda x, y, box=box: box(x, y) - g / 2, RED, 0.08))
-                layers += [(box, border, 1), (inner, PANEL, 1)]
-                imgs[name] = paint(n, n, layers)
-            self._corner_cache[key] = imgs
+            x0, y0 = {"nw": (g, g), "ne": (n - g - big, g), "sw": (g, n - g - big), "se": (n - g - big, n - g - big)}[name]
+            box = sd_box(x0, y0, x0 + big, y0 + big, r)
+            inner = sd_box(x0 + 1, y0 + 1, x0 + big - 1, y0 + big - 1, r - 1)
+            layers = []
+            if hot:
+                layers.append((lambda x, y, box=box: box(x, y) - g, RED, 0.06))
+                layers.append((lambda x, y, box=box: box(x, y) - g / 2, RED, 0.08))
+            layers += [(box, border, 1), (inner, PANEL, 1)]
+            self._corner_cache[key] = paint(n, n, layers, bg)
         return self._corner_cache[key]
 
     def draw_card(self, card):
@@ -765,11 +823,10 @@ class Page(tk.Canvas):
         self.create_line(x0 + r, y1 - 1, x1 - r, y1 - 1, fill=border, tags=t)
         self.create_line(x0, y0 + r, x0, y1 - r, fill=border, tags=t)
         self.create_line(x1 - 1, y0 + r, x1 - 1, y1 - r, fill=border, tags=t)
-        im = self._corners(hot)
-        self.create_image(x0 - g, y0 - g, image=im["nw"], anchor="nw", tags=t)
-        self.create_image(x1 + g, y0 - g, image=im["ne"], anchor="ne", tags=t)
-        self.create_image(x0 - g, y1 + g, image=im["sw"], anchor="sw", tags=t)
-        self.create_image(x1 + g, y1 + g, image=im["se"], anchor="se", tags=t)
+        W, H = max(self.winfo_width(), 2), max(self.winfo_height(), 2)
+        for name, x, y, anchor in (("nw", x0 - g, y0 - g, "nw"), ("ne", x1 + g, y0 - g, "ne"),
+                                   ("sw", x0 - g, y1 + g, "sw"), ("se", x1 + g, y1 + g, "se")):
+            self.create_image(x, y, image=self._corner(hot, name, wash_colour(x, y, W, H)), anchor=anchor, tags=t)
         self.tag_lower("card")
         self.tag_lower("wash")
 

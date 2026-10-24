@@ -100,6 +100,9 @@ def main():
     C = cc.parse_char(args.source)
     slots = [cc.parse_slot_spec(s) for s in args.slot] or [(29, cc.Recolour("hue=blue")), (30, cc.Recolour("hue=green")), (31, cc.Recolour("hue=purple")), (32, cc.Recolour("hue=yellow"))]
     ui_source = args.ui == "source"
+    regions = cc.source_regions(disc, dol, C)          # what clone() binds bare colours / region= to
+    for _, rc in slots:
+        rc.resolve(regions)
 
     print("0. retail lookup tables (the proof behind the fn_800698F8 rewrite)")
     main_arr = list(dol.read(0x80108DB8, 32))                      # mainCharArray: grid cell -> base charID
