@@ -42,6 +42,11 @@ not the USA version, already patched, ...).  An extracted game folder works too 
 ## 3. Choose the character and the colours
 
 * **Character to clone**: who gets copied (Mario by default).
+* **Colours to change**: the character's own colours, found in its textures, each with a small
+  swatch.  The main one is ticked: Mario's red, Luigi's green, Yoshi's green, Peach's pink dress,
+  Daisy's orange/yellow dress, Donkey Kong's brown fur, a Koopa's shell and so on.  Tick more to
+  change them too (e.g. Donkey Kong's red tie, Mario's blue overalls); at least one stays ticked.
+  Skin, eyes and the baseball glove never change.
 * **Clones**: one row per copy.  On each row:
   * **Slot it takes over**: which existing character becomes the copy.  The first choices, marked
     *recommended*, are the extra colours of Toad (and of Shy Guy, Koopa, Magikoopa, ...).  They are
@@ -49,8 +54,8 @@ not the USA version, already patched, ...).  An extracted game folder works too 
     *replaces X on the select screen* turn that character (e.g. Luigi) into the copy.
   * **Colour**: pick one of the colours, or **Custom...** to choose any colour (only its hue is used;
     the light and dark shading comes from the original).
-  * The round button on the left shows that row in the **Preview** on the right: the character's
-    main texture before and after.
+  * The round button on the left shows that row in the **Preview** on the right: every texture of
+    the character, before and after.
   * **+ Add a clone** / the **×** at the end of a row to change how many copies you make.
 
 The default is four Marios on the four Toad colours: blue, green, purple and yellow.
@@ -61,8 +66,6 @@ The default is four Marios on the four Toad colours: blue, green, purple and yel
   shows something odd; the clones then keep their old name, face and voice in menus.
 * *Give clones Mario's stats*: on by default.
 * *Keep shading*: how closely the new colour follows the original's light and dark areas.
-* *Colours to change*: by default only reds change (Mario's hat and shirt).  *Every strong colour*
-  recolours the whole outfit; use it when cloning a character whose main colour isn't red.
 * *Keep the working folder*: for troubleshooting only.
 
 ## 4. Create the game

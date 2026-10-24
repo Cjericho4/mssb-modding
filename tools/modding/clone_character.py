@@ -705,6 +705,20 @@ class Recolour:
             return "every strong colour"
         return "hue %.3f +- %.3f" % (self.band_from, self.band_width)
 
+    def for_palette(self):
+        """The spec for a whole-image palette (the HUD portrait): a portrait is a separate painting
+        whose shading reaches past the boxes fitted to the body's texels, so detected regions are
+        widened (more hue, any brightness, less saturation); Mario's original band stays as it is."""
+        if not self.blockwise:
+            return self
+        rc = copy.copy(self)
+        widen = lambda r: Region(r.name, r.hue, r.width + 0.03, max(0.15, r.minsat - 0.2), 1.0, 0.0, 1.0, "lips" if r.keepskin else False,
+                                 r.skip, r.weight, r.rgb, r.sat, r.val)
+        rc.bands = [widen(b) for b in self.bands]
+        rc.regions = [b for b in rc.bands] + [widen(r) for r in self.regions if not any(r is b for b in self.bands)]
+        rc._cache, rc._texel_cache = {}, {}
+        return rc
+
     def touches(self, tex_index):
         """Does this spec recolour texture `tex_index` of a body?"""
         return (self.tex is None or tex_index in self.tex) and tex_index not in self.skip_tex
@@ -933,6 +947,11 @@ def is_skin(h, s, v):
     return h <= 0.13 and 0.08 <= s <= 0.62 and v >= 0.5
 
 
+def is_skin_or_lips(h, s, v):
+    """is_skin plus the light pinks of lips and cheeks (portraits: Peach's lips are her dress pink)."""
+    return is_skin(h, s, v) or ((h >= 0.93 or h <= 0.02) and s <= 0.5 and v >= 0.8)
+
+
 # Every character's body carries two baseball-glove textures (orange-brown leather, the same few
 # images shared between characters).  Their colours sit right on top of brown fur, orange dresses
 # and skin, so a detected region never touches them.  md5(texture data)[:12] of all of them in the
@@ -976,7 +995,7 @@ class Region:
             return False
         if abs((h - self.hue + 0.5) % 1.0 - 0.5) > self.width:
             return False
-        return not (self.keepskin and is_skin(h, s, v))
+        return not (self.keepskin and (is_skin_or_lips if self.keepskin == "lips" else is_skin)(h, s, v))
 
     def distance(self, h, s, v):
         """How far a colour is from this region's typical colour (hue counts 4x)."""
@@ -1046,7 +1065,7 @@ KEEP_TEXTURES = {
 }
 REGION_DEFAULTS = {
     3: ("red",),                                   # Diddy: cap and shirt (fur is region 1)
-    4: ("light pink", "red"),                      # Peach: dress and its darker pink parts
+    4: ("light pink",),                            # Peach: dress (her lips are its darker pink)
     5: ("orange", "yellow"),                       # Daisy: the whole dress
     9: ("green",), 19: ("green", "green 2"),                 # Bowser, Bowser Jr.: shell
     12: ("green",), 42: ("red",), 20: ("red",), 43: ("green",),   # Koopas / Paratroopas: shell
@@ -1274,7 +1293,7 @@ def copy_portrait(tf, S, C, rc):
     if src["size"] != dst["size"]:
         raise ValueError("portrait sizes differ")
     tf.data[dst["data"]:dst["data"] + dst["size"]] = tf.pixels(src)
-    tf.data[dst["tlut"]:dst["tlut"] + 512] = recolour_tlut(tf.tlut(src), rc)
+    tf.data[dst["tlut"]:dst["tlut"] + 512] = recolour_tlut(tf.tlut(src), rc.for_palette())
 
 
 def portrait_desc(dol):

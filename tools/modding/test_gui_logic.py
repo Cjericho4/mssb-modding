@@ -178,23 +178,41 @@ def main():
     out = g.decode_cmpr(blk * 4, 8, 8)
     check(out[:3] == b"\x00\x00\xff" and out[3:6] == b"\xff\x00\x00", "CMPR first pixel in the top bits")
     pv = game.preview(0)
-    check(game.preview(0) is pv, "preview cached per source")
-    check((pv.w, pv.h) == (256, 256), "Mario's main texture is 256x256")
+    check(game.preview(0) is pv and game.cached_preview(0) is pv, "preview cached per source")
+    check(len(pv.layout) == pv.tex_count == len(pv.body.textures) == 9, "Mario's preview shows all %d body textures" % pv.tex_count)
+    check(pv.w == g.PREVIEW_WIDTH and all(x + t["w"] <= pv.w and y + t["h"] <= pv.h for t, x, y in pv.layout),
+          "atlas %dx%d holds every texture" % (pv.w, pv.h))
     w, h, raw = png_info(pv.before_png)
-    check((w, h, len(raw)) == (256, 256, 256 * (1 + 256 * 3)), "before PNG 256x256 RGB")
+    check((w, h, len(raw)) == (pv.w, pv.h, pv.h * (1 + pv.w * 3)), "before PNG %dx%d RGB" % (w, h))
     spec = g.colour_spec("blue")
     after = pv.after_png(spec)
-    check(png_info(after)[:2] == (256, 256) and after != pv.before_png, "after PNG differs from before")
+    check(png_info(after)[:2] == (pv.w, pv.h) and after != pv.before_png, "after PNG differs from before")
     check(pv.after_png(spec) is after, "after PNG cached")
     body = cc.Gpc(cc.effective_body(game.disc, game.dol, 0))
-    cc.recolour_gpc(body, cc.Recolour(spec))
-    t = body.textures[pv.tex_index]
-    check(bytes(body.data[t["data"]:t["data"] + t["size"]]) == pv.recoloured_blocks(spec), "preview recolour == recolour_gpc on the real body")
-    check(pv.recoloured_blocks("hue=blue,tex=0") == pv.blocks, "tex= filter that skips the atlas leaves it unchanged")
+    cc.recolour_gpc(body, cc.Recolour(spec).resolve(cc.source_regions(game.disc, game.dol, 0)))
+    check(bytes(body.data) == bytes(pv.recoloured(spec).data), "preview recolour == recolour_gpc on the real body (what the patch writes)")
+    one = pv.recoloured("hue=blue,tex=1")
+    check([t["index"] for t in pv.body.textures if cc.texture_bytes(one, t) != cc.texture_bytes(pv.body, t)] == [1],
+          "tex= filter only touches that texture")
     (work / "preview_before.png").write_bytes(pv.before_png)
     (work / "preview_after.png").write_bytes(after)
+    check([r.name for r in pv.regions if r.default] == ["red (cap, shirt)"], "Mario's default region: his reds")
     pl = game.preview(1)
-    check(pl.w * pl.h == max(t["w"] * t["h"] for t in cc.Gpc(cc.effective_body(game.disc, dol, 1)).textures), "Luigi preview uses his largest texture")
+    check([r.name for r in pl.regions if r.default] == ["green (cap, shirt)"] and pl.after_png(spec) != pl.before_png,
+          "Luigi's default region is his green, and the blue preview changes it")
+    check(g.region_selection(pl.regions, [0]) is None and g.region_selection(pl.regions, [0, 1]) == [0, 1],
+          "region checkboxes -> spec (defaults name no region)")
+    check(g.colour_spec("blue", 0.5, regions=[1, 0]) == "hue=blue,keeplum=0.5,region=0/1", "region spec %s" % g.colour_spec("blue", 0.5, regions=[1, 0]))
+    rc = cc.Recolour("hue=blue,region=1").resolve(pl.regions)
+    check([b.name for b in rc.bands] == [pl.regions[1].name], "region=1 binds to the source's second region")
+    seen = []
+    worker = g.PreviewWorker(seen.append)
+    worker.request({"seq": 1}, lambda: 41 + 1)
+    import time
+    end = time.time() + 5
+    while not seen and time.time() < end:
+        time.sleep(0.01)
+    check(seen == [("preview", {"seq": 1}, 42)], "preview worker posts its result")
 
     print("5. jobs")
     out_iso = work / "Mario Superstar Baseball (US) - Clones.iso"

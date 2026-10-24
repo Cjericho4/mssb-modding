@@ -235,6 +235,7 @@ def main():
 
     if args.sheet:
         write_sheets(Path(args.sheet), sheet_rows)
+        write_portraits(Path(args.sheet), disc, dol, chars)
 
     if args.patches:
         run_patches(args)
@@ -291,8 +292,104 @@ def write_sheets(folder, rows, per_sheet=2):
         print("   wrote %s" % p)
 
 
+def test_clone(disc, patched, source, slots, ui):
+    cmd = [sys.executable, str(HERE / "test_clone.py"), "--disc", str(disc), "--patched", str(patched),
+           "--source", str(source), "--ui", ui]
+    for sl in slots:
+        cmd += ["--slot", sl]
+    r = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, universal_newlines=True)
+    fails = [l for l in r.stdout.splitlines() if "FAIL" in l]
+    check(r.returncode == 0 and "ALL CHECKS PASSED" in r.stdout,
+          "test_clone.py on %s: %s" % (patched.name, "ALL CHECKS PASSED" if not fails else "; ".join(fails[:4])))
+
+
+def same_files(a, b, names=("sys/main.dol", "sys/fst.bin", "files/ZZZZ.dat", "files/aaaa.dat")):
+    import filecmp
+    return all(filecmp.cmp(str(Path(a) / n), str(Path(b) / n), shallow=False) for n in names)
+
+
+# (label, source, slots, ui): bare colours (= the source's default regions) and one region= spec
+CLI_PATCHES = [
+    ("luigi", "luigi", ["29:blue", "30:red"], "source"),
+    ("yoshi", "yoshi", ["31:blue", "32:hue=pink,region=0/1"], "source"),
+    ("dk", "dk", ["29:blue", "1:green"], "source"),
+    ("peach", "peach", ["44:green"], "donor"),
+    ("babymario", "babymario", ["33:green"], "source"),
+]
+
+
+def write_portraits(folder, disc, dol, chars):
+    """The HUD portrait of every character: original, -> blue, -> green, -> red (palette recolour,
+    as copy_portrait does it), 4 per row block."""
+    pdesc = cc.portrait_desc(dol)
+    pf = cc.TextureFile(cc.lzss_decompress(disc.read_zzzz(pdesc[2], pdesc[3]), pdesc[1] & 0x0FFFFFFF)[0])
+    por = pf.portraits()
+
+    def rgb5a3(v):
+        if v & 0x8000:
+            return bytes((((v >> 10) & 31) * 255 // 31, ((v >> 5) & 31) * 255 // 31, (v & 31) * 255 // 31))
+        return bytes((((v >> 8) & 15) * 17, ((v >> 4) & 15) * 17, (v & 15) * 17))
+
+    def decode(t, tlut):
+        pal = [rgb5a3(struct.unpack_from(">H", tlut, i * 2)[0]) for i in range(256)]
+        px = pf.pixels(t)
+        return b"".join(pal[px[((y // 4) * 7 + x // 8) * 32 + (y % 4) * 8 + (x % 8)]] for y in range(50) for x in range(50))
+    per_col = 14
+    cols = -(-len(chars) // per_col)
+    cv = Canvas(8 + cols * (4 * 104 + 120), 8 + per_col * 112)
+    for n, c in enumerate(chars):
+        x0, y0 = 8 + (n // per_col) * (4 * 104 + 120), 8 + (n % per_col) * 112
+        regions = cc.source_regions(disc, dol, c)
+        cv.text(x0, y0, "%d %s" % (c, cc.CHAR_NAMES[c]), scale=1)
+        cv.blit(x0, y0 + 8, 50, 50, decode(por[c], pf.tlut(por[c])), 2)
+        for i, hue in enumerate(("blue", "green", "red")):
+            rc = cc.Recolour("hue=" + hue).resolve(regions)
+            cv.blit(x0 + (i + 1) * 104, y0 + 8, 50, 50, decode(por[c], cc.recolour_tlut(pf.tlut(por[c]), rc.for_palette())), 2)
+    p = folder / "portraits.png"
+    p.write_bytes(cv.png())
+    print("   wrote %s" % p)
+
+
 def run_patches(args):
-    pass
+    import shutil
+    sys.path.insert(0, str(HERE))
+    import clone_gui as g
+    work = Path(args.work)
+    if work.exists():
+        shutil.rmtree(str(work))
+    work.mkdir(parents=True)
+    print("3. full patches (CLI), each checked by test_clone.py")
+    t = time.time()
+    a = work / "mario_default"
+    cc.main(["--disc", args.disc, "--out", str(a), "--force"])
+    b = work / "mario_band"
+    cc.main(["--disc", args.disc, "--out", str(b), "--force"] + sum(
+        [["--slot", "%d:hue=%s,from=0,width=0.035,minsat=0.5" % (s, c)] for s, c in
+         ((29, "blue"), (30, "green"), (31, "purple"), (32, "yellow"))], []))
+    check(same_files(a, b), "Mario -> Toads default is byte-identical to the pre-region band (from=0 width=0.035 minsat=0.5)")
+    test_clone(args.disc, a, "mario", [], "source")
+    shutil.rmtree(str(b))
+    shutil.rmtree(str(a))
+    for label, src, slots, ui in CLI_PATCHES:
+        out = work / label
+        argv = ["--disc", args.disc, "--out", str(out), "--force", "--source", src, "--ui", ui]
+        for sl in slots:
+            argv += ["--slot", sl]
+        cc.main(argv)
+        test_clone(args.disc, out, src, slots, ui)
+        shutil.rmtree(str(out))
+    print("4. full patch through the GUI's code path (run_job): Daisy, both regions ticked off-default")
+    game, ok, msg = g.load_game(args.disc)
+    pv = game.preview(5)
+    sel = g.region_selection(pv.regions, [0, 1] if len(pv.regions) > 1 else [0])
+    slots = [(29, g.colour_spec("blue", 0.5, regions=sel)), (30, g.colour_spec("green", 0.5))]
+    out_iso = work / "daisy.iso"
+    job = g.Job(args.disc, out_iso, 5, slots, keep_work=True)
+    res = g.run_job(job, lambda l: None)
+    test_clone(args.disc, res["work"], 5, ["%d:%s" % sl for sl in slots], "source")
+    shutil.rmtree(str(res["work"].parent))
+    out_iso.unlink()
+    print("   patches took %.0f s" % (time.time() - t))
 
 
 if __name__ == "__main__":

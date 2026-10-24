@@ -227,7 +227,7 @@ def main():
         non_portrait = [t for t in pfile.textures if t not in pors]
         check(all(ppf.data[t["data"]:t["data"] + 64] == pfile.data[t["data"]:t["data"] + 64] for t in non_portrait), "non-portrait textures identical (first 64 B each)")
         for S, rc in slots:
-            check(ppf.pixels(ppors[S]) == pfile.pixels(pors[C]) and ppf.tlut(ppors[S]) == cc.recolour_tlut(pfile.tlut(pors[C]), rc),
+            check(ppf.pixels(ppors[S]) == pfile.pixels(pors[C]) and ppf.tlut(ppors[S]) == cc.recolour_tlut(pfile.tlut(pors[C]), rc.for_palette()),
                   "portrait %d = %s's indices + recoloured palette (%s)" % (S, cc.CHAR_NAMES[C], rc.spec))
             check(ppf.tlut(ppors[S]) != pfile.tlut(pors[C]), "portrait %d palette actually changed" % S)
     else:

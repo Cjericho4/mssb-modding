@@ -67,8 +67,12 @@ Options:
   the new ZZZZ.dat size), so it is the higher-fidelity path if folder boot misbehaves.
 * Recolour spec after the colon.  Presets: `red orange yellow green cyan blue purple pink`.  Or
   `hue=0.62` (0..1), `hue=0.62,sat=1.2,val=0.9`, `all=1` (recolour every saturated colour, skin too),
-  `tint=00FF00:0.5` (blend towards a colour), `solid=0000FF` (debug: flat colour).  By default only
-  Mario's reds (hat, shirt) are retargeted; skin, eyes, blue overalls and the white glove stay.
+  `tint=00FF00:0.5` (blend towards a colour), `solid=0000FF` (debug: flat colour).  By default a
+  slot changes the source's own main colour: Mario's reds (hat, shirt; skin, eyes, blue overalls and
+  the white glove stay), Luigi's green, Yoshi's green, Peach's pink dress, Donkey Kong's brown fur,
+  and so on.  `--list-regions --source dk` lists a character's colour regions; `region=0/1` picks
+  them (`--slot 29:hue=blue,region=0/1` = DK's fur and his tie).  The baseball glove, skin and eyes
+  are never part of a region.
 * `--source Luigi` etc. to clone someone else.  Characters with a per-character setup case (DK, Boo,
   Piantas, ...) can only be cloned onto slots 0..47; `--list-slots` shows the "setup" column.
 * `--ui source` (default) / `--ui donor`: whose name, portrait, announcer call-out and voice the clone
