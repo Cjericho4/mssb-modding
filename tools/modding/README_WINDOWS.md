@@ -2,8 +2,9 @@
 
 `clone_character.py` copies one character (default: Mario) onto other roster slots with recoloured
 textures, so several Marios in different colours can be on the field at once.  The clones also get
-the source's name, portrait, announcer call-out and voice (`--ui source`, the default).  It only
-edits data plus one small rewritten function (16 instructions) in `main.dol`; nothing is recompiled.
+the source's name, portraits and menu pictures, announcer call-out and voice (`--ui source`, the
+default).  It only edits data, one small rewritten function (16 instructions) in `main.dol` and, by
+default, one jump-table relocation per clone in `menus.rel`; nothing is recompiled.
 Python standard library only.
 
 Files you need from the repo: `tools/modding/clone_character.py` and `tools/modding/test_clone.py`
@@ -76,8 +77,13 @@ Options:
 * `--source Luigi` etc. to clone someone else.  Characters with a per-character setup case (DK, Boo,
   Piantas, ...) can only be cloned onto slots 0..47; `--list-slots` shows the "setup" column.
 * `--ui source` (default) / `--ui donor`: whose name, portrait, announcer call-out and voice the clone
-  slots get.  `source` makes the clone look and sound like Mario everywhere (details in section 6);
-  `donor` leaves every menu/HUD/announcer lookup as it was (the clone is called "Toad"/"Luigi").
+  slots get.  `source` makes the clone look and sound like Mario everywhere (details in section 6):
+  roster-screen name, mini picture and select-grid portrait (both pictures recoloured like the
+  clone), lineup/results portraits, HUD card, announcer and voice.  `donor` leaves every
+  menu/HUD/announcer lookup as it was (the clone is called "Toad"/"Luigi").
+* `--colour-word none` (default) / `--colour-word donor`: on the roster screen a colour variant shows a
+  colour word ("Blue", "Purple", ...) next to its name.  `none` removes it for the clone slots (the
+  clone is Mario, who has none); `donor` keeps the donor's word.  Only with `--ui source`.
 * `--no-aram-overlay`: skip the in-match (ARAM) body recolour.  Use it only to isolate a problem; with
   it the clones look like plain Mario in matches.
 * `--no-stats` / `--no-gameplay`: keep the donor's stats / timing tables instead of Mario's.
@@ -128,11 +134,14 @@ command every non-red Toad is a Mario, so the order does not matter.
 2. Start the game.  On the field you get Mario, Red Toad and a recoloured Mario per extra Toad.
    Put Toads on both teams to see them batting and fielding.
 
-With the default `--ui source` the extra Toads show up as **Mario** in the lineup/team screens and the
-results screens (Mario's face and name), the bottom-left batter/pitcher card in a match shows a Mario
-icon tinted in the clone's colour, the announcer calls them "Mario", and they use Mario's voice bank.
-The **Toad cell on the character grid stays Toad**: the clones live on the colour-variant slots, which
-have no grid cell of their own, so the select screen itself is unchanged.  That is why colour-variant
+With the default `--ui source` the extra Toads show up as **Mario** on the roster screen (the name
+under the preview and the small team picture, which is a Mario recoloured like the clone, with no
+"Blue"/"Purple" colour word) and in the lineup/team and results screens (Mario's face and name), the
+bottom-left batter/pitcher card in a match shows a Mario icon tinted in the clone's colour, the
+announcer calls them "Mario", and they use Mario's voice bank.  The **Toad cell on the character grid
+stays Toad**: the grid cells show the family's base character (Red Toad), and the clones live on the
+colour-variant slots, which have no grid cell of their own.  Wherever the game asks for the variant's
+own grid portrait it now gets a recoloured Mario.  That is why colour-variant
 donors give the cleanest result; a main-character donor such as Luigi replaces that character's own
 cell (see test 1).  Everything else (model, animations, bat/glove, stats, special-ability checks that
 are keyed by the character kind) is Mario's as well.  With `--ui donor` the menus still show the
@@ -152,12 +161,16 @@ mechanism works exactly the way the patcher uses it (Blue Toad's model == Red To
 34); every patched table entry re-parses; the recoloured models have intact headers and only texture
 bytes differ; the per-slot "unique index" table agrees with the retail name/portrait lookup function
 for all 54 characters (the proof behind the rewritten function); the rewritten HUD portrait file
-decodes to the retail file with only the clone portraits replaced; everything outside the intended
-edits is byte-identical.  **Verified in Project Rio by you:** the clone plays as a green Mario.  **Not
+decodes to the retail file with only the clone portraits replaced; in the two menu art files only the
+clones' name/mini picture/grid portrait changed (every other texture decodes as before, including
+pictures that share pixels with a clone's); `menus.rel` differs only in the clones' colour-word
+relocations; everything outside the intended edits is byte-identical.  **Verified in Project Rio by you:** the clone plays as a green Mario.  **Not
 verified until it runs in Dolphin:** the `--ui source` presentation, i.e. that the menus really show
 "Mario" for the clone slots (name banners and the small portraits are keyed by the unique index the
-patcher changes, but no one has watched the menus do it), the recoloured HUD card, the announcer
-saying "Mario" and Mario's voice bank loading for the clone.
+patcher changes, but no one has watched the menus do it), the roster-screen name/mini picture/grid
+portrait and the missing colour word (added after the first Rio test, which still showed the donor's
+picture), the recoloured HUD card, the announcer saying "Mario" and Mario's voice bank loading for the
+clone.
 
 Known limit of `--ui source`: a *main-character* donor (Luigi) with `isBase == 1` also inherits the
 source's row on the records/star screens (those are keyed by the unique index and only shown for base
@@ -202,7 +215,8 @@ Reading a crash in Dolphin:
 | Roster screen refuses the Toad or shows odd stats | stats row | `--no-stats` |
 | Colours wrong but stable | recolour spec | widen the band `hue=0.62,width=0.08`, or `all=1` |
 | Clone plays fine but menus/announcer still say the donor's name | the unique-index remap did not take | report (which screen); `test_clone.py --patched` must show the `ui (source)` checks passing |
-| Menus show a wrong/garbled name or face for the clone, or a crash on the roster/records screen | a menu lookup not covered by the unique index | rerun with `--ui donor`, report which screen |
+| Menus show a wrong/garbled name or face for the clone, or a crash on the roster/records screen | a menu lookup not covered by the unique index, or the re-packed menu art files | rerun with `--ui donor`, report which screen |
+| Roster screen still shows the donor's picture/name, or a wrong colour word | menu art files / menus.rel colour-word edit | report which pane; try `--colour-word donor` to rule out the menus.rel edit |
 | HUD batter card is still the donor's face in a match | the in-place portrait file was not picked up | report; try `--ui donor` to confirm the rest still works |
 | Clone is silent (no voice) in a match | voice bank (file 5+unique) | report; `--ui donor` goes back to the donor's bank |
 

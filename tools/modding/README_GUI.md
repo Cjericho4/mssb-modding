@@ -62,8 +62,13 @@ The default is four Marios on the four Toad colours: blue, green, purple and yel
 
 **Advanced options** (you normally don't need them):
 
-* *Show clones as Mario in menus, on the HUD and by the announcer*: on by default.  Untick it if a menu
-  shows something odd; the clones then keep their old name, face and voice in menus.
+* *Show clones as Mario: name and pictures in menus, HUD, announcer*: on by default.  The roster
+  screen, the select grid, the lineup and the in-match card then show Mario's name and a Mario picture
+  in the clone's colour, and the announcer says "Mario".  Untick it if a menu shows something odd; the
+  clones then keep their old name, face and voice in menus.
+  * *Keep the donor's colour word (e.g. 'Purple')*: off by default.  A colour variant such as Purple
+    Toad shows a colour word on the roster screen; normally the clone drops it (it is Mario).  Tick
+    this to keep it.
 * *Give clones Mario's stats*: on by default.
 * *Keep shading*: how closely the new colour follows the original's light and dark areas.
 * *Keep the working folder*: for troubleshooting only.
@@ -84,7 +89,8 @@ When it is done a message says where the file is.
 * **Toad slots (the default):** the game has no colour button.  On the roster screen, put **Toad** on a
   team several times.  The first Toad is the normal red Toad; every extra Toad gets one of the other
   colours by itself, and with the default settings every one of those is a Mario in that colour.  The
-  extra Toads are listed as **Mario** with Mario's face, and the announcer calls them "Mario".
+  extra Toads are listed as **Mario** with a Mario picture in their colour, and the announcer calls
+  them "Mario".  The Toad square on the select screen itself stays Toad.
   The same goes for other families (e.g. put several Shy Guys on a team if you used Shy Guy slots).
 * **A main character such as Luigi:** pick Luigi as usual.  His square on the select screen now shows
   Mario, and he plays as a Mario in your colour.

@@ -48,11 +48,23 @@ Presentation (--ui source, the default; see .agent/character_select.md section 6
     texture file (ZZZZ.dat 0x1A6B3000, CI8 50x50 + RGB5A3 palette, one per charID).  The clone's
     portrait becomes a copy of the source's with its palette recoloured by the slot's spec; the
     file is re-packed in place (it only has to fit the retail compressed size).
+  * Menu art keyed by charID (.agent/character_select.md section 8): the roster preview name and the
+    52x60 mini picture (common UI file, ZZZZ.dat 0x1A9FE800) and the 50x50 select-grid portrait (ZZZZ.dat
+    0x18AEE800).  The donor's texture headers are pointed at the source's pixel buffers; the two
+    pictures get a private palette recoloured by the slot's spec, written into a buffer no header uses
+    any more (the donor's own palette, or the donor's freed name/picture pixels), so no buffer another
+    texture shares is ever written and the files keep their size.  Both are re-packed in place; if one
+    ever does not fit it is appended and every copy of its descriptor (main.dol, menus/game/
+    challenge.rel) is rewritten.
+  * The colour word before the roster name ("Blue", "Purple") is a charID switch in menus.rel
+    fn_2_74F40.  --colour-word none (default) points each donor's jump-table relocation at the label-0
+    case (what single-colour characters show); --colour-word donor keeps it.  menus.rel is re-packed
+    in place in aaaa.dat like game.rel.
 
 What stays the donor's: the family/colour grouping on the character-select grid.  A main-grid
 donor (e.g. Luigi) is itself the clone, so its grid cell shows the source's face and name; a colour
-variant donor (e.g. Blue Toad) has no cell of its own, so the grid is unchanged and only the
-lineup/HUD/announcer show the source.  --ui donor keeps every menu/HUD/announcer lookup as it was.
+variant donor (e.g. Blue Toad) has no cell of its own, so the grid is unchanged and the roster
+screen, lineup, HUD and announcer show the source.  --ui donor keeps every menu/HUD/announcer lookup as it was.
 """
 import argparse
 import colorsys
