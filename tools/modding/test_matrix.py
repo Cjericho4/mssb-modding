@@ -170,6 +170,7 @@ def main():
     ap.add_argument("--chars", help="comma-separated charIDs (default: every cloneable one)")
     ap.add_argument("--patches", action="store_true", help="also run the sampled full patches (slow)")
     ap.add_argument("--work", default=str(HERE.parents[1] / ".scratch" / "matrix"))
+    ap.add_argument("--only", help="with --patches: comma-separated subset of mario,%s,gui" % ",".join(p[0] for p in CLI_PATCHES))
     args = ap.parse_args()
     disc = cc.Disc(args.disc)
     dol = cc.Dol((disc.sys / "main.dol").read_bytes())
@@ -314,7 +315,7 @@ CLI_PATCHES = [
     ("yoshi", "yoshi", ["31:blue", "32:hue=pink,region=0/1"], "source"),
     ("dk", "dk", ["29:blue", "1:green"], "source"),
     ("peach", "peach", ["44:green"], "donor"),
-    ("babymario", "babymario", ["33:green"], "source"),
+    ("babymario", "babymario", ["34:green"], "source"),
 ]
 
 
@@ -360,6 +361,26 @@ def run_patches(args):
     work.mkdir(parents=True)
     print("3. full patches (CLI), each checked by test_clone.py")
     t = time.time()
+    only = set(args.only.split(",")) if args.only else None
+    if only is None or "mario" in only:
+        mario_patch(args, work)
+    for label, src, slots, ui in CLI_PATCHES:
+        if only is not None and label not in only:
+            continue
+        out = work / label
+        argv = ["--disc", args.disc, "--out", str(out), "--force", "--source", src, "--ui", ui]
+        for sl in slots:
+            argv += ["--slot", sl]
+        cc.main(argv)
+        test_clone(args.disc, out, src, slots, ui)
+        shutil.rmtree(str(out))
+    if only is None or "gui" in only:
+        gui_patch(args, work)
+    print("   patches took %.0f s" % (time.time() - t))
+
+
+def mario_patch(args, work):
+    import shutil
     a = work / "mario_default"
     cc.main(["--disc", args.disc, "--out", str(a), "--force"])
     b = work / "mario_band"
@@ -370,26 +391,23 @@ def run_patches(args):
     test_clone(args.disc, a, "mario", [], "source")
     shutil.rmtree(str(b))
     shutil.rmtree(str(a))
-    for label, src, slots, ui in CLI_PATCHES:
-        out = work / label
-        argv = ["--disc", args.disc, "--out", str(out), "--force", "--source", src, "--ui", ui]
-        for sl in slots:
-            argv += ["--slot", sl]
-        cc.main(argv)
-        test_clone(args.disc, out, src, slots, ui)
-        shutil.rmtree(str(out))
-    print("4. full patch through the GUI's code path (run_job): Daisy, both regions ticked off-default")
+
+
+def gui_patch(args, work):
+    import shutil
+    import clone_gui as g
+    print("4. full patch through the GUI's code path (run_job): DK with fur + tie ticked, and his default")
     game, ok, msg = g.load_game(args.disc)
-    pv = game.preview(5)
-    sel = g.region_selection(pv.regions, [0, 1] if len(pv.regions) > 1 else [0])
+    pv = game.preview(2)
+    sel = g.region_selection(pv.regions, [0, 1])
+    check(sel == [0, 1], "DK fur + tie -> region=0/1")
     slots = [(29, g.colour_spec("blue", 0.5, regions=sel)), (30, g.colour_spec("green", 0.5))]
-    out_iso = work / "daisy.iso"
-    job = g.Job(args.disc, out_iso, 5, slots, keep_work=True)
+    out_iso = work / "dk.iso"
+    job = g.Job(args.disc, out_iso, 2, slots, keep_work=True)
     res = g.run_job(job, lambda l: None)
-    test_clone(args.disc, res["work"], 5, ["%d:%s" % sl for sl in slots], "source")
+    test_clone(args.disc, res["work"], 2, ["%d:%s" % sl for sl in slots], "source")
     shutil.rmtree(str(res["work"].parent))
     out_iso.unlink()
-    print("   patches took %.0f s" % (time.time() - t))
 
 
 if __name__ == "__main__":
