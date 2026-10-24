@@ -57,7 +57,8 @@ not the USA version, already patched, ...).  An extracted game folder works too 
   * **Colour**: pick one of the colours, or **Custom...** to choose any colour (only its hue is used;
     the light and dark shading comes from the original).
   * The round button on the left shows that row in the **Preview** on the right: every texture of
-    the character, before and after.
+    the character, before and after.  On a small screen (or with Windows display scaling at 125 % or
+    more) the Preview and the Log move under the form; scroll down to see them.
   * **+ Add a clone** / the **×** at the end of a row to change how many copies you make.
 
 The default is four Marios on the four Toad colours: blue, green, purple and yellow.

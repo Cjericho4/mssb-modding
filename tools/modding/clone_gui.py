@@ -622,8 +622,11 @@ class App:
         page.rowconfigure(4, weight=1)
         left = dict(column=0, sticky="new", padx=(edge, gap // 2))
 
+        self._edge, self._gap = edge, gap
+        self.stacked = False           # True: the preview sits under the form (narrow windows, see relayout)
         # 01 game
         card = page.add_card(T.Card(page, "Your game", chip="01"), row=1, pady=(edge - px(4), gap), **left)
+        self.left_cards = [card]
         b = card.body
         b.columnconfigure(2, weight=1)
         self.btn_iso = ttk.Button(b, text="Choose your game (.iso)…", command=self.choose_iso)
@@ -639,6 +642,7 @@ class App:
 
         # 02 character + clones (+ advanced)
         card = page.add_card(T.Card(page, "Clones", chip="02"), row=2, pady=(0, gap), **left)
+        self.left_cards.append(card)
         T.section(card.right, "Character to clone", row=0, column=0, pady=(0, 0))
         self.source_var = tk.StringVar(value=pretty_name(0))
         self.cb_source = ttk.Combobox(card.right, textvariable=self.source_var, state="readonly", width=18,
@@ -723,6 +727,7 @@ class App:
 
         # 03 save + create
         card = page.add_card(T.Card(page, "Save the new game as", chip="03"), row=3, pady=(0, edge), **left)
+        self.left_cards.append(card)
         b = card.body
         b.columnconfigure(0, weight=1)
         self.out_path = tk.StringVar()
@@ -741,6 +746,7 @@ class App:
         # preview + log (right column, full height)
         card = page.add_card(T.Card(page, "Preview"), row=1, column=1, rowspan=4, sticky="nsew",
                              padx=(gap // 2, edge), pady=(edge - px(4), edge))
+        self.preview_card = card
         self.preview_chip = T.Chip(card.right, pretty_name(0), "neutral")
         self.preview_chip.grid(row=0, column=0)
         b = card.body
@@ -761,9 +767,10 @@ class App:
                                   bg=T.FIELD, bd=0, highlightthickness=1, highlightbackground=T.LINE)
         self.img_after.grid(row=2, column=1, sticky="nw", padx=(px(16), 0))
         self.img_after.grid_configure(sticky="nw")
-        tk.Frame(b, bg=T.LINE, height=1).grid(row=3, column=0, columnspan=2, sticky="ew", pady=px(16))
-        T.section(b, "Log", red=True, row=4, column=0)
-        lf = tk.Frame(b, bg=T.FIELD, highlightthickness=1, highlightbackground=T.LINE)
+        self._log_sep = tk.Frame(b, bg=T.LINE, height=1)
+        self._log_sep.grid(row=3, column=0, columnspan=2, sticky="ew", pady=px(16))
+        self._log_head = T.section(b, "Log", red=True, row=4, column=0)
+        lf = self._log_frame = tk.Frame(b, bg=T.FIELD, highlightthickness=1, highlightbackground=T.LINE)
         lf.grid(row=5, column=0, columnspan=2, sticky="nsew")
         lf.columnconfigure(0, weight=1)
         lf.rowconfigure(0, weight=1)
@@ -783,11 +790,56 @@ class App:
         root.update_idletasks()
         w, h = page.winfo_reqwidth(), page.winfo_reqheight()
         self.scroller.host(page)
+        self.scroller.view.bind("<Configure>", lambda e: self.relayout(e.width), add="+")
         sw, sh = root.winfo_screenwidth(), root.winfo_screenheight() - px(80)
-        root.minsize(min(w, sw), min(h, sh, px(560)))       # shorter than the content: it scrolls
+        # narrower than both columns: the preview goes under the form; narrower still: it scrolls sideways
+        root.minsize(min(self.stacked_width(), sw, px(640)), min(h, sh, px(560)))
         root.geometry("%dx%d" % (min(max(w, px(1320)), sw), min(max(h, px(780)), sh)))
         root.protocol("WM_DELETE_WINDOW", self.on_close)
         root.after(100, self.poll)
+
+    # ---------------------------------------------------------------- layout
+    def wide_width(self):
+        """Width the two-column layout needs (form | preview).  The preview's width is the one it had
+        in that layout (stacked, it also holds the log beside the pictures)."""
+        if not self.stacked:
+            self._preview_w = self.preview_card.winfo_reqwidth()
+        return max(c.winfo_reqwidth() for c in self.left_cards) + self._preview_w + 2 * self._edge + self._gap
+
+    def stacked_width(self):
+        return max(c.winfo_reqwidth() for c in self.left_cards + [self.preview_card]) + 2 * self._edge
+
+    def relayout(self, width):
+        """Two columns when the window is wide enough, else the preview and log under the form (small
+        screens, 125-150 % scaling).  Only re-grids on a change of mode; nothing is redrawn otherwise."""
+        if width <= 1:
+            return
+        need = self.wide_width()
+        stack = width < need if not self.stacked else width < need + theme.px(8)
+        if stack == self.stacked:
+            return
+        self.stacked = stack
+        edge, gap = self._edge, self._gap
+        side = (edge, edge) if stack else (edge, gap // 2)
+        for c in self.left_cards:
+            c.grid_configure(padx=side)
+        self.left_cards[-1].grid_configure(pady=(0, gap if stack else edge))
+        b = self.preview_card.body
+        if stack:
+            self.preview_card.grid_configure(row=4, column=0, rowspan=1, padx=(edge, edge), pady=(0, edge))
+            # the log goes beside the before/after pictures, using the width the form leaves
+            self._log_sep.grid_remove()
+            self._log_head.grid_configure(row=1, column=2, columnspan=1, padx=(theme.px(16), 0))
+            self._log_frame.grid_configure(row=2, column=2, columnspan=1, padx=(theme.px(16), 0))
+            b.columnconfigure(2, weight=1, minsize=theme.px(280))
+            b.rowconfigure(5, weight=0)
+        else:
+            self.preview_card.grid_configure(row=1, column=1, rowspan=4, padx=(gap // 2, edge), pady=(edge - theme.px(4), edge))
+            self._log_sep.grid()
+            self._log_head.grid_configure(row=4, column=0, columnspan=1, padx=0)
+            self._log_frame.grid_configure(row=5, column=0, columnspan=2, padx=0)
+            b.columnconfigure(2, weight=0, minsize=0)
+            b.rowconfigure(5, weight=1)
 
     # ---------------------------------------------------------------- helpers
     def set_enabled(self, on):
@@ -1256,6 +1308,17 @@ def selftest(argv):
         print("selftest: scale %.2f, fonts %s, dark title bar %s" % (
             theme.S, "fallback for " + ", ".join(theme.FONT_FALLBACK) if theme.FONT_FALLBACK else "bundled",
             "on" if dark else "off"))
+        # narrow window: the preview stacks under the form; wide again: back to two columns
+        wide = app.wide_width()
+        app.relayout(wide - theme.px(40))
+        root.update()
+        stacked = app.stacked and app.preview_card.grid_info()["column"] == 0
+        app.relayout(wide + theme.px(40))
+        root.update()
+        if not stacked or app.stacked or app.preview_card.grid_info()["column"] != 1:
+            print("selftest: the narrow-window layout did not switch (stacked %s)" % stacked)
+            return 1
+        app.relayout(app.scroller.view.winfo_width())
         if "--expect-fonts" in argv and theme.FONT_FALLBACK:
             print("selftest: the bundled fonts did not load")
             return 1

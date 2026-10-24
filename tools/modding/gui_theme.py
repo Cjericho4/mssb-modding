@@ -434,6 +434,14 @@ def _build_style(root):
                  lightcolor=PANEL, darkcolor=PANEL, gripcount=0, arrowsize=sw)
     st.configure("Page.Vertical.TScrollbar", troughcolor=PAGE, background=PAGE, bordercolor=PAGE,
                  lightcolor=PAGE, darkcolor=PAGE)
+    hthumb = _keep(rounded(sh, sw, sw / 2, LINE))
+    hthumb_hot = _keep(rounded(sh, sw, sw / 2, SOFT_LINE))
+    st.element_create("Night.hthumb", "image", hthumb, ("pressed", hthumb_hot), ("active", hthumb_hot),
+                      border=(sw // 2 + 1, 0), sticky="nsew", padding=0)
+    st.layout("Page.Horizontal.TScrollbar", [("Horizontal.Scrollbar.trough", {"sticky": "ew", "children": [
+        ("Night.hthumb", {"expand": "1", "sticky": "nsew"})]})])
+    st.configure("Page.Horizontal.TScrollbar", troughcolor=PAGE, background=PAGE, bordercolor=PAGE,
+                 lightcolor=PAGE, darkcolor=PAGE, gripcount=0, arrowsize=sw)
     return st
 
 
@@ -709,7 +717,8 @@ class Page(tk.Canvas):
         self._tracked_text(x, ty + tf.metrics("ascent") + px(3), subtitle, kf, MUTED, 0.12)
         x += max(tracked_width(tf, title.upper(), 0.08), tracked_width(kf, subtitle.upper(), 0.12)) + px(22)
         self.create_line(x, cy - px(14), x, cy + px(14), fill=LINE)
-        self.create_text(x + px(22), cy, text=blurb, font=F["body"], fill=MUTED, anchor="w")
+        self.blurb = self.create_text(x + px(22), cy, text=blurb, font=F["body"], fill=MUTED, anchor="w")
+        self._blurb_right = x + px(22) + F["body"].measure(blurb)
         self.header_line = self.create_line(0, self.header_h - 1, 0, self.header_h - 1, fill=LINE)
         # status pill (top right)
         self.pill_bg = self.create_image(0, cy, anchor="e")
@@ -751,6 +760,8 @@ class Page(tk.Canvas):
         dx = right - self._pill_w + px(15)
         d = px(8)
         self.coords(self.pill_dot, dx, cy - d / 2, dx + d, cy + d / 2)
+        # a narrow window: the status pill wins over the one-line blurb
+        self.itemconfigure(self.blurb, state="normal" if self._blurb_right + px(16) < right - self._pill_w else "hidden")
 
     # ---- wash + layout
     def _resized(self, e):
@@ -856,15 +867,19 @@ class Page(tk.Canvas):
 
 
 class Scroller(tk.Frame):
-    """Hosts the Page and scrolls it vertically when the window is shorter than its content
-    (small screens, high DPI); the slim scrollbar only shows when it is needed."""
+    """Hosts the Page and scrolls it when the window is smaller than its content (small screens, high
+    DPI): vertically, and sideways only as a last resort (the App stacks its columns first).  The slim
+    scrollbars only show when they are needed."""
 
     def __init__(self, root):
         tk.Frame.__init__(self, root, bg=PAGE)
-        self.view = tk.Canvas(self, bg=PAGE, highlightthickness=0, bd=0, yscrollincrement=px(24))
-        self.view.pack(side="left", fill="both", expand=True)
+        self.rowconfigure(0, weight=1)
+        self.columnconfigure(0, weight=1)
+        self.view = tk.Canvas(self, bg=PAGE, highlightthickness=0, bd=0, yscrollincrement=px(24), xscrollincrement=px(24))
+        self.view.grid(row=0, column=0, sticky="nsew")
         self.bar = ttk.Scrollbar(self, orient="vertical", command=self.view.yview, style="Page.Vertical.TScrollbar")
-        self.view.configure(yscrollcommand=self.bar.set)
+        self.hbar = ttk.Scrollbar(self, orient="horizontal", command=self.view.xview, style="Page.Horizontal.TScrollbar")
+        self.view.configure(yscrollcommand=self.bar.set, xscrollcommand=self.hbar.set)
         self.page = self.item = None
         self._req = None
         self.view.bind("<Configure>", lambda e: self.fit())
@@ -894,10 +909,16 @@ class Scroller(tk.Frame):
         self.view.configure(scrollregion=(0, 0, w, h))
         if rh > vh + 1 and vh > 1:
             if not self.bar.winfo_ismapped():
-                self.bar.pack(side="right", fill="y")
+                self.bar.grid(row=0, column=1, sticky="ns")
         elif self.bar.winfo_ismapped():
-            self.bar.pack_forget()
+            self.bar.grid_remove()
             self.view.yview_moveto(0)
+        if rw > vw + 1 and vw > 1:
+            if not self.hbar.winfo_ismapped():
+                self.hbar.grid(row=1, column=0, sticky="ew")
+        elif self.hbar.winfo_ismapped():
+            self.hbar.grid_remove()
+            self.view.xview_moveto(0)
 
     def _wheel(self, e):
         if not self.bar.winfo_ismapped() or not isinstance(e.widget, tk.Misc):
@@ -907,7 +928,10 @@ class Scroller(tk.Frame):
         if e.widget.winfo_toplevel() is not self.winfo_toplevel():
             return
         up = e.num == 4 or getattr(e, "delta", 0) > 0
-        self.view.yview_scroll(-3 if up else 3, "units")
+        if e.state & 1 and self.hbar.winfo_ismapped():      # Shift+wheel: sideways
+            self.view.xview_scroll(-3 if up else 3, "units")
+        else:
+            self.view.yview_scroll(-3 if up else 3, "units")
 
 
 # ----------------------------------------------------------------------------------------------
