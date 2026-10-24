@@ -135,8 +135,10 @@ def region_texel_check(body, new, rc):
                 n0, n1, ib = unpack(">HHI", b, o)
                 pb = cc.cmpr_palette(n0, n1)
                 hits = [rc._in_band(*hsv(c)) for c in (c0, c1)]
-                forced = rc.blockwise and cc.block_mostly_in_band(c0, c1, ia, rc)
-                if forced:
+                share = cc.block_band_share(c0, c1, ia, rc) if rc.blockwise else None
+                if share == 0.0:
+                    problems.append("tex %d block %d changed though no texel shows a region colour" % (t["index"], o // 8))
+                if share is not None and share >= 0.5:
                     hits = [hit or not cc.is_skin(*hsv(c)) for hit, c in zip(hits, (c0, c1))]
                 if not any(hits):
                     problems.append("tex %d block %d changed without a region endpoint" % (t["index"], o // 8))
@@ -196,7 +198,7 @@ def main():
         gl = cc.glove_textures(body)
         check(len(gl) == 2, "%2d %s: two glove textures %s" % (c, name, sorted(gl)))
         t = time.time()
-        regions = cc.detect_regions(body, c)
+        regions = cc.source_regions(disc, dol, c, body)
         timings.append(time.time() - t)
         check(len(regions) >= 1, "%2d %s: %d regions, main %r" % (c, name, len(regions), regions[0].name if regions else None))
         for r in regions:
@@ -223,7 +225,7 @@ def main():
 
     print("2. Mario's default is the pre-region band, byte for byte")
     body = cc.Gpc(cc.effective_body(disc, dol, 0))
-    regions = cc.detect_regions(body, 0)
+    regions = cc.source_regions(disc, dol, 0, body)
     for preset in cc.COLOUR_PRESETS:
         a = cc.Gpc(bytes(body.data))
         b = cc.Gpc(bytes(body.data))

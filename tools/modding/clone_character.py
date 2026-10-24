@@ -56,6 +56,7 @@ lineup/HUD/announcer show the source.  --ui donor keeps every menu/HUD/announcer
 """
 import argparse
 import colorsys
+import copy
 import hashlib
 import math
 import shutil
@@ -776,11 +777,11 @@ def _swap01(idx):
     return out
 
 
-def block_mostly_in_band(c0, c1, idx, rc):
-    """True when at least half of a CMPR block's visible texels show a colour of the region.  A
-    texel is often an interpolated mix of two endpoints that are themselves outside the region
-    (Baby Luigi's cap: dark olive + green, every texel at the 1/3 point), so per-endpoint tests alone
-    leave such blocks half recoloured."""
+def block_band_share(c0, c1, idx, rc):
+    """Fraction of a CMPR block's visible texels whose colour is inside the region(s).  A texel is
+    often an interpolated mix of the two endpoints, so the endpoints alone mislead both ways: Baby
+    Luigi's cap is dark olive + green with every texel at the 1/3 point (all in the region), a Red
+    Paratroopa's yellow face is orange + lime with every texel at the midpoints (none in it)."""
     pal = cmpr_palette(c0, c1)
     n = [0, 0, 0, 0]
     for sh in (24, 16, 8, 0):
@@ -793,12 +794,21 @@ def block_mostly_in_band(c0, c1, idx, rc):
             total += n[i]
             if rc.texel_in_band(pal[i]):
                 inside += n[i]
-    return total > 0 and 2 * inside >= total
+    return inside / total if total else 0.0
+
+
+def block_mostly_in_band(c0, c1, idx, rc):
+    return block_band_share(c0, c1, idx, rc) >= 0.5
 
 
 def recolour_block(block, rc):
     c0, c1, idx = struct.unpack(">HHI", block)
-    force = rc.blockwise and block_mostly_in_band(c0, c1, idx, rc)
+    force = False
+    if rc.blockwise:
+        share = block_band_share(c0, c1, idx, rc)
+        if share == 0.0:
+            return block                 # no texel shows a region colour: leave the block alone
+        force = share >= 0.5             # mostly region: both endpoints follow it
     n0 = rc.map565(c0, force)
     n1 = rc.map565(c1, force)
     four = c0 > c1
@@ -993,8 +1003,13 @@ def hue_name(h, s, v):
 # region is exactly the band clone_character used before regions existed (byte-identical output).
 REGION_OVERRIDES = {
     0: [Region("red (cap, shirt)", 0.0, 0.035, 0.5, keepskin=False, blockwise=False)],
+    # Wario's tan skin (hue 30 deg, more saturated than most skin) touches his yellow cap's hues
+    10: [Region("yellow (cap, shirt)", 0.133, 0.027, 0.6, minval=0.5, rgb=(230, 190, 20))],
+    # Red Magikoopa's robe shades through orange into his yellow face without a gap in hue
+    34: [Region("red (robe)", 0.005, 0.045, 0.8, rgb=(150, 20, 10))],
 }
-# Which detected regions a slot recolours by default (name prefixes, the first is the main one),
+# Which detected regions a slot recolours by default (words of their names, a|b = either; main
+# one first),
 # where the biggest coloured cluster is not the character's own colour: the turtles' yellow skin,
 # the colour variants' shared base colours (a Blue Toad's brown vest), Pianta palm hair.  Every
 # entry is checked against the contact sheet of test_matrix.py.
@@ -1002,16 +1017,21 @@ REGION_OVERRIDES = {
 KEEP_TEXTURES = {
     5: {8: "hair (the same orange as the dress)"},
     7: {11: "mouth (the same red as the cap)"},
+    20: {12: "mouth"}, 42: {12: "mouth"},
+    39: {13: "mouth"},
+    50: {0: "baseball", 8: "baseball"},           # red stitches
+    52: {32: "flame (red shading into orange)"},
 }
 REGION_DEFAULTS = {
     3: ("red",),                                   # Diddy: cap and shirt (fur is region 1)
     4: ("light pink", "red"),                      # Peach: dress and its darker pink parts
     5: ("orange", "yellow"),                       # Daisy: the whole dress
-    9: ("green",), 19: ("green",),                 # Bowser, Bowser Jr.: shell
+    9: ("green",), 19: ("green", "green 2"),                 # Bowser, Bowser Jr.: shell
     12: ("green",), 42: ("red",), 20: ("red",), 43: ("green",),   # Koopas / Paratroopas: shell
-    21: ("light cyan",), 22: ("light pink",), 23: ("yellow",),   # Piantas: body
+    21: ("cyan",), 22: ("pink|purple",), 23: ("yellow",),   # Piantas: body
     27: ("green",), 52: ("red",), 53: ("blue",),  # Bros: helmet and shell
     29: ("blue",), 30: ("yellow",), 31: ("green",), 32: ("purple",),  # Toad colours: cap spots
+    28: ("purple", "purple 2"),                    # Toadsworth: cap spots and coat
     39: ("pink",),                                 # Dixie: beret and top
     44: ("blue",),                                 # Blue Shy Guy: robe
 }
@@ -1038,11 +1058,34 @@ def _bin_stats(cand, bins_):
     return (_wpercentile([(c[2], c[4]) for c in members], 0.5), _wpercentile([(c[3], c[4]) for c in members], 0.5))
 
 
-def detect_regions(gpc, char=None, bins=72, min_share=0.015):
+def family_shared_textures(disc, dol, c):
+    """Texture indices whose data is the same in every character that shares c's ARAM body entry
+    (a colour family: Toads, Magikoopas, Shy Guys, ...).  Those are not the family colour (mouths,
+    wands, buttons), so no region of a family member touches them."""
+    body = dol.pair(c)[0]
+    members = [m for m in range(NUM_CHARS) if dol.pair(m)[0] == body]
+    if len(members) < 2:
+        return frozenset()
+    bodies = [Gpc(effective_body(disc, dol, m)) for m in members]
+    n = bodies[0].tex_count
+    if any(b.tex_count != n for b in bodies):
+        return frozenset()
+    return frozenset(i for i in range(n)
+                     if len({texture_bytes(b, b.textures[i]) for b in bodies}) == 1)
+
+
+def source_regions(disc, dol, c, gpc=None):
+    """detect_regions() for charID c's in-match body, with its colour family's shared textures."""
+    gpc = gpc or Gpc(effective_body(disc, dol, c))
+    return detect_regions(gpc, c, family_shared_textures(disc, dol, c))
+
+
+def detect_regions(gpc, char=None, keep=frozenset(), bins=72, min_share=0.015):
     """The character's recolourable colour regions, main one first: clusters of saturated hues over
-    every body texture (weighted by texel count), leaving out the gloves, skin tones, eyes and
-    near-greys/whites/blacks.  REGION_OVERRIDES[char] replaces or extends the result."""
-    skip = glove_textures(gpc) | frozenset(KEEP_TEXTURES.get(char, ()))
+    every body texture (weighted by texel count), leaving out the gloves, `keep` (texture indices,
+    see family_shared_textures), skin tones, eyes and near-greys/whites/blacks.
+    REGION_OVERRIDES[char] replaces or extends the result, REGION_DEFAULTS[char] picks the default."""
+    skip = glove_textures(gpc) | frozenset(KEEP_TEXTURES.get(char, ())) | frozenset(keep)
     counts = {}
     for t in gpc.textures:
         if t["index"] not in skip:
@@ -1094,7 +1137,8 @@ def detect_regions(gpc, char=None, bins=72, min_share=0.015):
         merged = [parts[0]]
         for part in parts[1:]:
             a, b = _bin_stats(cand, merged[-1]), _bin_stats(cand, part)
-            if abs(a[0] - b[0]) < 0.22 and abs(a[1] - b[1]) < 0.22:
+            gap = (len(merged[-1]) + len(part)) / 2.0 / bins      # distance of the parts' centres
+            if abs(a[0] - b[0]) < 0.22 and abs(a[1] - b[1]) < 0.22 and gap < 0.07:
                 merged[-1] = merged[-1] + part
             else:
                 merged.append(part)
@@ -1126,11 +1170,16 @@ def detect_regions(gpc, char=None, bins=72, min_share=0.015):
             r.name = "%s %d" % (r.name, seen[r.name])
     ov = REGION_OVERRIDES.get(char)
     if ov:
-        regions = list(ov) + [r for r in regions if not any(_overlaps(r, o) for o in ov)]
+        ov = [copy.copy(o) for o in ov]
+        for o in ov:
+            o.skip = o.skip | skip if o.keepskin else o.skip   # Mario's band stays exactly as it was
+            o.weight = sum(n for rgb, n in counts.items()
+                           if o.contains(*colorsys.rgb_to_hsv(rgb[0] / 255.0, rgb[1] / 255.0, rgb[2] / 255.0))) / total
+        regions = ov + [r for r in regions if not any(_overlaps(r, o) for o in ov)]
     want = REGION_DEFAULTS.get(char, ())
     picked = []
     for prefix in want:
-        r = next((r for r in regions if r.name.startswith(prefix) and r not in picked), None)
+        r = next((r for r in regions if any(w in r.name for w in prefix.split("|")) and r not in picked), None)
         if r is not None:
             picked.append(r)
     if not picked and regions:
