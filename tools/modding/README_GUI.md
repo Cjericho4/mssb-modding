@@ -46,7 +46,9 @@ not the USA version, already patched, ...).  An extracted game folder works too 
   swatch.  The main one is ticked: Mario's red, Luigi's green, Yoshi's green, Peach's pink dress,
   Daisy's orange/yellow dress, Donkey Kong's brown fur, a Koopa's shell and so on.  Tick more to
   change them too (e.g. Donkey Kong's red tie, Mario's blue overalls); at least one stays ticked.
-  Skin, eyes and the baseball glove never change.
+  Skin, eyes and the baseball glove never change.  White, black and grey characters (Boo, King Boo,
+  Black Shy Guy, Gray Dry Bones) are tinted: pick Blue and Boo becomes a blue Boo with his eyes and
+  mouth as they were.
 * **Clones**: one row per copy.  On each row:
   * **Slot it takes over**: which existing character becomes the copy.  The first choices, marked
     *recommended*, are the extra colours of Toad (and of Shy Guy, Koopa, Magikoopa, ...).  They are

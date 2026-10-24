@@ -73,8 +73,13 @@ Options:
   the white glove stay), Luigi's green, Yoshi's green, Peach's pink dress, Donkey Kong's brown fur,
   and so on.  `--list-regions --source dk` lists a character's colour regions; `region=0/1` picks
   them (`--slot 29:hue=blue,region=0/1` = DK's fur and his tie).  The baseball glove, skin and eyes
-  are never part of a region.
-* `--source Luigi` etc. to clone someone else.  Characters with a per-character setup case (DK, Boo,
+  are never part of a region.  White, black and grey characters have no hue to shift, so their main
+  region is *tinted* instead: Boo's and King Boo's white body, Black Shy Guy's robe and Gray Dry
+  Bones' pale shell get the target colour, lighter where the original is light and fading out
+  towards black, so the shading, eyes, fangs and mouth stay (`--list-regions` shows them like any
+  other region).
+* `--source Luigi` etc. to clone someone else.  Every character can be the source, Petey too (his
+  body uses palette textures; they are recoloured through the palette).  Characters with a per-character setup case (DK, Boo,
   Piantas, ...) can only be cloned onto slots 0..47; `--list-slots` shows the "setup" column.
 * `--ui source` (default) / `--ui donor`: whose name, portrait, announcer call-out and voice the clone
   slots get.  `source` makes the clone look and sound like Mario everywhere (details in section 6):
