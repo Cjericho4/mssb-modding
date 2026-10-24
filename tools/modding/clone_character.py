@@ -34,9 +34,25 @@ How a clone works (all verified against the matched decompilation, see .agent/ch
   * game.rel .data: voice SFX base, batter hitbox, charge frames, runner timing and two more
     per-character tables are copied so the clone plays like the source.
 
-What stays the donor's: menu name, portrait, announcer call-out, family/colour grouping on the
-character-select grid (lbl_800E8558 / lbl_80108EDC).  Picking the donor in the menus gives you the
-clone on the field.
+Presentation (--ui source, the default; see .agent/character_select.md section 6):
+
+  * Names, portraits, the announcer call-out, the character voice bank and a few gameplay tables are
+    keyed by the "unique index" (0..31, one per distinct character; colour variants share their
+    base's).  Retail computes it two ways that always agree: lbl_800E8558[charID].uniqueIdx (the
+    per-slot table) and fn_800698F8(charID) (a scan of mainCharArray / the variant table plus a
+    switch).  The clone gets the source's uniqueIdx in lbl_800E8558, and fn_800698F8 is rewritten
+    (16 instructions, DOL .text) to return lbl_800E8558[charID].uniqueIdx, so both routes agree
+    again.  Family/base/colour in lbl_800E8558 are left alone: they drive the colour assignment on
+    the select grid.
+  * The in-game HUD portrait (batter/pitcher card) is a pane frame = charID into a 54-portrait
+    texture file (ZZZZ.dat 0x1A6B3000, CI8 50x50 + RGB5A3 palette, one per charID).  The clone's
+    portrait becomes a copy of the source's with its palette recoloured by the slot's spec; the
+    file is re-packed in place (it only has to fit the retail compressed size).
+
+What stays the donor's: the family/colour grouping on the character-select grid.  A main-grid
+donor (e.g. Luigi) is itself the clone, so its grid cell shows the source's face and name; a colour
+variant donor (e.g. Blue Toad) has no cell of its own, so the grid is unchanged and only the
+lineup/HUD/announcer show the source.  --ui donor keeps every menu/HUD/announcer lookup as it was.
 """
 import argparse
 import colorsys
@@ -72,6 +88,50 @@ ADDR_BLOB_LIS = 0x800227EC       # fn_800227E4: lis  r3, 0x4d      (3C 60 00 4D)
 ADDR_BLOB_ADDI = 0x800227F4      # fn_800227E4: addi r3, r3, 0x6600 (38 63 66 00)
 JUMPTABLE_CASES = 48
 ANIMPARAM_TABLES = 15
+FAMILY_UNIQUE = 2                # lbl_800E8558 row byte: unique index (name/portrait/announcer key)
+
+# fn_800698F8 (findCharacterID, DOL .text 0x800698F8, 0x170 bytes): charID -> unique index 0..31.
+# Retail scans lbl_80108DB8 (32 base charIDs, returns the position) and then lbl_80108DDC (22
+# variants, a switch maps each to its base's cell), so a variant can never resolve to another base's
+# cell without new code.  --ui source replaces the head of the function with a lookup of
+# lbl_800E8558[charID].uniqueIdx, which equals the retail result for every retail charID (checked by
+# test_clone.py), keeping the Birdo contract (lbl_8034E9A0.useAltBirdoGrid: cell 0x11 reports 0x20
+# once; the flag is cleared on every return).  The old body after the blr becomes dead code.
+ADDR_FINDCHAR = 0x800698F8
+FINDCHAR_PATCH = bytes.fromhex(
+    "3C80800F"   # lis    r4, lbl_800E8558@ha
+    "38848558"   # addi   r4, r4, lbl_800E8558@l
+    "1C030006"   # mulli  r0, r3, 6
+    "7C840214"   # add    r4, r4, r0
+    "88640002"   # lbz    r3, 2(r4)              ; uniqueIdx
+    "3C808035"   # lis    r4, lbl_8034E9A0@ha
+    "3884E9A0"   # addi   r4, r4, lbl_8034E9A0@l
+    "880448AE"   # lbz    r0, 0x48AE(r4)         ; useAltBirdoGrid
+    "2C030011"   # cmpwi  r3, 0x11
+    "40820010"   # bne    +0x10 (clear)
+    "28000000"   # cmplwi r0, 0
+    "41820008"   # beq    +0x08 (clear)
+    "38600020"   # li     r3, 0x20
+    "38000000"   # clear: li r0, 0
+    "980448AE"   # stb    r0, 0x48AE(r4)
+    "4E800020"   # blr
+)
+# the retail head (same length) as the preflight signature
+FINDCHAR_RETAIL = bytes.fromhex(
+    "9421FFF0" "7C0802A6" "3C808011" "3CA0800E" "90010014" "38000020" "38848DB8" "93E1000C"
+    "3BE569B8" "38A00000" "7C0903A6" "88040000" "7C001800" "4082003C" "2C050011" "4082001C")
+
+# 54-portrait texture file (HUD batter/pitcher card; pane frame = charID in game.rel fn_3_91D1C etc.).
+# Descriptor rows that reference it: DOL lbl_800EEFD0+0x10 and lbl_800E8AA8+0x70; game.rel .data
+# lbl_3_data_21EC8+0x10, lbl_3_data_F538+0x10, lbl_3_data_10598+0x10.  None of them is modified: the
+# file is re-packed in place at the same ZZZZ.dat offset with the same uncompressed size.
+ADDR_PORTRAIT_DESC = 0x800EEFE0
+ADDR_PORTRAIT_DESC2 = 0x800E8B18
+REL_PORTRAIT_DESCS = (0x21ED8, 0xF548, 0x105A8)
+PORTRAIT_W = 50
+PORTRAIT_H = 50
+TEX_FMT_CI8 = 9
+TLUT_FMT_RGB5A3 = 2
 
 ZZZZ_STATS_OFFSET = 0x06CF8800   # CharacterStats[54], 0xA0 each (menus.rel lbl_2_data_C8)
 STATS_ROW = 0xA0
@@ -567,15 +627,10 @@ class Recolour:
         d = abs((h - self.band_from + 0.5) % 1.0 - 0.5)
         return d <= self.band_width
 
-    def map565(self, c):
-        r = self._cache.get(c)
-        if r is not None:
-            return r
+    def map_rgb8(self, r8, g8, b8):
+        """Map one 8-bit RGB colour through the spec (shared by every pixel format)."""
         if self.solid is not None:
-            out = rgb_to_rgb565((self.solid >> 16) & 0xFF, (self.solid >> 8) & 0xFF, self.solid & 0xFF)
-            self._cache[c] = out
-            return out
-        r8, g8, b8 = rgb565_to_rgb(c)
+            return (self.solid >> 16) & 0xFF, (self.solid >> 8) & 0xFF, self.solid & 0xFF
         h, s, v = colorsys.rgb_to_hsv(r8 / 255.0, g8 / 255.0, b8 / 255.0)
         hit = self._in_band(h, s)
         if hit:
@@ -596,9 +651,27 @@ class Recolour:
             rf = rf * (1 - t) + ((self.tint >> 16) & 0xFF) / 255.0 * t
             gf = gf * (1 - t) + ((self.tint >> 8) & 0xFF) / 255.0 * t
             bf = bf * (1 - t) + (self.tint & 0xFF) / 255.0 * t
-        out = rgb_to_rgb565(int(round(rf * 255)), int(round(gf * 255)), int(round(bf * 255)))
+        return int(round(rf * 255)), int(round(gf * 255)), int(round(bf * 255))
+
+    def map565(self, c):
+        r = self._cache.get(c)
+        if r is not None:
+            return r
+        out = rgb_to_rgb565(*self.map_rgb8(*rgb565_to_rgb(c)))
         self._cache[c] = out
         return out
+
+    def map_rgb5a3(self, p):
+        """One RGB5A3 TLUT/pixel value: bit 15 set = RGB555 opaque, clear = A3 RGB444."""
+        if p & 0x8000:
+            r = (p >> 10) & 0x1F
+            g = (p >> 5) & 0x1F
+            b = p & 0x1F
+            r8, g8, b8 = self.map_rgb8((r << 3) | (r >> 2), (g << 3) | (g >> 2), (b << 3) | (b >> 2))
+            return 0x8000 | ((r8 >> 3) << 10) | ((g8 >> 3) << 5) | (b8 >> 3)
+        a = (p >> 12) & 7
+        r8, g8, b8 = self.map_rgb8(((p >> 8) & 0xF) * 17, ((p >> 4) & 0xF) * 17, (p & 0xF) * 17)
+        return (a << 12) | ((r8 >> 4) << 8) | ((g8 >> 4) << 4) | (b8 >> 4)
 
 
 def _swap01(idx):
@@ -641,6 +714,75 @@ def recolour_gpc(gpc, rc):
         start, end = t["data"], t["data"] + t["size"]
         for o in range(start, end, 8):
             d[o:o + 8] = recolour_block(bytes(d[o:o + 8]), rc)
+
+
+# ----------------------------------------------------------------------------------------------
+# UI texture files (TextureArchiveHeader at the root; CI8 textures with a TLUT)
+# ----------------------------------------------------------------------------------------------
+class TextureFile:
+    """A UI resource whose root word is the texture archive offset (the HUD portrait file).
+    Each 0x20 header: {u32 dataOff, u32 tlutOff, u16 h, u16 w, ..., u8 fmt @0x17, u16 colours @0x18,
+    u8 tlutFmt @0x1A}; offsets are archive-relative.  CI8 index data is stored in 8x4 tiles."""
+
+    def __init__(self, data):
+        self.data = bytearray(data)
+        self.archive = struct.unpack_from(">I", self.data, 0)[0]
+        self.count = struct.unpack_from(">H", self.data, self.archive)[0]
+        self.textures = []
+        for i in range(self.count):
+            h = self.archive + 4 + i * 0x20
+            data_off, tlut_off, height, width = struct.unpack_from(">IIHH", self.data, h)
+            fmt = self.data[h + 0x17]
+            colours = struct.unpack_from(">H", self.data, h + 0x18)[0]
+            tlut_fmt = self.data[h + 0x1A]
+            size = None
+            if fmt == TEX_FMT_CI8:
+                size = align(width, 8) * align(height, 4)
+            self.textures.append({"index": i, "hdr": h, "data": self.archive + data_off, "tlut": self.archive + tlut_off,
+                                  "w": width, "h": height, "fmt": fmt, "colours": colours, "tlut_fmt": tlut_fmt, "size": size})
+
+    def portraits(self):
+        """The per-charID 50x50 CI8 portraits, in charID order (54 of them)."""
+        out = [t for t in self.textures if (t["w"], t["h"], t["fmt"]) == (PORTRAIT_W, PORTRAIT_H, TEX_FMT_CI8)]
+        if len(out) != NUM_CHARS:
+            raise ValueError("portrait file: expected %d 50x50 CI8 textures, found %d" % (NUM_CHARS, len(out)))
+        for t in out:
+            if t["colours"] != 256 or t["tlut_fmt"] != TLUT_FMT_RGB5A3:
+                raise ValueError("portrait %d is not CI8 with a 256-entry RGB5A3 palette" % t["index"])
+        return out
+
+    def tlut(self, t):
+        return bytes(self.data[t["tlut"]:t["tlut"] + t["colours"] * 2])
+
+    def pixels(self, t):
+        return bytes(self.data[t["data"]:t["data"] + t["size"]])
+
+
+def recolour_tlut(tlut, rc):
+    out = bytearray(tlut)
+    for o in range(0, len(out), 2):
+        struct.pack_into(">H", out, o, rc.map_rgb5a3(struct.unpack_from(">H", out, o)[0]))
+    return bytes(out)
+
+
+def copy_portrait(tf, S, C, rc):
+    """Portrait S := portrait C with its palette recoloured (index data copied as is)."""
+    por = tf.portraits()
+    src, dst = por[C], por[S]
+    if src["size"] != dst["size"]:
+        raise ValueError("portrait sizes differ")
+    tf.data[dst["data"]:dst["data"] + dst["size"]] = tf.pixels(src)
+    tf.data[dst["tlut"]:dst["tlut"] + 512] = recolour_tlut(tf.tlut(src), rc)
+
+
+def portrait_desc(dol):
+    """The 54-portrait file descriptor; all DOL rows that name it must agree (and look retail)."""
+    d = dol.desc(ADDR_PORTRAIT_DESC, 0)
+    if dol.desc(ADDR_PORTRAIT_DESC2, 0) != d:
+        raise SystemExit("main.dol: the two portrait-file descriptor rows disagree (patched DOL?)")
+    if d[0] != LZSS_FLAGS or not (d[1] & SIZE_COMPRESSED_BIT):
+        raise SystemExit("main.dol: portrait file descriptor is not an LZSS file")
+    return d
 
 
 # ----------------------------------------------------------------------------------------------
@@ -914,6 +1056,8 @@ def preflight(disc, dol, log):
             problems.append("main.dol ARAM allocation already patched")
         if dol.desc(ADDR_SUBFILES, 0)[2] != 0x09439000 or dol.pair(0) != (0, -1):
             problems.append("main.dol character tables do not look like retail GYQE01")
+        if dol.read(ADDR_FINDCHAR, len(FINDCHAR_RETAIL)) != FINDCHAR_RETAIL:
+            problems.append("main.dol fn_800698F8 (findCharacterID) is not retail (already patched DOL?)")
     except ValueError as e:
         problems.append(str(e))
     boot = disc.sys / "boot.bin"
@@ -1009,6 +1153,32 @@ def clone(args):
     blob = bytearray(disc.read_zzzz(blob_desc[2], blob_desc[3])) if use_overlay else None
     blob_used = len(blob) if blob is not None else 0
     report = []
+    inplace = []         # (offset, bytes) rewritten inside the existing ZZZZ.dat
+
+    # --- presentation: unique index (names/portraits/announcer/voice bank) and the HUD portrait
+    ui_source = args.ui == "source"
+    if ui_source:
+        src_unique = dol.u8(ADDR_FAMILY + C * 6 + FAMILY_UNIQUE)
+        for S, rc in clones:
+            dol.write(ADDR_FAMILY + S * 6 + FAMILY_UNIQUE, bytes([src_unique]))
+        dol.write(ADDR_FINDCHAR, FINDCHAR_PATCH)
+        log("ui: unique index of %s -> %d (%s's); fn_800698F8 rewritten to read lbl_800E8558[charID].uniqueIdx" % (
+            ", ".join(CHAR_NAMES[S] for S, _ in clones), src_unique, CHAR_NAMES[C]))
+        pdesc = portrait_desc(dol)
+        pfile = TextureFile(lzss_decompress(disc.read_zzzz(pdesc[2], pdesc[3]), pdesc[1] & 0x0FFFFFFF)[0])
+        for S, rc in clones:
+            copy_portrait(pfile, S, C, rc)
+        pcomp = lzss_compress_optimal(bytes(pfile.data))
+        if lzss_decompress(pcomp, len(pfile.data))[0] != bytes(pfile.data):
+            raise SystemExit("internal error: LZSS round trip failed (portraits)")
+        if len(pcomp) > pdesc[3]:
+            raise SystemExit("the re-packed HUD portrait file is %d B but only %d B fit at its disc offset; rerun with --ui donor"
+                             % (len(pcomp), pdesc[3]))
+        inplace.append((pdesc[2], pcomp + b"\0" * (pdesc[3] - len(pcomp))))
+        log("ui: HUD portraits %s := %s's (palette recoloured); file re-packed in place at ZZZZ.dat+0x%08X (%d of %d B)" % (
+            ", ".join(CHAR_NAMES[S] for S, _ in clones), CHAR_NAMES[C], pdesc[2], len(pcomp), pdesc[3]))
+    else:
+        log("ui: donor (menus, HUD and announcer keep the donor's name/portrait/call-out)")
 
     for S, rc in clones:
         log("clone -> slot %d %s  (%s)" % (S, CHAR_NAMES[S], rc.spec))
@@ -1101,14 +1271,14 @@ def clone(args):
         log("game.rel: copied voice/hitbox/timing tables, re-packed in place at aaaa.dat+0x%08X (%d B, room %d B)" % (old[2], len(comp), room))
 
     if dry:
-        log("DRY RUN summary: %d B in %d chunks appended to ZZZZ.dat from 0x%08X; main.dol/stats/game.rel rows for slots %s" % (
-            cursor - append_at, len(chunks), append_at, [S for S, _ in report]))
+        log("DRY RUN summary: %d B in %d chunks appended to ZZZZ.dat from 0x%08X; %d in-place rewrite(s); main.dol/stats/game.rel rows for slots %s" % (
+            cursor - append_at, len(chunks), append_at, len(inplace), [S for S, _ in report]))
         log("DRY RUN: no files written")
         return
 
-    # --- write ZZZZ.dat appendix
+    # --- write ZZZZ.dat: in-place rewrites, then the appendix
     with open(zz_path, "r+b") as f:
-        for off, b in chunks:
+        for off, b in inplace + chunks:
             f.seek(off)
             f.write(b)
         f.seek(0, 2)
@@ -1154,6 +1324,8 @@ def clone(args):
 
     log("")
     log("Done.  In the game, pick: " + ", ".join("%s (slot %d) -> %s" % (CHAR_NAMES[S], S, rc.spec) for S, rc in report))
+    if ui_source:
+        log("Menus, HUD and the announcer show/say %s for these slots (grid cells of main characters included)." % CHAR_NAMES[C])
     log("Boot: Dolphin -> File -> Open -> %s" % (out / "sys" / "main.dol"))
 
 
@@ -1174,6 +1346,8 @@ recolour spec (after the slot and a colon): """ + Recolour.__doc__)
     ap.add_argument("--iso", help="also write a bootable .iso (the disc grows past the standard size; Dolphin accepts it)")
     ap.add_argument("--no-aram-overlay", action="store_true",
                     help="do not recolour the ARAM (in-game) body; clones then look like the plain source in matches")
+    ap.add_argument("--ui", choices=("source", "donor"), default="source",
+                    help="whose name/portrait/announcer call-out/voice the clone slots get in menus and in-game (default: source)")
     ap.add_argument("--no-stats", action="store_true", help="keep the donor's stats instead of copying the source's")
     ap.add_argument("--no-gameplay", action="store_true", help="keep the donor's game.rel/DOL gameplay tables")
     ap.add_argument("--list-slots", action="store_true", help="print the slot table and exit")

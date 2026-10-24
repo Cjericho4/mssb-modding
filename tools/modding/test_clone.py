@@ -69,12 +69,34 @@ def main():
     ap.add_argument("--slot", action="append", default=[])
     ap.add_argument("--iso", action="store_true", help="also write and verify an ISO (1.5 GB)")
     ap.add_argument("--patched", help="verify this already-patched folder instead of running the patcher (give the same --source/--slot you used)")
+    ap.add_argument("--ui", choices=("source", "donor"), default="source", help="the --ui the patcher ran with (default source)")
     args = ap.parse_args()
 
     disc = cc.Disc(args.disc)
     dol = cc.Dol((disc.sys / "main.dol").read_bytes())
     C = cc.parse_char(args.source)
     slots = [cc.parse_slot_spec(s) for s in args.slot] or [(29, cc.Recolour("hue=blue")), (30, cc.Recolour("hue=green")), (31, cc.Recolour("hue=purple")), (32, cc.Recolour("hue=yellow"))]
+    ui_source = args.ui == "source"
+
+    print("0. retail lookup tables (the proof behind the fn_800698F8 rewrite)")
+    main_arr = list(dol.read(0x80108DB8, 32))                      # mainCharArray: grid cell -> base charID
+    var_arr = list(dol.read(0x80108DDC, 22))                       # variant charIDs, switch -> base cell
+    var_cell = [0x15, 0x15, 0x16, 0x16, 0xD, 0xD, 0xD, 0xD, 0x19, 0x19, 0x19, 0xC, 0x14, 0x10, 0x10, 0x10, 0x10, 0x1F, 0x1F, 0x1F, 0x17, 0x17]
+
+    def retail_grid(c):
+        if c in main_arr:
+            return main_arr.index(c)
+        return var_cell[var_arr.index(c)]
+    check(all(dol.u8(cc.ADDR_FAMILY + c * 6 + cc.FAMILY_UNIQUE) == retail_grid(c) for c in range(54)),
+          "lbl_800E8558[c].uniqueIdx == fn_800698F8(c) for all 54 retail charIDs")
+    check(dol.read(cc.ADDR_FINDCHAR, len(cc.FINDCHAR_RETAIL)) == cc.FINDCHAR_RETAIL, "retail fn_800698F8 head bytes")
+    pdesc = cc.portrait_desc(dol)
+    pfile = cc.TextureFile(cc.lzss_decompress(disc.read_zzzz(pdesc[2], pdesc[3]), pdesc[1] & 0x0FFFFFFF)[0])
+    pors = pfile.portraits()
+    check(len(set(pfile.pixels(t) + pfile.tlut(t) for t in pors)) == 54, "portrait file has 54 distinct 50x50 CI8 portraits (one per charID)")
+    rel0 = cc.load_game_rel(disc, dol)
+    rbase, rsize = cc.rel_data_section(rel0)
+    check(all(struct.unpack_from(">4I", rel0, rbase + o) == pdesc for o in cc.REL_PORTRAIT_DESCS), "game.rel portrait descriptor rows == the DOL's")
 
     print("1. LZSS round trip on retail files")
     for t in range(cc.SUBFILE_TRACKS):
@@ -105,7 +127,7 @@ def main():
     else:
         print("3. run the patcher")
         out = work / "patched"
-        argv = ["--disc", args.disc, "--out", str(out), "--source", args.source, "--force"]
+        argv = ["--disc", args.disc, "--out", str(out), "--source", args.source, "--force", "--ui", args.ui]
         for s in args.slot:
             argv += ["--slot", s]
         if args.iso:
@@ -120,6 +142,8 @@ def main():
     check(new_zz > old_zz, "ZZZZ.dat grew from %d to %d" % (old_zz, new_zz))
     # original ZZZZ.dat bytes unchanged except the stats block
     allowed_zz = [(cc.ZZZZ_STATS_OFFSET, cc.ZZZZ_STATS_OFFSET + cc.NUM_CHARS * cc.STATS_ROW)]
+    if ui_source:
+        allowed_zz.append((pdesc[2], pdesc[2] + pdesc[3]))       # the HUD portrait file, re-packed in place
     with open(disc.files / "ZZZZ.dat", "rb") as a, open(pdisc.files / "ZZZZ.dat", "rb") as b:
         pos = 0
         bad = False
@@ -132,7 +156,40 @@ def main():
                     if not any(lo <= pos + s and pos + e <= hi for lo, hi in allowed_zz):
                         bad = True
             pos += n
-    check(not bad, "original ZZZZ.dat region unchanged outside the stats block")
+    check(not bad, "original ZZZZ.dat region unchanged outside the stats block%s" % (" and the HUD portrait file" if ui_source else ""))
+
+    print(" ui (%s)" % args.ui)
+    clone_ids = [s for s, _ in slots]
+    if ui_source:
+        check(pdol.read(cc.ADDR_FINDCHAR, len(cc.FINDCHAR_PATCH)) == cc.FINDCHAR_PATCH, "fn_800698F8 head == the uniqueIdx lookup (16 instructions)")
+        check(pdol.read(cc.ADDR_FINDCHAR + len(cc.FINDCHAR_PATCH), 0x170 - len(cc.FINDCHAR_PATCH)) == dol.read(cc.ADDR_FINDCHAR + len(cc.FINDCHAR_PATCH), 0x170 - len(cc.FINDCHAR_PATCH)),
+              "rest of fn_800698F8 untouched")
+        src_u = dol.u8(cc.ADDR_FAMILY + C * 6 + cc.FAMILY_UNIQUE)
+        for S, _ in slots:
+            row, prow = dol.read(cc.ADDR_FAMILY + S * 6, 6), pdol.read(cc.ADDR_FAMILY + S * 6, 6)
+            check(prow[cc.FAMILY_UNIQUE] == src_u and prow[:2] == row[:2] and prow[3:] == row[3:],
+                  "lbl_800E8558[%d] = %s (uniqueIdx %d -> %d, family/base/colour kept)" % (S, list(prow), row[cc.FAMILY_UNIQUE], src_u))
+        check(all(pdol.read(cc.ADDR_FAMILY + c * 6, 6) == dol.read(cc.ADDR_FAMILY + c * 6, 6) for c in range(54) if c not in clone_ids), "all other lbl_800E8558 rows unchanged")
+        check(pdol.desc(cc.ADDR_PORTRAIT_DESC, 0) == pdesc and pdol.desc(cc.ADDR_PORTRAIT_DESC2, 0) == pdesc, "portrait descriptors unchanged (file re-packed in place)")
+        praw = pdisc.read_zzzz(pdesc[2], pdesc[3])
+        pdata, used = cc.lzss_decompress(praw, pdesc[1] & 0x0FFFFFFF)
+        check(used <= pdesc[3] and praw[used:] == b"\0" * (pdesc[3] - used), "re-packed portrait stream fits (%d of %d B) and is zero padded" % (used, pdesc[3]))
+        ppf = cc.TextureFile(pdata)
+        ppors = ppf.portraits()
+        check(len(pdata) == len(pfile.data) and all(ppf.data[t["hdr"]:t["hdr"] + 0x20] == pfile.data[t["hdr"]:t["hdr"] + 0x20] for t in pfile.textures)
+              and ppf.data[:pfile.archive + 4] == pfile.data[:pfile.archive + 4], "portrait file: size, root and every texture header identical")
+        others_same = all(ppf.pixels(t) == pfile.pixels(t) and ppf.tlut(t) == pfile.tlut(t) for i, t in enumerate(pors) if i not in clone_ids)
+        check(others_same, "all other portraits identical")
+        non_portrait = [t for t in pfile.textures if t not in pors]
+        check(all(ppf.data[t["data"]:t["data"] + 64] == pfile.data[t["data"]:t["data"] + 64] for t in non_portrait), "non-portrait textures identical (first 64 B each)")
+        for S, rc in slots:
+            check(ppf.pixels(ppors[S]) == pfile.pixels(pors[C]) and ppf.tlut(ppors[S]) == cc.recolour_tlut(pfile.tlut(pors[C]), rc),
+                  "portrait %d = %s's indices + recoloured palette (%s)" % (S, cc.CHAR_NAMES[C], rc.spec))
+            check(ppf.tlut(ppors[S]) != pfile.tlut(pors[C]), "portrait %d palette actually changed" % S)
+    else:
+        check(pdol.read(cc.ADDR_FINDCHAR, 0x170) == dol.read(cc.ADDR_FINDCHAR, 0x170), "fn_800698F8 untouched")
+        check(all(pdol.read(cc.ADDR_FAMILY + c * 6, 6) == dol.read(cc.ADDR_FAMILY + c * 6, 6) for c in range(54)), "lbl_800E8558 untouched")
+        check(pdisc.read_zzzz(pdesc[2], pdesc[3]) == disc.read_zzzz(pdesc[2], pdesc[3]), "portrait file untouched")
 
     src_t0 = cc.Gpc(cc.load_subfile(disc, dol, C * cc.SUBFILE_TRACKS))
     src_t1 = cc.Gpc(cc.load_subfile(disc, dol, C * cc.SUBFILE_TRACKS + 1))
@@ -208,6 +265,12 @@ def main():
     allowed = [(dol.off(cc.ADDR_BLOB_LIS), dol.off(cc.ADDR_BLOB_LIS) + 4), (dol.off(cc.ADDR_BLOB_ADDI), dol.off(cc.ADDR_BLOB_ADDI) + 4),
                (dol.off(cc.ADDR_MASTER + 515 * 16), dol.off(cc.ADDR_MASTER + 515 * 16) + 16),
                (dol.off(cc.ADDR_GAME_REL_DESC), dol.off(cc.ADDR_GAME_REL_DESC) + 16)]  # game.rel re-packed size
+    text_allowed = [allowed[0], allowed[1]]
+    if ui_source:
+        allowed.append((dol.off(cc.ADDR_FINDCHAR), dol.off(cc.ADDR_FINDCHAR) + len(cc.FINDCHAR_PATCH)))
+        text_allowed.append(allowed[-1])
+        for S, _ in slots:
+            allowed.append((dol.off(cc.ADDR_FAMILY + S * 6 + cc.FAMILY_UNIQUE), dol.off(cc.ADDR_FAMILY + S * 6 + cc.FAMILY_UNIQUE) + 1))
     for S, _ in slots:
         allowed += [(dol.off(cc.ADDR_SUBFILES + S * 19 * 16), dol.off(cc.ADDR_SUBFILES + S * 19 * 16) + 19 * 16),
                     (dol.off(cc.ADDR_MASTER + (54 + S * 7) * 16), dol.off(cc.ADDR_MASTER + (54 + S * 7) * 16) + 7 * 16),
@@ -223,9 +286,8 @@ def main():
             allowed.append((dol.off(cc.ADDR_ANIMPARAMS + (k * 54 + S) * 2), dol.off(cc.ADDR_ANIMPARAMS + (k * 54 + S) * 2) + 2))
     bad = covered(diff_ranges(dol.data, pdol.data), allowed)
     check(not bad, "main.dol differs only in the intended tables (%d differing ranges)%s" % (len(diff_ranges(dol.data, pdol.data)), "" if not bad else " unexpected: " + ", ".join("0x%X-0x%X" % r for r in bad[:5])))
-    text_end = dol.off(cc.ADDR_BLOB_ADDI) + 4
     text_diffs = [r for r in diff_ranges(dol.data, pdol.data) if r[0] < dol.sections[1][0] + dol.sections[1][2]]
-    check(len(text_diffs) <= 2 and all(e - s <= 4 for s, e in text_diffs), ".text changed only at the two ARAM-size instructions")
+    check(not covered(text_diffs, text_allowed), ".text changed only at the two ARAM-size instructions%s" % (" and the fn_800698F8 head" if ui_source else ""))
 
     print(" stats block")
     st = pdisc.read_zzzz(cc.ZZZZ_STATS_OFFSET, 54 * 0xA0)
