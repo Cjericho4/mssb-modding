@@ -1396,12 +1396,11 @@ def selftest(argv):
             theme.S, "fallback for " + ", ".join(theme.FONT_FALLBACK) if theme.FONT_FALLBACK else "bundled",
             "on" if dark else "off"))
         # narrow window: the preview stacks under the form; wide again: back to two columns
+        # (no root.update() between: the window's own resize events would re-run relayout with its real width)
         wide = app.wide_width()
         app.relayout(wide - theme.px(40))
-        root.update()
         stacked = app.stacked and app.preview_card.grid_info()["column"] == 0
         app.relayout(wide + theme.px(40))
-        root.update()
         if not stacked or app.stacked or app.preview_card.grid_info()["column"] != 1:
             print("selftest: the narrow-window layout did not switch (stacked %s)" % stacked)
             return 1
