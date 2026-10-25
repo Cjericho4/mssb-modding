@@ -74,7 +74,10 @@ No retail data or generated discs belong in commits or CI.
 
 For large local grids, `--ram-isos` (Linux) keeps ISO contents in anonymous RAM
 files exposed through temporary symlinks under `.scratch`, avoiding sustained
-ISO writes to the host disk. Every byte is still compared. `--skip-passed LOG`
+ISO writes to the host disk. In this mode the two CLIs produce their folders
+with identical arguments, then their production ISO writers are called directly
+(the CLI input-protection checks reject anonymous-file paths). Every byte is
+still compared. Ordinary runs exercise the CLI `--iso` path. `--skip-passed LOG`
 resumes a grid from the `PASS clone` labels in a previous log. Both are optional;
 normal runs use ordinary files and start the complete grid.
 

@@ -455,10 +455,16 @@ def clone_case_in(cli, work, disc, label, opts):
                 path.symlink_to("/proc/%d/fd/%d" % (os.getpid(),fd))
         base = ["--disc", disc, *opts]
         t = time.perf_counter()
-        py = run([sys.executable, MOD / "clone_character.py", *base, "--out", a, "--iso", ai])
+        py = run([sys.executable, MOD / "clone_character.py", *base, "--out", a,
+                  *([] if RAM_ISOS else ["--iso",ai])])
+        if RAM_ISOS:
+            import clone_character as cc
+            cc.write_iso(cc.Disc(a),ai,lambda _:None)
         py_time = time.perf_counter() - t
         t = time.perf_counter()
-        rs = run([cli, *base, "--out", b, "--iso", bi])
+        rs = run([cli, *base, "--out", b, *([] if RAM_ISOS else ["--iso",bi])])
+        if RAM_ISOS:
+            run([cli.with_name("mssb-clone-probe"),"write-iso",b,bi])
         rs_time = time.perf_counter() - t
         compare_trees(a, b)
         compare_files(ai, bi)
