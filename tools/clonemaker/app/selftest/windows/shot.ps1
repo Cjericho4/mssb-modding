@@ -1,5 +1,6 @@
 # Saves the Clone Maker window as $env:SHOT_DIR\<name>.png (called by shot.cmd during --selftest)
 param([string]$Name)
+$ErrorActionPreference = "Stop"
 Add-Type -AssemblyName System.Drawing
 Add-Type @"
 using System;
