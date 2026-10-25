@@ -73,8 +73,8 @@ team). Only keys present in your file are written, so a file with just
 `{"format": "mssb-stats 1", "characters": [{"id": 0, "speed": 90}]}` is a valid mod. Typos and
 out-of-range values are refused before anything is written. Field meanings, ranges and what the
 game does with each value: `.agent/stats.md` in the repo. Chemistry is stored twice (A with B and
-B with A): change both. A star player's +50 bonus and the 1..10 menu bars are separate fields; the
-bars do not affect play.
+B with A): change both. The star-player bonus (+50, +20 to pitch speeds) is in `main.dol`, not in
+this file. The 1..10 bars are what the menus show; no in-match reader was found.
 
 ## How replace works
 
