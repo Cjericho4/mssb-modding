@@ -1,0 +1,35 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "MSSB Clone Maker",
+  "version": "0.1.0",
+  "identifier": "io.github.cjericho4.mssb-clone-maker",
+  "build": {
+    "frontendDist": "ui"
+  },
+  "app": {
+    "withGlobalTauri": true,
+    "windows": [
+      {
+        "title": "MSSB Clone Maker",
+        "width": 1320,
+        "height": 780,
+        "minWidth": 640,
+        "minHeight": 560,
+        "center": true,
+        "theme": "Dark",
+        "backgroundColor": "#07070b"
+      }
+    ],
+    "security": {
+      "csp": "default-src 'self'; img-src 'self' data:; style-src 'self'; font-src 'self'; script-src 'self'"
+    }
+  },
+  "bundle": {
+    "active": false,
+    "icon": [
+      "icons/32x32.png",
+      "icons/icon.png",
+      "icons/icon.ico"
+    ]
+  }
+}

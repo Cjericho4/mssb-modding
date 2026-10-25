@@ -1,0 +1,129 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>MSSB Clone Maker</title>
+<link rel="stylesheet" href="theme.css">
+</head>
+<body>
+<header class="top">
+  <svg class="mark" viewBox="0 0 32 32" aria-hidden="true">
+    <defs><clipPath id="ball"><circle cx="16" cy="16" r="11"/></clipPath></defs>
+    <rect width="32" height="32" rx="7" fill="#e60012"/>
+    <circle cx="16" cy="16" r="11" fill="#f5f5f8"/>
+    <g clip-path="url(#ball)" fill="none" stroke="#e60012" stroke-width="2.2">
+      <circle cx="1.5" cy="16" r="10.5"/><circle cx="30.5" cy="16" r="10.5"/>
+    </g>
+  </svg>
+  <div class="brand">
+    <h1>MSSB Clone Maker</h1>
+    <p>Mario Superstar Baseball · USA</p>
+  </div>
+  <p class="blurb">Make recoloured copies of a character.</p>
+  <div class="pill" id="pill"><i></i><span>No game yet</span></div>
+</header>
+
+<main class="page">
+  <section class="card" id="card-game">
+    <header><span class="chip red">01</span><h2>Your game</h2></header>
+    <div class="body">
+      <div class="line">
+        <button id="btn-iso">Choose your game (.iso)…</button>
+        <button id="btn-dir">or a folder…</button>
+        <input id="game-path" class="path grow" readonly tabindex="-1">
+      </div>
+      <p id="status" class="status">No game chosen yet.</p>
+    </div>
+  </section>
+
+  <section class="card" id="card-clones">
+    <header>
+      <span class="chip red">02</span><h2>Clones</h2>
+      <label class="label right" for="source">Character to clone</label>
+      <select id="source"></select>
+    </header>
+    <div class="body">
+      <div id="regions">
+        <h3 class="label">Colours to change</h3>
+        <div id="regions-box"></div>
+        <p id="regions-hint" class="muted">Choose your game first.</p>
+      </div>
+      <div class="clone-row head">
+        <h3 class="label">Preview</h3><h3 class="label">Slot it takes over</h3><h3 class="label">Colour</h3>
+      </div>
+      <p id="no-game-hint" class="muted">Choose your game first.</p>
+      <div id="rows"></div>
+      <div class="line spread">
+        <button id="btn-add">+ Add a clone</button>
+        <button id="btn-adv">Advanced options  ▸</button>
+      </div>
+      <div id="adv" hidden>
+        <hr>
+        <h3 class="kicker">Advanced</h3>
+        <label class="check"><input type="checkbox" id="chk-ui" checked><span id="chk-ui-text"></span></label>
+        <label class="check indent"><input type="checkbox" id="chk-colour"><span>Keep the donor's colour word (e.g. 'Purple')</span></label>
+        <label class="check"><input type="checkbox" id="chk-stats" checked><span id="chk-stats-text"></span></label>
+        <div class="shading">
+          <h3 class="label">Keep shading</h3>
+          <input type="range" id="keeplum" min="0" max="1" step="0.01" value="0.5">
+          <output id="keeplum-value" class="mono">0.50</output>
+        </div>
+        <p class="muted">Higher keeps the light and dark areas of the original; lower is brighter and flatter.</p>
+        <label class="check spaced"><input type="checkbox" id="chk-keep"><span>Keep the working folder (for troubleshooting)</span></label>
+      </div>
+    </div>
+  </section>
+
+  <section class="card" id="card-save">
+    <header><span class="chip red">03</span><h2>Save the new game as</h2></header>
+    <div class="body">
+      <div class="line">
+        <input id="out-path" class="path grow" spellcheck="false">
+        <button id="btn-out">Save as…</button>
+        <button id="btn-go" class="primary">Create patched game</button>
+      </div>
+      <div id="run-box" hidden>
+        <p id="progress-label" class="muted"></p>
+        <div class="line">
+          <div class="progress grow"><div id="progress-bar"></div></div>
+          <button id="btn-cancel">Cancel</button>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="card" id="card-preview">
+    <header><h2>Preview</h2><span id="preview-chip" class="chip neutral right">Mario</span></header>
+    <div class="body">
+      <p id="preview-caption" class="muted caption">All of the character's textures, before and after.</p>
+      <div class="pics">
+        <figure>
+          <h3 class="label">Before</h3>
+          <div class="pic"><img id="img-before" alt="" hidden><span>No preview yet</span></div>
+        </figure>
+        <figure>
+          <h3 class="label">After</h3>
+          <div class="pic"><img id="img-after" alt="" hidden></div>
+        </figure>
+        <div class="log-box">
+          <h3 class="kicker">Log</h3>
+          <div id="log" class="mono"></div>
+        </div>
+      </div>
+    </div>
+  </section>
+</main>
+
+<div id="dialog" class="modal" hidden>
+  <div class="dialog" role="dialog" aria-modal="true" aria-labelledby="dialog-title">
+    <header><span id="dialog-chip" class="chip"></span><h2 id="dialog-title"></h2></header>
+    <p id="dialog-text"></p>
+    <div class="line end" id="dialog-buttons"></div>
+  </div>
+</div>
+
+<input type="color" id="picker" class="offscreen" tabindex="-1">
+<script src="app.js"></script>
+</body>
+</html>
