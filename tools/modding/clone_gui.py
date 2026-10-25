@@ -1422,6 +1422,16 @@ def selftest(argv):
             prof.disable()
             busy = time.perf_counter() - t0 - 80 * 0.02
             print("selftest: 80 resizes, %.2f s busy (%.1f ms per step, sleeps excluded)" % (busy, busy * 12.5))
+            # the same drag without the background wash image, and without the card panels: what painting costs
+            for what, tag in (("no wash", "wash"), ("no wash or cards", "card")):
+                app.page.itemconfigure(tag, state="hidden")
+                t1 = time.perf_counter()
+                for i in range(40):
+                    root.geometry("%dx%d" % (int(sw * 0.55) + 4 * i, int(sh * 0.6) + 2 * i))
+                    root.update()
+                    time.sleep(0.02)
+                busy = time.perf_counter() - t1 - 40 * 0.02
+                print("selftest: %s: %.1f ms per step" % (what, busy * 25))
             pstats.Stats(prof, stream=sys.stdout).sort_stats("cumulative").print_stats(30)
             pstats.Stats(prof, stream=sys.stdout).sort_stats("tottime").print_stats(15)
         if "--expect-fast-lzss" in argv and cc._fast_lzss is None:
