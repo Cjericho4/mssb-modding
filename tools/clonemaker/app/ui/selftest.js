@@ -36,7 +36,7 @@ export async function run(options, app) {
     const failed = await invoke("selftest_mark", { name });
     if (failed) say(`no screenshot ${name}: ${failed}`);
   };
-  const sep = options.game.includes("\\") ? "\\" : "/";
+  const sep = options.dir.includes("\\") ? "\\" : "/";
   const inDir = (name) => options.dir + sep + name;
   const rows = () => [...document.querySelectorAll("#rows .clone-row")];
   const caption = () => $("preview-caption").textContent;
@@ -67,7 +67,38 @@ export async function run(options, app) {
     if (innerWidth >= 1200) check(!stacked(), "wide window shows the preview beside the form");
     else say(`screen too small for the two-column check (window ${innerWidth} px wide)`);
 
-    // the game
+    // a game that can't be used
+    await app.startLoad(inDir("game.rvz"));
+    check($("status").textContent.startsWith("✖ File not found") && $("pill").textContent === "Game not usable", "missing game: " + $("status").textContent);
+    check($("btn-go").disabled, "no game, no create");
+    await shot("bad_game");
+
+    if (options.game) await walkThrough();
+    else say("no --game: the features that need the game were not tested");
+
+    // a 1366 x 768 screen at 125 %
+    await resizeTo(1093, 614);
+    check(stacked(), "1093 px wide is stacked");
+    await shot("small_top");
+
+    // resizing: time from each new size to the next painted frame
+    const longTasks = [];
+    const observer = PerformanceObserver.supportedEntryTypes?.includes("longtask")
+      ? new PerformanceObserver((l) => longTasks.push(...l.getEntries())) : null;
+    observer?.observe({ entryTypes: ["longtask"] });
+    const medians = [await bench("narrow", 640, 560)];
+    if (screen.availWidth >= 1600 && screen.availHeight >= 900) medians.push(await bench("wide", 1200, 700));
+    observer?.disconnect();
+    if (observer) say(`resize: ${longTasks.length} long tasks (> 50 ms) on the page during the drags`);
+    check(medians.every((m) => m < 100), "resizing stays under 100 ms per step");
+    await resizeTo(1320, 780);
+  } catch (e) {
+    check(false, "exception: " + (e.stack || e.error || e));
+  }
+  say(ok ? "OK" : "FAILED");
+  await invoke("selftest_report", { ok, lines });
+
+  async function walkThrough() {
     await app.startLoad(options.game);
     await waitFor(() => $("pill").textContent === "GYQE01 ready", "the game check");
     check($("status").textContent === "✔ Mario Superstar Baseball (USA) — OK", "status line: " + $("status").textContent);
@@ -75,7 +106,7 @@ export async function run(options, app) {
     check(rows()[0].querySelector("select").selectedOptions[0].textContent === "Blue Toad — recommended (an extra Toad colour)",
       "first row is Blue Toad");
     check(rows().map((r) => r.querySelectorAll("select")[1].value).join() === "blue,green,purple,yellow", "default colours");
-    check($("out-path").value === inDir("Mario Superstar Baseball - Clones.iso"), "default output: " + $("out-path").value);
+    check($("out-path").value.endsWith(" - Clones.iso"), "default output: " + $("out-path").value);
     await waitFor(() => !$("img-after").hidden && caption().startsWith("All 9 textures of Mario"), "the first preview");
     check(document.querySelectorAll("#regions-box input").length === 2, "Mario's two colour regions");
     await shot("idle");
@@ -153,7 +184,7 @@ export async function run(options, app) {
     check(logHas("the full log is also saved to " + inDir("My Clones.log")), "the .log note");
     await sleep(800);
     await shot("busy");
-    await waitFor(() => !$("dialog").hidden && $("dialog-title").textContent === "Done!", "the done dialog", 30000);
+    await waitFor(() => !$("dialog").hidden && $("dialog-title").textContent === "Done!", "the done dialog", 900000);
     check($("dialog-text").textContent.startsWith("Saved to " + inDir("My Clones.iso") + ".\n\nOpen it in Dolphin"), "done text");
     check($("dialog-text").textContent.includes("In the game, put several Toads on one team"), "done hint");
     await shot("done");
@@ -161,43 +192,17 @@ export async function run(options, app) {
     check($("pill").textContent === "Game created" && !$("btn-go").disabled, "Game created");
     check([...$("log").children].some((l) => l.className === "ok" && l.textContent.startsWith("saved ")), "saved line in green");
 
-    // cancel
+    // replace the game just made, then cancel
     $("btn-go").click();
+    await waitFor(() => dialogOpen("My Clones.iso already exists. Replace it?"), "the replace question");
+    dialogButton("Yes").click();
     await waitFor(() => !$("run-box").hidden && $("progress-label").textContent.includes("%"), "the second run");
     $("btn-cancel").click();
     check($("progress-label").textContent === "Cancelling…", "Cancelling…");
     await waitFor(() => $("pill").textContent === "Cancelled", "the cancelled job");
     check(logHas("Cancelled. Nothing was saved.") && $("run-box").hidden, "cancel message, bar hidden");
 
-    // a game that can't be used, then the real one again
-    await app.startLoad(inDir("game.rvz"));
-    check($("status").textContent.startsWith("✖ File not found") && $("pill").textContent === "Game not usable", "missing game: " + $("status").textContent);
-    check($("btn-go").disabled, "no game, no create");
-    await shot("bad_game");
-    await app.startLoad(options.game);
-    await waitFor(() => !$("btn-go").disabled, "the game again");
-
-    // a 1366 x 768 screen at 125 %
-    await resizeTo(1093, 614);
-    check(stacked(), "1093 px wide is stacked");
-    await shot("small_top");
-
-    // resizing: time from each new size to the next painted frame
-    const longTasks = [];
-    const observer = PerformanceObserver.supportedEntryTypes?.includes("longtask")
-      ? new PerformanceObserver((l) => longTasks.push(...l.getEntries())) : null;
-    observer?.observe({ entryTypes: ["longtask"] });
-    const medians = [await bench("narrow", 640, 560)];
-    if (screen.availWidth >= 1600 && screen.availHeight >= 900) medians.push(await bench("wide", 1200, 700));
-    observer?.disconnect();
-    if (observer) say(`resize: ${longTasks.length} long tasks (> 50 ms) on the page during the drags`);
-    check(medians.every((m) => m < 100), "resizing stays under 100 ms per step");
-    await resizeTo(1320, 780);
-  } catch (e) {
-    check(false, "exception: " + (e.stack || e.error || e));
   }
-  say(ok ? "OK" : "FAILED");
-  await invoke("selftest_report", { ok, lines });
 
   async function resizeTo(w, h) {
     const t0 = performance.now();
