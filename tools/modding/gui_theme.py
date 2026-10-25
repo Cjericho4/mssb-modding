@@ -904,7 +904,8 @@ class Scroller(tk.Frame):
         self.view.configure(yscrollcommand=self.bar.set, xscrollcommand=self.hbar.set)
         self.page = self.item = None
         self._req = None
-        self.view.bind("<Configure>", lambda e: self.fit())
+        self._fit_job = None
+        self.view.bind("<Configure>", lambda e: self._schedule_fit())
         self.bind_all("<MouseWheel>", self._wheel, add="+")
         self.bind_all("<Button-4>", self._wheel, add="+")
         self.bind_all("<Button-5>", self._wheel, add="+")
@@ -920,6 +921,16 @@ class Scroller(tk.Frame):
             self._req = req
             self.fit()
         self.after(150, self._watch)
+
+    def _schedule_fit(self):
+        """Resize the page at most every 40 ms: each fit re-lays out every widget on it (~40 ms in Tk on
+        Windows), and a window drag sends a resize per mouse move."""
+        if self._fit_job is None:
+            self._fit_job = self.after(40, self._fit_now)
+
+    def _fit_now(self):
+        self._fit_job = None
+        self.fit()
 
     def fit(self):
         if self.page is None:

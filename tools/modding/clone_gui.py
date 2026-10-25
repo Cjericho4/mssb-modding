@@ -1421,7 +1421,8 @@ def selftest(argv):
                 root.update()
                 time.sleep(0.02)       # a real drag gives the after() jobs time to fire
             prof.disable()
-            print("selftest: 80 resizes in %.2f s (%.1f ms each)" % (time.perf_counter() - t0, (time.perf_counter() - t0) * 12.5))
+            busy = time.perf_counter() - t0 - 80 * 0.02
+            print("selftest: 80 resizes, %.2f s busy (%.1f ms per step, sleeps excluded)" % (busy, busy * 12.5))
             pstats.Stats(prof, stream=sys.stdout).sort_stats("cumulative").print_stats(30)
             pstats.Stats(prof, stream=sys.stdout).sort_stats("tottime").print_stats(15)
         if "--expect-fast-lzss" in argv and cc._fast_lzss is None:
