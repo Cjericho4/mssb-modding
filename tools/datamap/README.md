@@ -99,6 +99,40 @@ with key values are local game data; don't redistribute them. Extraction uses ca
 filenames (check the output manifest). Track purposes, binary layouts, swap requirements and
 remaining Blender work: [.agent/animations.md](../../.agent/animations.md).
 
+## Voices, announcer, sound effects and music
+
+Every voice line, sound effect and announcer call is a sample inside one of 48 sound groups
+(`sound.0` .. `sound.47`). Character voices are `sound.5` .. `sound.36` (Mario is `sound.5`; the
+first command lists which is which), the announcer's name calls are in `sound.37`.
+
+```powershell
+py mssb_files.py sound-list $disc                    # the 48 groups: what each one is
+py mssb_files.py sound-list $disc sound.5            # Mario: 13 voice lines, which sample each plays
+
+# export, edit, put back (only WAVs you changed are re-encoded)
+py mssb_files.py sound-export $disc sound.5 .\mario_voice      # smp_XXXX.wav + manifest.json
+#   edit or replace a WAV in Audacity etc.; keep the file name. Mono or stereo, any rate, 8/16/24/32-bit.
+py mssb_files.py sound-import $disc sound.5 .\mario_voice --out D:\Games\mssb_voice.iso
+
+# give every Toad (all colours) Mario's voice; lossless, one command
+py mssb_files.py voice-swap $disc Toad Mario --out D:\Games\mssb_toad_mario.iso
+
+# music: the stadium themes etc. are snd\my_snd_h\*.adp; export them to WAV
+py mssb_files.py music-export $disc mario_01_h .\music      # or 'all'
+```
+
+* `manifest.json` says which SFX (and for voices which line: 0 = happy, 10 = hurt, ...) uses each
+  sample. Several lines can share one sample.
+* Re-encoding is DSP-ADPCM, like the game (about 40 dB SNR). Keep replacements about as long as
+  the originals: all 18 players' voice banks are loaded into sound memory at match start.
+* `voice-swap <target> <voice>` takes a character name (`BlueToad`, `Mario`), a charID or a voice
+  name (`Toad`). It changes the voice of every character that shares the target's voice bank
+  (colour variants, and clones made with `clone_character.py --ui source` of that character).
+* The menu has its own copies of some captains' clips (`sound.38`); change them there too.
+* Music: replace the `.adp` in an extracted disc folder (Dolphin rebuilds the file table); any
+  length works. The tools can export but not yet encode `.adp` (use a DTK/ADP encoder).
+* Details and what is still unknown: `.agent/sounds.md`.
+
 ## How replace works
 
 1. The new file is packed the same way as the old one (LZSS 11/4 for almost everything; stored
