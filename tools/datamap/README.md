@@ -58,6 +58,24 @@ leave them as they are or copy them) and `{XXXX}` is a glyph with no ASCII equiv
 icons, symbols). Letters, digits, space and `! " ' ( ) , - . ?` are supported. Strings can get
 longer or shorter.
 
+## Editing character stats, chemistry and Challenge teams
+
+```powershell
+py mssb_files.py stats-export $disc stats.json
+notepad stats.json                                 # change values; delete what you don't touch
+py mssb_files.py stats-import $disc stats.json --out D:\Games\mssb_stats.iso
+```
+
+`stats.json` has one entry per character (`id` 0..53, CHAR_ID order) with named fields
+(`speed`, `slap_power`, `curve`, `fielding_abilities`, `captain_star`, `star_swing`, ...), its
+`chemistry` with every character, and the 12 `captain_teams` (lineup 0 is the Challenge starting
+team). Only keys present in your file are written, so a file with just
+`{"format": "mssb-stats 1", "characters": [{"id": 0, "speed": 90}]}` is a valid mod. Typos and
+out-of-range values are refused before anything is written. Field meanings, ranges and what the
+game does with each value: `.agent/stats.md` in the repo. Chemistry is stored twice (A with B and
+B with A): change both. A star player's +50 bonus and the 1..10 menu bars are separate fields; the
+bars do not affect play.
+
 ## How replace works
 
 1. The new file is packed the same way as the old one (LZSS 11/4 for almost everything; stored

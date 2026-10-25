@@ -9,6 +9,8 @@ The synthetic disc is built in a temp folder from scratch (a tiny DOL/REL/ZZZZ/a
 table addresses as the retail game), so the replace logic is tested without any game data.  The
 real-disc tests only read the disc (replace writes to a temp copy).
 """
+import hashlib
+import json
 import os
 import shutil
 import struct
@@ -22,6 +24,7 @@ sys.path.insert(0, str(HERE))
 import disc as dm  # noqa: E402
 import catalog as ct  # noqa: E402
 import mssb_files as mf  # noqa: E402
+import stats as st  # noqa: E402
 
 cc = dm.cc
 REPO = HERE.parents[1]
@@ -156,6 +159,9 @@ class Synth:
         o5 = put(self.f5)
         self.d5 = (0, len(self.f5), o5, len(self.f5))
         self.d5_partial = (0, 0x200, o5, len(self.f5))
+        self.f6 = payload(st.FILE_SIZE, 9)          # stats.0: stored, named by menus.rel and game.rel
+        o6 = put(self.f6)
+        self.d6 = (0, len(self.f6), o6, len(self.f6))
         put(noise(0x2345, 7))                        # trailing unreferenced data
         zz.extend(bytes(dm.align(len(zz), 4) - len(zz)))
         self.zzzz = bytes(zz)
@@ -165,8 +171,8 @@ class Synth:
                     (dm.BLOB_DESC_ADDR, self.blob_desc)]
         dol_rows += [(dm.MASTER_ADDR + 16 * i, d) for i, d in enumerate(self.mdesc)]
         dol_rows.append((dm.MASTER_ADDR + 16 * 400, self.mdesc[1]))     # a second row naming member 1
-        rels = {"menus": make_rel("menus", [(0x12298, self.d2)]),
-                "game": make_rel("game", [(0x6130 + 16 * 1, self.d1)]),
+        rels = {"menus": make_rel("menus", [(0x12298, self.d2), (0xC8, self.d6)]),
+                "game": make_rel("game", [(0x6130 + 16 * 1, self.d1), (0x0, self.d6)]),
                 "challenge": make_rel("challenge", [(0xA940, self.d5_partial), (0x104F4, self.d5)])}
         aaaa = bytearray(0x800)
         for (name, addr) in dm.REL_DESC_ADDRS:
@@ -242,6 +248,41 @@ class TextFormat(unittest.TestCase):
         self.assertEqual(fm.text_export(b).splitlines()[1], "0\t" + line)
         with self.assertRaises(ValueError):
             fm.encode_text("tab\there")
+
+
+def tree_hashes(root):
+    root = Path(root)
+    return {str(p.relative_to(root)): hashlib.sha1(p.read_bytes()).hexdigest()
+            for p in sorted(root.rglob("*")) if p.is_file()}
+
+
+class StatsFormat(unittest.TestCase):
+    def test_export_apply_identity(self):
+        data = payload(st.FILE_SIZE, 21)
+        obj = st.export(data)
+        self.assertEqual(st.apply(data, obj), data)
+        self.assertEqual(st.apply(data, json.loads(json.dumps(obj))), data)
+        self.assertEqual(st.apply(data, {"format": st.FORMAT}), data)
+
+    def test_one_field(self):
+        data = bytes(st.FILE_SIZE)
+        new = st.apply(data, {"format": st.FORMAT, "characters": [
+            {"id": 2, "speed": 77, "captain_star": "dk", "fielding_abilities": ["laser", "super_curve"],
+             "chemistry": {"mario": 30}}]})
+        diff = [(i, new[i]) for i in range(len(new)) if new[i] != data[i]]
+        r = 2 * st.ROW
+        self.assertEqual(diff, [(r + 0x22, 0x20), (r + 0x23, 0x10), (r + 0x2F, 77), (r + 0x34, 5), (r + 0x3B, 30)])
+
+    def test_errors(self):
+        data = bytes(st.FILE_SIZE)
+        for bad in ({"characters": []},
+                    {"format": st.FORMAT, "characters": [{"id": 0, "sped": 1}]},
+                    {"format": st.FORMAT, "characters": [{"id": 0, "speed": 256}]},
+                    {"format": st.FORMAT, "characters": [{"id": 0, "name": "luigi"}]},
+                    {"format": st.FORMAT, "characters": [{"id": 0, "star_pitch": "slider"}]},
+                    {"format": st.FORMAT, "captain_teams": [{"block": 0, "lineups": [{"members": ["mario"]}]}]}):
+            with self.assertRaises(st.StatsError):
+                st.apply(data, bad)
 
 
 class SyntheticDisc(unittest.TestCase):
@@ -409,6 +450,22 @@ class SyntheticDisc(unittest.TestCase):
         self.assertEqual(ca.data(ca.find("text_menu.0")), self.s.f2)
         self.assertFalse(any(p.name.startswith("mssb_work_") for p in self.tmp.iterdir()))
 
+    def test_stats_round_trip_and_edit(self):
+        js = self.tmp / "stats.json"
+        mf.cmd_stats_export(mf.argparse.Namespace(disc=str(self.s.root), out=str(js)))
+        mf.cmd_stats_import(mf.argparse.Namespace(disc=str(self.s.root), json=str(js), out=str(self.tmp / "same")))
+        self.assertEqual(tree_hashes(self.tmp / "same"), tree_hashes(self.s.root))
+        obj = json.loads(js.read_text(encoding="utf-8"))
+        obj["characters"][5]["speed"] = 200
+        js.write_text(json.dumps(obj), encoding="utf-8")
+        mf.cmd_stats_import(mf.argparse.Namespace(disc=str(self.s.root), json=str(js), out=str(self.tmp / "mod")))
+        a, b = tree_hashes(self.s.root), tree_hashes(self.tmp / "mod")
+        self.assertEqual([k for k in a if a[k] != b[k]], [str(Path("files/ZZZZ.dat"))])
+        za = (self.tmp / "mod" / "files/ZZZZ.dat").read_bytes()
+        off = self.s.d6[2] + 5 * st.ROW + 0x2F
+        self.assertEqual(diff_ranges(self.s.zzzz, za), [(off, off + 1)])
+        self.assertEqual(za[off], 200)
+
     def test_extract_manifest(self):
         out = self.tmp / "x"
         mf.cmd_extract(mf.argparse.Namespace(disc=str(self.s.root), id="all", dir=str(out), raw=False, fst=False))
@@ -469,6 +526,37 @@ class RealDisc(unittest.TestCase):
         for f in banks:
             data = self.cat.data(f)
             self.assertEqual(fm.text_import(fm.text_export(data)), data, f.id)
+
+    def test_stats_retail(self):
+        data = self.cat.data(self.cat.find("stats.0"))
+        obj = st.export(data)
+        self.assertEqual(st.apply(data, obj), data)
+        self.assertEqual(st.warnings(data), [])
+        mario, dk = obj["characters"][0], obj["characters"][2]
+        self.assertEqual((mario["captain_star"], mario["star_pitch"], mario["fielding_abilities"]),
+                         ("mario", "fastball", ["wall_jump", "sliding_catch"]))
+        self.assertEqual((dk["captain_star"], dk["character_class"], dk["weight"]), ("dk", "power", 4))
+        self.assertEqual([c["char_id"] for c in obj["characters"]], list(range(54)))
+        self.assertNotIn("unreferenced", obj)
+        self.assertEqual([t["captain"] for t in obj["captain_teams"]],
+                         ["mario", "peach", "wario", "dk", "yoshi", "bowser", "luigi", "daisy", "waluigi",
+                          "diddy", "birdo", "bowserjr"])
+        self.assertEqual(obj["captain_teams"][0]["lineups"][0]["members"][:2], ["mario", "luigi"])
+
+    @unittest.skipUnless(SLOW, "set MSSB_SLOW=1 (copies the disc)")
+    def test_real_stats_import_identical(self):
+        tmp = Path(tempfile.mkdtemp(prefix="mssb_real_"))
+        try:
+            js = tmp / "stats.json"
+            mf.cmd_stats_export(mf.argparse.Namespace(disc=REAL, out=str(js)))
+            mf.cmd_stats_import(mf.argparse.Namespace(disc=REAL, json=str(js), out=str(tmp / "same")))
+            if Path(REAL).is_dir():
+                self.assertEqual(tree_hashes(tmp / "same"), tree_hashes(REAL))
+            else:
+                c2 = ct.Catalog(dm.Disc(tmp / "same"))
+                self.assertEqual(c2.data(c2.find("stats.0")), self.cat.data(self.cat.find("stats.0")))
+        finally:
+            shutil.rmtree(tmp, ignore_errors=True)
 
     @unittest.skipUnless(SLOW, "set MSSB_SLOW=1 (decompresses ~1 GB)")
     def test_every_file_decompresses(self):

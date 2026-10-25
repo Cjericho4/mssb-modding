@@ -15,6 +15,8 @@ address every file by a stable id such as `res.15` (the menu common file) or `su
     py mssb_files.py tables
     py mssb_files.py text-export <disc> <id> <out.txt>    (text banks: text_menu.0, menu_1ff84.1, ...)
     py mssb_files.py text-import <in.txt> <out.bin>       (then `replace` the bank with out.bin)
+    py mssb_files.py stats-export <disc> <out.json>       (character stats, chemistry, captain teams)
+    py mssb_files.py stats-import <disc> <in.json> --out <folder|game.iso>
 
 <disc> is an extracted disc folder (Dolphin: right-click -> Properties -> Filesystem -> Extract
 Entire Disc, giving sys/ and files/) or a .iso.  The input is never written to.
@@ -36,6 +38,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import disc as dm  # noqa: E402
 import formats as fm  # noqa: E402
 import catalog as ct  # noqa: E402
+import stats as st  # noqa: E402
 
 cc = dm.cc
 EXT = {"model": ".gpc", "stadium": ".stadium.bin", "ui": ".ui.bin", "texarc": ".tex.bin", "anim": ".anim",
@@ -390,7 +393,7 @@ def apply_replace(work, file_id, data, reuse_gaps=False):
         raise SystemExit("file too large")
     old_fmt = cat.sniff(f)[0]
     new_fmt = fm.sniff(data[:fm.HEAD], len(data), not f.compressed)[0]
-    if new_fmt != old_fmt:
+    if new_fmt != old_fmt and old_fmt not in ("stats", "blob"):   # those are known by table, not content
         log("warning: %s was %s, the new file sniffs as %s" % (f.id, old_fmt, new_fmt))
     packed, sizew, plen = build_packed(f, data)
     report = {"id": f.id, "old_offset": f.offset, "old_packed": f.packed, "old_size": f.size,
@@ -646,6 +649,46 @@ def cmd_text_import(args):
 
 
 # ----------------------------------------------------------------------------------------------
+# character stats
+# ----------------------------------------------------------------------------------------------
+STATS_ID = "stats.0"
+
+
+def cmd_stats_export(args):
+    d, cat = open_catalog(args.disc)
+    obj = st.export(cat.data(cat.find(STATS_ID)))
+    with open(args.out, "w", encoding="utf-8", newline="\n") as fh:
+        json.dump(obj, fh, indent=1)
+        fh.write("\n")
+    log("wrote %d characters and %d captain teams to %s (edit, then: stats-import <disc> %s --out ...)" % (
+        len(obj["characters"]), len(obj["captain_teams"]), args.out, args.out))
+
+
+def cmd_stats_import(args):
+    d, cat = open_catalog(args.disc)
+    old = cat.data(cat.find(STATS_ID))
+    d.close()
+    with open(args.json, encoding="utf-8") as fh:
+        obj = json.load(fh)
+    try:
+        new = st.apply(old, obj)
+    except st.StatsError as e:
+        raise SystemExit("%s: %s" % (args.json, e))
+    for note in st.warnings(new):
+        log("note: " + note)
+    changed = sum(a != b for a, b in zip(old, new))
+    log("%d byte(s) of %s differ from the disc" % (changed, STATS_ID))
+    out = Path(args.out)
+    tmp = Path(tempfile.mkdtemp(prefix="mssb_stats_", dir=str(out.resolve().parent)))
+    try:
+        (tmp / "stats.bin").write_bytes(new)
+        cmd_replace(argparse.Namespace(disc=args.disc, id=STATS_ID, file=str(tmp / "stats.bin"),
+                                       out=args.out, reuse_gaps=False))
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
+# ----------------------------------------------------------------------------------------------
 def main(argv=None):
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = p.add_subparsers(dest="cmd")
@@ -684,13 +727,21 @@ def main(argv=None):
     s = sub.add_parser("text-import", help="edited text -> text bank binary (feed it to replace)")
     s.add_argument("txt")
     s.add_argument("out")
+    s = sub.add_parser("stats-export", help="character stats, chemistry and captain teams -> JSON")
+    s.add_argument("disc")
+    s.add_argument("out")
+    s = sub.add_parser("stats-import", help="edited stats JSON -> new disc folder/ISO")
+    s.add_argument("disc")
+    s.add_argument("json")
+    s.add_argument("--out", required=True, help="new output folder, or a path ending in .iso")
     args = p.parse_args(argv)
     if not args.cmd:
         p.print_help()
         return 1
     {"list": cmd_list, "info": cmd_info, "extract": cmd_extract, "replace": cmd_replace,
      "coverage": cmd_coverage, "tables": cmd_tables, "text-export": cmd_text_export,
-     "text-import": cmd_text_import}[args.cmd](args)
+     "text-import": cmd_text_import, "stats-export": cmd_stats_export,
+     "stats-import": cmd_stats_import}[args.cmd](args)
     return 0
 
 
