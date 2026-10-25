@@ -815,12 +815,25 @@ pub fn absolute_path(path: &Path) -> Result<PathBuf> {
             other => {
                 resolved.push(other.as_os_str());
                 if resolved.exists() {
-                    resolved = fs::canonicalize(&resolved)?;
+                    resolved = canonical(&resolved)?;
                 }
             }
         }
     }
     Ok(resolved)
+}
+
+/// `fs::canonicalize` without Windows' `\\?\` prefix on drive-letter paths, so messages show paths
+/// as the user knows them (like Python's `Path.resolve()`).
+fn canonical(path: &Path) -> Result<PathBuf> {
+    let full = fs::canonicalize(path)?;
+    if cfg!(windows)
+        && let Some(plain) = full.to_str().and_then(|s| s.strip_prefix(r"\\?\"))
+        && plain.as_bytes().get(1) == Some(&b':')
+    {
+        return Ok(PathBuf::from(plain));
+    }
+    Ok(full)
 }
 
 #[cfg(test)]
@@ -831,7 +844,7 @@ mod tests {
         let temp = tempfile::tempdir().unwrap();
         assert_eq!(
             absolute_path(&temp.path().join("missing/../output.iso")).unwrap(),
-            temp.path().join("output.iso")
+            canonical(temp.path()).unwrap().join("output.iso")
         );
         assert_eq!(
             absolute_path(Path::new("")).unwrap(),
