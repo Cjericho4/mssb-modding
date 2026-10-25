@@ -76,6 +76,29 @@ game does with each value: `.agent/stats.md` in the repo. Chemistry is stored tw
 B with A): change both. The star-player bonus (+50, +20 to pitch speeds) is in `main.dol`, not in
 this file. The 1..10 bars are what the menus show; no in-match reader was found.
 
+## Inspecting character animation banks and bones (R5)
+
+Tracks 2..18 in `subfile` are banks; body tracks 0/1 contain the skeleton. Extract first,
+then use the stdlib inspector (sequence/track IDs are zero-based):
+
+```powershell
+py mssb_files.py extract $disc subfile.2 .\out_anim
+py animations.py .\out_anim\subfile.2.anim --out bank.json
+py animations.py .\out_anim\subfile.2.anim --sequence 2 --keyframes --out swing.json
+py mssb_files.py extract $disc subfile.0 .\out_anim
+py animations.py .\out_anim\subfile.0.gpc --layout --out bones.json
+py audit_animations.py $disc audit.json
+py -m unittest test_animations
+```
+
+The audit decodes all character banks and layouts, compares descriptor sharing and decoded-byte
+hashes, verifies ARAM/disc track-15 equality, and exports all 54 characters' DOL event windows.
+It takes several minutes. The inspector dumps key **settings** and interpolation modes/offsets;
+it does not evaluate curves, decode auxiliary curve payloads or write animations. Files/JSON
+with key values are local game data; don't redistribute them. Extraction uses canonical alias
+filenames (check the output manifest). Track purposes, binary layouts, swap requirements and
+remaining Blender work: [.agent/animations.md](../../.agent/animations.md).
+
 ## How replace works
 
 1. The new file is packed the same way as the old one (LZSS 11/4 for almost everything; stored
