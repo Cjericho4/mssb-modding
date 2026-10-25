@@ -450,12 +450,16 @@ def lzss_compress_optimal(data, lb_bits=LZSS_LOOKBACK_BITS, rp_bits=LZSS_REPEAT_
 def _load_fast_lzss():
     """Swap in the C build of the two slow codecs (lzss.c, ~100x faster) when it sits next to this
     file or inside the PyInstaller bundle; the pure-Python versions above stay as the fallback."""
+    global _fast_lzss_why
     name = {"win32": "_lzss.dll", "darwin": "_lzss.dylib"}.get(sys.platform, "_lzss.so")
-    for d in (getattr(sys, "_MEIPASS", None), os.path.dirname(os.path.abspath(__file__))):
+    dirs = (getattr(sys, "_MEIPASS", None), os.path.dirname(os.path.abspath(__file__)))
+    _fast_lzss_why = "%s not found in %s" % (name, [d for d in dirs if d])
+    for d in dirs:
         if d and os.path.exists(os.path.join(d, name)):
             try:
                 lib = ctypes.CDLL(os.path.join(d, name))
-            except OSError:
+            except OSError as e:
+                _fast_lzss_why = "%s: %s" % (os.path.join(d, name), e)
                 return None
             lib.lzss_compress_optimal.restype = ctypes.c_size_t
             lib.lzss_compress_optimal.argtypes = [ctypes.c_char_p, ctypes.c_size_t, ctypes.c_char_p,
@@ -463,10 +467,12 @@ def _load_fast_lzss():
             lib.lzss_decompress.restype = ctypes.c_longlong
             lib.lzss_decompress.argtypes = [ctypes.c_char_p, ctypes.c_size_t, ctypes.c_char_p, ctypes.c_size_t,
                                             ctypes.c_int, ctypes.c_int]
+            _fast_lzss_why = None
             return lib
     return None
 
 
+_fast_lzss_why = None   # why the C codec did not load (for the GUI self-test)
 _fast_lzss = _load_fast_lzss()
 if _fast_lzss is not None:
     _py_lzss_decompress, _py_lzss_compress_optimal = lzss_decompress, lzss_compress_optimal

@@ -1376,7 +1376,10 @@ def selftest(argv):
     Used by the Windows build (the .exe) and for screenshots:
         clone_gui.py --selftest [--game P] [--hold S] [--expect-fonts] [--expect-fast-lzss]
     --expect-fonts fails unless Rajdhani / Inter / JetBrains Mono were loaded (bundled or installed);
-    --expect-fast-lzss fails unless the C codec (_lzss.dll, from lzss.c) was loaded."""
+    --expect-fast-lzss fails unless the C codec (_lzss.dll, from lzss.c) was loaded;
+    --log P writes the output to P (a --windowed .exe has no console)."""
+    if "--log" in argv:
+        sys.stdout = sys.stderr = open(argv[argv.index("--log") + 1], "w", encoding="utf-8")
     game = hold = None
     if "--game" in argv:
         game = argv[argv.index("--game") + 1]
@@ -1406,7 +1409,7 @@ def selftest(argv):
             print("selftest: the bundled fonts did not load")
             return 1
         if "--expect-fast-lzss" in argv and cc._fast_lzss is None:
-            print("selftest: the C codec (_lzss) did not load; packing would take minutes")
+            print("selftest: the C codec did not load (%s); packing would take minutes" % cc._fast_lzss_why)
             return 1
         if game:
             app.game_path.set(game)
