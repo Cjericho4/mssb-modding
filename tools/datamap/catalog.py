@@ -17,12 +17,13 @@ import disc as dm
 import formats as fm
 
 NUM_CHARS = 54
+# CHAR_ID order (include/mssbTypes.h); abbreviated display labels.
 CHAR_NAMES = [
     "Mario", "Luigi", "DK", "Diddy", "Peach", "Daisy", "Yoshi", "BabyMario", "BabyLuigi", "Bowser",
-    "Wario", "Waluigi", "KoopaR", "ToadR", "Boo", "Toadette", "ShyGuyR", "Birdo", "Monty", "BowserJr",
-    "ParatroopaR", "PiantaB", "PiantaR", "PiantaY", "NokiB", "NokiR", "NokiG", "BroH", "ToadsworthR",
+    "Wario", "Waluigi", "KoopaG", "ToadR", "Boo", "Toadette", "ShyGuyR", "Birdo", "Monty", "BowserJr",
+    "ParatroopaR", "PiantaB", "PiantaR", "PiantaY", "NokiB", "NokiR", "NokiG", "BroH", "Toadsworth",
     "ToadB", "ToadY", "ToadG", "ToadP", "MagikoopaB", "MagikoopaR", "MagikoopaG", "MagikoopaY",
-    "KingBoo", "Petey", "Dixie", "Goomba", "Paragoomba", "KoopaG", "ParatroopaG", "ShyGuyB",
+    "KingBoo", "Petey", "Dixie", "Goomba", "Paragoomba", "KoopaR", "ParatroopaG", "ShyGuyB",
     "ShyGuyY", "ShyGuyG", "ShyGuyBk", "DryBonesGy", "DryBonesG", "DryBonesR", "DryBonesB", "BroF",
     "BroB"]
 STADIUMS = ["Mario Stadium", "Bowser Castle", "Wario Palace", "Yoshi Park", "Peach Garden",
