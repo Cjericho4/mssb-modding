@@ -73,13 +73,23 @@ pub fn launch_options(options: State<Options>) -> LaunchOptions {
     }
 }
 
+/// Runs `MSSB_SHOT_CMD <name>`; returns why it failed, if it did (a missing screenshot is noted in
+/// the report, not a failed test).
 #[tauri::command]
-pub async fn selftest_mark(name: String) {
-    if let Ok(cmd) = std::env::var("MSSB_SHOT_CMD") {
-        // a missing screenshot is not a failed test
-        let _ = tauri::async_runtime::spawn_blocking(move || Command::new(cmd).arg(name).status())
-            .await;
-    }
+pub async fn selftest_mark(name: String) -> Option<String> {
+    let cmd = std::env::var("MSSB_SHOT_CMD").ok()?;
+    let run = move || match Command::new(&cmd).arg(name).output() {
+        Ok(out) if out.status.success() => None,
+        Ok(out) => Some(format!(
+            "{} ({})",
+            String::from_utf8_lossy(&out.stderr).trim(),
+            out.status
+        )),
+        Err(e) => Some(format!("{cmd}: {e}")),
+    };
+    tauri::async_runtime::spawn_blocking(run)
+        .await
+        .unwrap_or_else(|e| Some(e.to_string()))
 }
 
 #[tauri::command]

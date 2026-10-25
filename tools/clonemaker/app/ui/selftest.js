@@ -33,7 +33,8 @@ export async function run(options, app) {
   const shot = async (name) => {
     await painted();
     await sleep(150);
-    await invoke("selftest_mark", { name });
+    const failed = await invoke("selftest_mark", { name });
+    if (failed) say(`no screenshot ${name}: ${failed}`);
   };
   const sep = options.game.includes("\\") ? "\\" : "/";
   const inDir = (name) => options.dir + sep + name;
