@@ -71,7 +71,7 @@ pub fn launch_options(options: State<Options>) -> LaunchOptions {
 #[tauri::command]
 pub async fn selftest_mark(name: String) -> Option<String> {
     let cmd = std::env::var("MSSB_SHOT_CMD").ok()?;
-    let run = move || match Command::new(&cmd).arg(name).output() {
+    let run = move || match screenshot_command(&cmd, &name).output() {
         Ok(out) if out.status.success() => None,
         Ok(out) => Some(format!(
             "{} ({})",
@@ -83,6 +83,15 @@ pub async fn selftest_mark(name: String) -> Option<String> {
     tauri::async_runtime::spawn_blocking(run)
         .await
         .unwrap_or_else(|e| Some(e.to_string()))
+}
+
+fn screenshot_command(cmd: &str, name: &str) -> Command {
+    let mut command = Command::new(cmd);
+    command.arg(name);
+    // a console window would pop up over the window being photographed
+    #[cfg(windows)]
+    std::os::windows::process::CommandExt::creation_flags(&mut command, 0x0800_0000); // CREATE_NO_WINDOW
+    command
 }
 
 #[tauri::command]
