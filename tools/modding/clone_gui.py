@@ -1415,9 +1415,11 @@ def selftest(argv):
             prof = cProfile.Profile()
             t0 = time.perf_counter()
             prof.enable()
-            for i in range(80):        # a drag: one pixel-ish step at a time, a redraw after each
-                root.geometry("%dx%d" % (theme.px(1100) + 4 * i, theme.px(760) + 2 * i))
+            sw, sh = root.winfo_screenwidth(), root.winfo_screenheight()
+            for i in range(80):        # a drag inside the screen (bigger is clamped): a redraw after each step
+                root.geometry("%dx%d" % (int(sw * 0.55) + 4 * i, int(sh * 0.6) + 2 * i))
                 root.update()
+                time.sleep(0.02)       # a real drag gives the after() jobs time to fire
             prof.disable()
             print("selftest: 80 resizes in %.2f s (%.1f ms each)" % (time.perf_counter() - t0, (time.perf_counter() - t0) * 12.5))
             pstats.Stats(prof, stream=sys.stdout).sort_stats("cumulative").print_stats(30)

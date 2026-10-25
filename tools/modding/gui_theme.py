@@ -614,13 +614,19 @@ class AngledButton(tk.Canvas):
 # ----------------------------------------------------------------------------------------------
 # The page: ambient red wash, header, rounded hairline panels
 # ----------------------------------------------------------------------------------------------
+_WASH = None   # (page, red - page, gold - page) per channel, filled on first use
+
+
 def _wash_rgb(u, v):
     """Page background colour at relative position (u = x/w - 0.5, v = y/h)."""
+    global _WASH
+    if _WASH is None:
+        _WASH = [(p, r - p, g - p) for p, r, g in zip(rgb(PAGE), rgb(RED), rgb(GOLD))]
     dr = math.hypot(u / 1.2, (v + 0.1) / 0.8)
     dg = math.hypot(u / 1.2, (v - 1.1) / 0.6)
     ar = 0.16 * max(0.0, 1 - dr / 0.68)
     ag = 0.05 * max(0.0, 1 - dg / 0.55)
-    return tuple(int(p + (rc - p) * ar + (gc - p) * ag + 0.5) for p, rc, gc in zip(rgb(PAGE), rgb(RED), rgb(GOLD)))
+    return tuple(int(p + dr_ * ar + dg_ * ag + 0.5) for p, dr_, dg_ in _WASH)
 
 
 def wash_colour(x, y, w, h):
@@ -774,7 +780,7 @@ class Page(tk.Canvas):
         self._place_pill()
         if self._wash_job is not None:
             self.after_cancel(self._wash_job)
-        self._wash_job = self.after(60, self._draw_wash)
+        self._wash_job = self.after(250, self._draw_wash)   # once the drag has stopped: ~0.1 s of Python
 
     def _draw_wash(self):
         self._wash_job = None
