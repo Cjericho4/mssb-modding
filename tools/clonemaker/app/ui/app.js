@@ -446,7 +446,13 @@ async function create() {
   $("run-box").hidden = false;
   log("---- creating " + job.output);
   log("the full log is also saved to " + withSuffix(job.output, ".log"));
-  await invoke("create", { job });
+  try {
+    await invoke("create", { job });
+  } catch (e) {
+    finish();
+    setPill("Not created", RED);
+    showError("Couldn't create the patched game", e.error ?? String(e));
+  }
 }
 
 function cancel() {
