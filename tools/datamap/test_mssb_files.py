@@ -25,6 +25,7 @@ import disc as dm  # noqa: E402
 import catalog as ct  # noqa: E402
 import mssb_files as mf  # noqa: E402
 import stats as st  # noqa: E402
+import sound as sd  # noqa: E402
 
 cc = dm.cc
 REPO = HERE.parents[1]
@@ -283,6 +284,101 @@ class StatsFormat(unittest.TestCase):
                     {"format": st.FORMAT, "captain_teams": [{"block": 0, "lineups": [{"members": ["mario"]}]}]}):
             with self.assertRaises(st.StatsError):
                 st.apply(data, bad)
+
+
+class SoundFormat(unittest.TestCase):
+    """MusyX group + DSP-ADPCM codec on synthetic data (no game files)."""
+
+    @staticmethod
+    def tone(n, rate, hz, amp=10000):
+        import math
+        return [int(amp * math.sin(2 * math.pi * hz * i / rate) * (0.5 + 0.5 * math.sin(i / 900.0)))
+                for i in range(n)]
+
+    @staticmethod
+    def snr(a, b):
+        import math
+        err = sum((x - y) ** 2 for x, y in zip(a, b)) or 1
+        return 10 * math.log10(sum(x * x for x in a) / err)
+
+    def make_group(self):
+        """One FX group: 2 samples, 2 macros (StartSample), 3 SFX (two share a macro)."""
+        tones = [self.tone(3000, 32000, 440), self.tone(1500, 22050, 880)]
+        encs = [sd.Encoded.from_pcm(t, r) for t, r in zip(tones, (32000, 22050))]
+        sdir = bytearray()
+        for k, e in enumerate(encs):
+            sdir += struct.pack(">HHIIIIIII", 0x100 + k, 0, 0, 0, (60 << 24) | e.rate, e.samples, 0, 0, 0)
+        sdir += b"\xFF\xFF\0\0"
+        for k, e in enumerate(encs):
+            struct.pack_into(">I", sdir, k * 0x20 + 0x1C, len(sdir))
+            sdir += e.info()
+        pool = bytearray(struct.pack(">IIII", 0x10, 0, 0, 0))
+        for k in range(2):     # MEM_DATA {nextOff, id, 0, steps}: StartSample(0x100+k), End
+            steps = struct.pack(">IIII", ((0x100 + k) << 8) | 0x10, 0, 0, 0)
+            pool += struct.pack(">IHH", 8 + len(steps), 0x20 + k, 0) + steps   # nextOff is relative
+        pool += b"\xFF\xFF\xFF\xFF"
+        struct.pack_into(">III", pool, 4, len(pool) - 4, len(pool) - 4, len(pool) - 4)
+        fx = [{"id": 0x50 + k, "macro": 0x20 + min(k, 1), "max_voices": 1, "priority": 0x28, "volume": 0x7F,
+               "pan": 0x40, "key": 0x3C, "vgroup": 0} for k in range(3)]
+        proj = sd.build_proj([{"id": 7, "type": 1, "macros": [0x20, 0x21], "samples": [0x100, 0x101],
+                               "curves": [], "keymaps": [], "layers": [], "fx": fx}])
+        samp = b"".join(e.data + b"\0" * (-len(e.data) % 0x20) for e in encs)
+        sdir_off = 0
+        for k, e in enumerate(encs):
+            struct.pack_into(">I", sdir, k * 0x20 + 4, sdir_off)
+            sdir_off += len(e.data) + (-len(e.data) % 0x20)
+        return sd.build_group({"proj": proj, "sdir": bytes(sdir), "pool": bytes(pool), "samp": samp}), tones
+
+    def test_codec_snr(self):
+        pcm = self.tone(5000, 32000, 300)
+        e = sd.Encoded.from_pcm(pcm, 32000)
+        self.assertEqual(len(e.data), sd.adpcm_bytes(5000))
+        self.assertGreater(self.snr(pcm, sd.dsp_decode(e.data, e.samples, e.coefs)), 30)
+
+    def test_group_parse_and_identity(self):
+        raw, tones = self.make_group()
+        g = sd.Group(raw)
+        self.assertEqual([gr["id"] for gr in g.groups], [7])
+        self.assertEqual([(f["id"], s) for _, f, s in g.fx_table()], [(0x50, [0x100]), (0x51, [0x101]), (0x52, [0x101])])
+        self.assertEqual(g.with_samples({}), raw)
+        self.assertEqual(sd.build_proj(g.groups), g.chunks["proj"])
+        for s, t in zip(g.samples, tones):
+            self.assertGreater(self.snr(t, s.decode()), 30)
+
+    def test_replace_sample(self):
+        raw, tones = self.make_group()
+        new_pcm = self.tone(4000, 16000, 200)
+        out = sd.Group(sd.Group(raw).with_samples({0x101: sd.Encoded.from_pcm(new_pcm, 16000)}))
+        s = out.sample(0x101)
+        self.assertEqual((s.rate, s.samples, s.root_key), (16000, 4000, 60))
+        self.assertGreater(self.snr(new_pcm, s.decode()), 30)
+        self.assertEqual(out.sample(0x100).data, sd.Group(raw).sample(0x100).data)
+
+    def test_retarget(self):
+        raw, tones = self.make_group()
+        g = sd.Group(raw)
+        r = sd.Group(g.retarget(9, 0x300, 0x400))
+        self.assertEqual(r.groups[0]["id"], 9)
+        got = [(f["id"], s) for _, f, s in r.fx_table()]
+        self.assertEqual(got, [(0x300, [0x400]), (0x301, [0x401]), (0x302, [0x401])])
+        self.assertEqual(r.sample(0x401).data, g.sample(0x101).data)
+
+    def test_wav_round_trip(self):
+        tmp = Path(tempfile.mkdtemp(prefix="mssb_wav_"))
+        try:
+            pcm = self.tone(1000, 22050, 500)
+            sd.write_wav(tmp / "a.wav", pcm, 22050)
+            self.assertEqual(sd.read_wav(tmp / "a.wav"), (pcm, 22050))
+            sd.write_wav_stereo(tmp / "b.wav", pcm, pcm, 48000)
+            self.assertEqual(sd.read_wav(tmp / "b.wav"), (pcm, 48000))
+        finally:
+            shutil.rmtree(tmp, ignore_errors=True)
+
+    def test_adp_decode(self):
+        # one frame, filter 0 shift 0: sample = nibble << 12 >> 0, left = low nibble
+        frame = bytes([0x00, 0x00, 0x00, 0x00]) + bytes([0x71] * 28)
+        left, right = sd.adp_decode(frame)
+        self.assertEqual((left[0], right[0], len(left)), (0x1000, 0x7000, 28))
 
 
 class SyntheticDisc(unittest.TestCase):
@@ -555,6 +651,55 @@ class RealDisc(unittest.TestCase):
             else:
                 c2 = ct.Catalog(dm.Disc(tmp / "same"))
                 self.assertEqual(c2.data(c2.find("stats.0")), self.cat.data(self.cat.find("stats.0")))
+        finally:
+            shutil.rmtree(tmp, ignore_errors=True)
+
+    def test_sound_groups(self):
+        """Every MusyX group parses, rebuilds byte-identically, and the voice tables agree."""
+        total = 0
+        for row in range(mf.SOUND_ROWS):
+            raw = self.cat.data(self.cat.find("sound.%d" % row))
+            g = sd.Group(raw)
+            self.assertEqual(g.with_samples({}), raw, row)
+            for s in g.samples:
+                self.assertEqual(s.comp_type, 0)
+                self.assertEqual(s.adpcm[2], s.data[0], "initialPS of sample 0x%X" % s.id)
+            if len(g.groups) == 1 and g.groups[0]["type"] == 1:
+                self.assertEqual(sd.build_proj(g.groups), g.chunks["proj"], row)
+            total += len(g.samples)
+        self.assertEqual(total, 842)
+        uniq, gids, base = mf.voice_tables(self.disc)
+        for c in range(54):
+            g = sd.Group(self.cat.data(self.cat.find("sound.%d" % (sd.VOICE_ROW0 + uniq[c]))))
+            fx = [f["id"] for _, f, _ in g.fx_table()]
+            self.assertEqual((g.groups[0]["id"], fx), (gids[uniq[c]], list(range(base[c], base[c] + 13))), c)
+        dol = self.disc.image("dol")
+        o = dol.ram_off(mf.DOL_ANNOUNCER)
+        calls = struct.unpack(">33H", bytes(dol.data[o:o + 66]))
+        ann = sd.Group(self.cat.data(self.cat.find("sound.37")))
+        fx = {f["id"] for _, f, _ in ann.fx_table()}
+        self.assertTrue(set(calls) <= fx)
+
+    def test_voice_decode_sane(self):
+        g = sd.Group(self.cat.data(self.cat.find("sound.5")))        # Mario
+        pcm = g.sample(0x1F5).decode()
+        self.assertEqual(len(pcm), 3232)
+        clipped = sum(1 for v in pcm if abs(v) >= 32767)
+        self.assertLess(clipped, 10)
+
+    @unittest.skipUnless(SLOW, "set MSSB_SLOW=1 (copies the disc)")
+    def test_real_voice_swap(self):
+        tmp = Path(tempfile.mkdtemp(prefix="mssb_real_"))
+        try:
+            mf.cmd_voice_swap(mf.argparse.Namespace(disc=REAL, target="BlueToad", voice="Mario",
+                                                    out=str(tmp / "swap")))
+            c2 = ct.Catalog(dm.Disc(tmp / "swap"))
+            toad = sd.Group(c2.data(c2.find("sound.18")))
+            mario = sd.Group(self.cat.data(self.cat.find("sound.5")))
+            self.assertEqual(toad.groups[0]["id"], 14)
+            for (_, f1, s1), (_, f2, s2) in zip(toad.fx_table(), mario.fx_table()):
+                self.assertEqual([toad.sample(x).data for x in s1], [mario.sample(x).data for x in s2])
+            self.assertEqual(toad.fx_table()[0][1]["id"], 0x9B)
         finally:
             shutil.rmtree(tmp, ignore_errors=True)
 

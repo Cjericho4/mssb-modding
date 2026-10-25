@@ -17,6 +17,11 @@ address every file by a stable id such as `res.15` (the menu common file) or `su
     py mssb_files.py text-import <in.txt> <out.bin>       (then `replace` the bank with out.bin)
     py mssb_files.py stats-export <disc> <out.json>       (character stats, chemistry, captain teams)
     py mssb_files.py stats-import <disc> <in.json> --out <folder|game.iso>
+    py mssb_files.py sound-list   <disc> [sound.N]        (sound groups; one group's SFX/voice lines)
+    py mssb_files.py sound-export <disc> <sound.N|all> <dir>   (samples -> WAV + manifest.json)
+    py mssb_files.py sound-import <disc> <sound.N> <dir> --out <folder|game.iso>
+    py mssb_files.py voice-swap   <disc> <target> <voice> --out <folder|game.iso>
+    py mssb_files.py music-export <disc> <name|all> <dir>  (snd/*.adp -> stereo WAV)
 
 <disc> is an extracted disc folder (Dolphin: right-click -> Properties -> Filesystem -> Extract
 Entire Disc, giving sys/ and files/) or a .iso.  The input is never written to.
@@ -39,6 +44,7 @@ import disc as dm  # noqa: E402
 import formats as fm  # noqa: E402
 import catalog as ct  # noqa: E402
 import stats as st  # noqa: E402
+import sound as sd  # noqa: E402
 
 cc = dm.cc
 EXT = {"model": ".gpc", "stadium": ".stadium.bin", "ui": ".ui.bin", "texarc": ".tex.bin", "anim": ".anim",
@@ -689,6 +695,225 @@ def cmd_stats_import(args):
 
 
 # ----------------------------------------------------------------------------------------------
+# sounds (MusyX groups `sound.N`, voices, announcer) and music (.adp streams)
+# ----------------------------------------------------------------------------------------------
+SOUND_ROWS = 48
+GAME_DATA = 5                      # game.rel section holding .data
+GAME_VOICE_GID = 0x8148            # u8[32] voice group id per unique index (lbl_3_data_8148)
+GAME_VOICE_BASE = 0x8168           # u16[54] voice SFX base per charID (lbl_3_data_8168)
+DOL_UNIQUE = 0x800E8558            # 6-byte rows per charID, unique index at +2
+DOL_ANNOUNCER = 0x80108DF4         # u16[33] announcer name SFX per unique index
+
+
+def _sound_id(arg):
+    a = str(arg)
+    if a.isdigit():
+        a = "sound.%d" % int(a)
+    if not a.startswith("sound.") or not a[6:].isdigit() or not 0 <= int(a[6:]) < SOUND_ROWS:
+        raise SystemExit("%s: expected a sound group id sound.0 .. sound.%d" % (arg, SOUND_ROWS - 1))
+    return a
+
+
+def _game_data(d, off, n):
+    g = d.image("game")
+    o = g.file_off(GAME_DATA, off)
+    return bytes(g.data[o:o + n])
+
+
+def voice_tables(d):
+    """(unique index per charID, voice gid per unique index, SFX base per charID) from the disc."""
+    dol = d.image("dol")
+    o = dol.ram_off(DOL_UNIQUE)
+    uniq = [dol.data[o + c * 6 + 2] for c in range(54)]
+    gids = list(_game_data(d, GAME_VOICE_GID, 32))
+    base = list(struct.unpack(">54H", _game_data(d, GAME_VOICE_BASE, 108)))
+    return uniq, gids, base
+
+
+def _char_or_unique(d, name):
+    """A character name / charID number / unique-index name -> unique index (voice bank)."""
+    uniq, _, _ = voice_tables(d)
+    low = name.lower()
+    for u, n in enumerate(sd.GRID_NAMES):
+        if n.lower() == low:
+            return u
+    names = [n.lower() for n in cc.CHAR_NAMES]
+    if low in names:
+        return uniq[names.index(low)]
+    if name.isdigit() and int(name) < len(uniq):
+        return uniq[int(name)]
+    raise SystemExit("unknown character %r (use a charID 0..53, a name like Mario / BlueToad, "
+                     "or a voice name: %s)" % (name, ", ".join(sd.GRID_NAMES)))
+
+
+def _line_of(row, fx_id, d):
+    """Voice line index of an SFX in a voice row, else None."""
+    if not sd.VOICE_ROW0 <= row < sd.VOICE_ROW0 + 32:
+        return None
+    uniq, _, base = voice_tables(d)
+    for c, u in enumerate(uniq):
+        if u == row - sd.VOICE_ROW0 and 0 <= fx_id - base[c] < sd.VOICE_LINES:
+            return fx_id - base[c]
+    return None
+
+
+def cmd_sound_list(args):
+    d, cat = open_catalog(args.disc)
+    if not args.id:
+        print("%-9s %-10s %4s %-17s %4s %-22s %s" % ("id", "size", "gid", "SFX ids", "smp", "rates", "what"))
+        for row in range(SOUND_ROWS):
+            f = cat.find("sound.%d" % row)
+            g = sd.Group(cat.data(f))
+            fx = [x[1]["id"] for x in g.fx_table()]
+            rates = sorted(set(s.rate for s in g.samples))
+            print("%-9s 0x%-8X %4s %-17s %4d %-22s %s" % (
+                f.id, f.size, "/".join(str(x["id"]) for x in g.groups),
+                "0x%X..0x%X" % (min(fx), max(fx)) if fx else "-", len(g.samples),
+                ",".join(str(r) for r in rates), sd.row_meaning(row)))
+        return
+    sid = _sound_id(args.id)
+    row = int(sid[6:])
+    g = sd.Group(cat.data(cat.find(sid)))
+    print("%s: %s" % (sid, sd.row_meaning(row)))
+    for gr in g.groups:
+        print("group %d (%s): %d macros, %d samples, %d SFX" % (
+            gr["id"], "SFX" if gr["type"] == 1 else "songs", len(gr["macros"]), len(gr["samples"]), len(gr["fx"])))
+    print("\nSFX     line macro   samples (id rate seconds)")
+    for gid, fx, smps in g.fx_table():
+        line = _line_of(row, fx["id"], d)
+        desc = []
+        for x in smps:
+            try:
+                s = g.sample(x)
+                desc.append("0x%X %d %.2fs" % (x, s.rate, s.samples / float(s.rate)))
+            except sd.SoundError:
+                desc.append("0x%X (in another group)" % x)
+        print("0x%-5X %-4s 0x%-5X %s%s" % (fx["id"], "" if line is None else line, fx["macro"], "; ".join(desc),
+                                         ("   <- " + sd.LINE_USES[line]) if line in sd.LINE_USES else ""))
+
+
+def _sample_name(s):
+    return "smp_%04X.wav" % s.id
+
+
+def cmd_sound_export(args):
+    d, cat = open_catalog(args.disc)
+    rows = range(SOUND_ROWS) if args.id == "all" else [int(_sound_id(args.id)[6:])]
+    out = Path(args.dir)
+    for row in rows:
+        sid = "sound.%d" % row
+        g = sd.Group(cat.data(cat.find(sid)))
+        dest = out / sid if len(rows) > 1 else out
+        dest.mkdir(parents=True, exist_ok=True)
+        users = {}
+        for gid, fx, smps in g.fx_table():
+            for x in smps:
+                users.setdefault(x, []).append(fx["id"])
+        manifest = {"format": "mssb-sound 1", "id": sid, "what": sd.row_meaning(row),
+                    "groups": [{"id": gr["id"], "type": "sfx" if gr["type"] == 1 else "songs"} for gr in g.groups],
+                    "sfx": [], "samples": []}
+        for gid, fx, smps in g.fx_table():
+            line = _line_of(row, fx["id"], d)
+            manifest["sfx"].append({"id": fx["id"], "group": gid, "macro": fx["macro"], "samples": smps,
+                                    "line": line, "use": sd.LINE_USES.get(line, "")})
+        for s in g.samples:
+            pcm = s.decode()
+            sd.write_wav(dest / _sample_name(s), pcm, s.rate)
+            manifest["samples"].append({"file": _sample_name(s), "id": s.id, "rate": s.rate, "samples": s.samples,
+                                        "seconds": round(s.samples / float(s.rate), 3), "root_key": s.root_key,
+                                        "loop": [s.loop_start, s.loop_length] if s.loop_length else None,
+                                        "sfx": users.get(s.id, [])})
+        (dest / "manifest.json").write_text(json.dumps(manifest, indent=1), encoding="utf-8")
+        log("%s: %d samples -> %s" % (sid, len(g.samples), dest))
+
+
+def sound_import_bytes(old, folder):
+    """New group bytes from the edited WAVs in `folder` (only files whose audio or rate changed)."""
+    g = sd.Group(old)
+    folder = Path(folder)
+    repl, notes = {}, []
+    for s in g.samples:
+        p = folder / _sample_name(s)
+        if not p.exists():
+            continue
+        pcm, rate = sd.read_wav(p)
+        if rate == s.rate and pcm == s.decode():
+            continue
+        repl[s.id] = sd.Encoded.from_pcm(pcm, rate)
+        notes.append("0x%X: %d samples at %d Hz (was %d at %d Hz)" % (s.id, len(pcm), rate, s.samples, s.rate))
+    for p in sorted(folder.glob("*.wav")):
+        if not any(p.name.lower() == _sample_name(s).lower() for s in g.samples):
+            notes.append("ignored %s (no sample with that id in this group)" % p.name)
+    return (g.with_samples(repl) if repl else None), notes
+
+
+def _replace_with_bytes(disc, file_id, data, out, prefix):
+    outp = Path(out)
+    tmp = Path(tempfile.mkdtemp(prefix=prefix, dir=str(outp.resolve().parent)))
+    try:
+        (tmp / "new.bin").write_bytes(data)
+        cmd_replace(argparse.Namespace(disc=disc, id=file_id, file=str(tmp / "new.bin"), out=out,
+                                       reuse_gaps=False))
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
+def cmd_sound_import(args):
+    sid = _sound_id(args.id)
+    d, cat = open_catalog(args.disc)
+    old = cat.data(cat.find(sid))
+    d.close()
+    new, notes = sound_import_bytes(old, args.dir)
+    for n in notes:
+        log("  " + n)
+    if new is None:
+        raise SystemExit("no WAV in %s differs from %s: nothing to do" % (args.dir, sid))
+    grow = len(new) - len(old)
+    if grow > 0:
+        log("note: %s grows by 0x%X bytes; its samples live in MusyX's 8 MB of ARAM while it is loaded "
+            "(see .agent/sounds.md), so keep replacements short" % (sid, grow))
+    _replace_with_bytes(args.disc, sid, new, args.out, "mssb_sound_")
+
+
+def cmd_voice_swap(args):
+    d, cat = open_catalog(args.disc)
+    target = _char_or_unique(d, args.target)
+    voice = _char_or_unique(d, args.voice)
+    uniq, gids, base = voice_tables(d)
+    members = [cc.CHAR_NAMES[c] for c, u in enumerate(uniq) if u == target]
+    fx_bases = sorted(set(base[c] for c, u in enumerate(uniq) if u == target))
+    if len(fx_bases) != 1:
+        raise SystemExit("characters sharing voice bank %d use different SFX bases %s; not supported"
+                         % (target, fx_bases))
+    src = sd.Group(cat.data(cat.find("sound.%d" % (sd.VOICE_ROW0 + voice))))
+    new = src.retarget(gids[target], fx_bases[0], sd.SWAP_ID_BASE + target * sd.SWAP_ID_STRIDE)
+    d.close()
+    log("voice bank of %s (%s) <- %s's voice (sound.%d -> sound.%d, group %d, SFX 0x%X..)" % (
+        sd.GRID_NAMES[target], ", ".join(members), sd.GRID_NAMES[voice], sd.VOICE_ROW0 + voice,
+        sd.VOICE_ROW0 + target, gids[target], fx_bases[0]))
+    _replace_with_bytes(args.disc, "sound.%d" % (sd.VOICE_ROW0 + target), new, args.out, "mssb_voice_")
+
+
+def cmd_music_export(args):
+    d = dm.Disc(args.disc)
+    paths = [p for e, p in d.fst_files() if p.lower().endswith(".adp")]
+    if args.name != "all":
+        paths = [p for p in paths if Path(p).stem.lower() in (args.name.lower(), args.name.lower() + "_h")
+                 or Path(p).name.lower() == args.name.lower()]
+        if not paths:
+            raise SystemExit("no .adp named %s (try: %s)" % (args.name, ", ".join(
+                Path(p).stem for e, p in d.fst_files() if p.lower().endswith(".adp"))))
+    out = Path(args.dir)
+    out.mkdir(parents=True, exist_ok=True)
+    for p in paths:
+        left, right = sd.adp_decode(d.read_fst_file(p))
+        dest = out / (Path(p).stem + ".wav")
+        sd.write_wav_stereo(dest, left, right, sd.ADP_RATE)
+        log("%s: %.1f s -> %s" % (p, len(left) / float(sd.ADP_RATE), dest))
+    d.close()
+
+
+# ----------------------------------------------------------------------------------------------
 def main(argv=None):
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = p.add_subparsers(dest="cmd")
@@ -734,6 +959,27 @@ def main(argv=None):
     s.add_argument("disc")
     s.add_argument("json")
     s.add_argument("--out", required=True, help="new output folder, or a path ending in .iso")
+    s = sub.add_parser("sound-list", help="the 48 MusyX sound groups, or one group's SFX and samples")
+    s.add_argument("disc")
+    s.add_argument("id", nargs="?", help="sound.N (or N) for its SFX table")
+    s = sub.add_parser("sound-export", help="a sound group's samples -> WAV files + manifest.json")
+    s.add_argument("disc")
+    s.add_argument("id", help="sound.N, N or 'all'")
+    s.add_argument("dir")
+    s = sub.add_parser("sound-import", help="edited WAVs (from sound-export) -> new disc folder/ISO")
+    s.add_argument("disc")
+    s.add_argument("id", help="sound.N or N")
+    s.add_argument("dir", help="folder with smp_XXXX.wav files; unchanged files are skipped")
+    s.add_argument("--out", required=True, help="new output folder, or a path ending in .iso")
+    s = sub.add_parser("voice-swap", help="give one character's voice bank another character's voice")
+    s.add_argument("disc")
+    s.add_argument("target", help="whose voice changes (name, charID or voice name, e.g. Toad)")
+    s.add_argument("voice", help="whose voice they get (e.g. Mario)")
+    s.add_argument("--out", required=True, help="new output folder, or a path ending in .iso")
+    s = sub.add_parser("music-export", help="DVD-streamed music (snd/*.adp) -> stereo 48 kHz WAV")
+    s.add_argument("disc")
+    s.add_argument("name", help="stream name (e.g. mario_01_h) or 'all'")
+    s.add_argument("dir")
     args = p.parse_args(argv)
     if not args.cmd:
         p.print_help()
@@ -741,7 +987,8 @@ def main(argv=None):
     {"list": cmd_list, "info": cmd_info, "extract": cmd_extract, "replace": cmd_replace,
      "coverage": cmd_coverage, "tables": cmd_tables, "text-export": cmd_text_export,
      "text-import": cmd_text_import, "stats-export": cmd_stats_export,
-     "stats-import": cmd_stats_import}[args.cmd](args)
+     "stats-import": cmd_stats_import, "sound-list": cmd_sound_list, "sound-export": cmd_sound_export,
+     "sound-import": cmd_sound_import, "voice-swap": cmd_voice_swap, "music-export": cmd_music_export}[args.cmd](args)
     return 0
 
 
