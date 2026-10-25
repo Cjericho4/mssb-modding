@@ -1,6 +1,8 @@
 //! Data-only character cloning for Mario Superstar Baseball (USA, GYQE01).
 
 pub mod binary;
+pub mod cli;
+pub mod clone;
 pub mod colour;
 pub mod constants;
 pub mod disc;

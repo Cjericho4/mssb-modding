@@ -1,0 +1,64 @@
+usage: clone_character.py [-h] --disc DISC [--out OUT] [--source SOURCE]
+                          [--slot SLOT[:RECOLOUR]] [--iso ISO]
+                          [--no-aram-overlay] [--ui {source,donor}]
+                          [--colour-word {none,donor}] [--no-stats]
+                          [--no-gameplay] [--list-slots] [--list-regions]
+                          [--force] [--dry-run]
+
+clone_character.py -- data-only character cloning for Mario Superstar Baseball (GYQE01).
+
+optional arguments:
+  -h, --help            show this help message and exit
+  --disc DISC           the game: a .iso file, or an extracted disc folder
+                        (contains sys/ and files/)
+  --out OUT             output folder (created; never the input)
+  --source SOURCE       character to clone (name or id, default mario)
+  --slot SLOT[:RECOLOUR]
+                        donor slot and recolour spec; repeatable. Default: all
+                        four Toad colours (29:blue 30:green 31:purple
+                        32:yellow)
+  --iso ISO             also write a bootable .iso (the disc grows past the
+                        standard size; Dolphin accepts it)
+  --no-aram-overlay     do not recolour the ARAM (in-game) body; clones then
+                        look like the plain source in matches
+  --ui {source,donor}   whose name/portrait/announcer call-out/voice the clone
+                        slots get in menus and in-game (default: source)
+  --colour-word {none,donor}
+                        with --ui source: the colour word shown before a
+                        clone's name on the roster screen; none (default: the
+                        clone is the source, e.g. no 'Purple') or donor (keep
+                        e.g. 'Purple')
+  --no-stats            keep the donor's stats instead of copying the source's
+  --no-gameplay         keep the donor's game.rel/DOL gameplay tables
+  --list-slots          print the slot table and exit
+  --list-regions        print the colour regions of --source (for region=) and
+                        exit
+  --force               overwrite --out if it exists
+  --dry-run             print every planned edit (offsets, sizes, entries)
+                        without copying or writing anything
+
+examples:
+  py clone_character.py --disc "C:\mssb\Mario Superstar Baseball (US).iso" --out "C:\mssb\marios" --iso "C:\mssb\marios.iso"
+  py clone_character.py --disc "C:\mssb\GYQE01" --list-slots
+  py clone_character.py --disc "C:\mssb\GYQE01" --list-regions --source luigi
+  py clone_character.py --disc "C:\mssb\GYQE01" --out "C:\mssb\GYQE01-luigi" --source mario --slot Luigi:green
+  py clone_character.py --disc "C:\mssb\GYQE01" --out "C:\mssb\GYQE01-marios" --source mario --slot BlueToad:blue --slot YellowToad:green --slot GreenToad:purple --slot PurpleToad:yellow
+  py clone_character.py --disc ... --out ... --source 0 --slot 29:hue=0.62,sat=1.1 --slot 30:tint=00FF00:0.6 --iso "C:\mssb\marios.iso"
+recolour spec (after the slot and a colon): Spec: comma-separated key=value.  Keys:
+        hue=<0..1|preset>  target hue for the matched band (default band: reds, i.e. Mario's suit)
+        from=<0..1> width=<0..1>  hue band to retarget (default from=0 width=0.035: Mario's red, not his skin or ear shading)
+        minsat=<0..1>      minimum saturation for a colour to be considered part of the band (0.5)
+        all=1              retarget every saturated colour, not just the band
+        sat=<mult> val=<mult>  multiply saturation / brightness (applied to matched colours)
+        keeplum=<0..1>     how far to pull a recoloured colour toward the original's perceived brightness
+                           (default 0.5; 0 = old look, greens/yellows washed-out and flat; 1 = exact
+                           match, greens/yellows quite dark)
+        tint=RRGGBB[:strength]  blend every colour towards RRGGBB (strength 0..1, default 0.5)
+        solid=RRGGBB       replace every colour (debug)
+        tex=0/1/2          only touch these texture indices, slash-separated (default: all)
+        region=0/1         recolour these detected colour regions of the source (see --list-regions;
+                           0 = its main colour).  With no from/width/minsat/region/all key, a slot
+                           recolours the source's main colour region (Mario: his reds, as before)
+        maxsat= minval= maxval=<0..1>  more limits for the from/width band (default 1, 0, 1)
+        keepskin=1         never touch skin tones, even inside the band
+    A bare preset name (blue, green, ...) is shorthand for hue=<preset>.
