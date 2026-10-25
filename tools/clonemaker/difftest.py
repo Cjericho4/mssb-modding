@@ -103,6 +103,182 @@ def compare_trees(a, b):
         compare_files(a / p, b / p, a)
 
 
+# --- #29 voice: the intended differences from the frozen Python reference --------------------
+SOUND_GROUPS = 0x800EF508   # lbl_800EF508: sound.N descriptors; voice bank of unique index u = row 5 + u
+VOICE_BASE = 0x8168         # game.rel .data: u16 SFX base per charID
+
+
+def voice_plan(disc, opts):
+    """What the Rust core changes on purpose compared with the reference for these CLI options:
+    the clone rows of game.rel 0x8168 always hold the source's SFX base, and with --ui donor each
+    donor family's voice bank (other than the source's) is merged with the source's sounds."""
+    import clone_character as cc
+    def value(flag, default):
+        return opts[opts.index(flag) + 1] if flag in opts else default
+    source = cc.parse_char(value("--source", "mario"))
+    slots = [cc.parse_char(opts[i + 1].split(":")[0]) for i, x in enumerate(opts) if x == "--slot"] or [29, 30, 31, 32]
+    dol = cc.Dol((Path(disc) / "sys/main.dol").read_bytes())
+    unique = lambda ch: dol.u8(cc.ADDR_FAMILY + ch * 6 + 2)
+    rows = {}
+    if value("--ui", "source") == "donor":
+        for s in slots:
+            if unique(s) != unique(source):
+                rows.setdefault(5 + unique(s), []).append(s)
+    return {"source": source, "slots": slots, "rows": rows, "no_gameplay": "--no-gameplay" in opts}
+
+
+def voice_changes(plan):
+    return bool(plan["rows"]) or plan["no_gameplay"]
+
+
+def chunked_equal(a, b, allowed, label):
+    """Files a (reference) and b equal except inside `allowed` [start, end) ranges; the shorter
+    one counts as zero-padded (the appended ZZZZ.dat tail)."""
+    step = 1 << 22
+    with open(a, "rb") as fa, open(b, "rb") as fb:
+        off = 0
+        while True:
+            x, y = fa.read(step), fb.read(step)
+            if not x and not y:
+                return
+            n = max(len(x), len(y))
+            x, y = bytearray(x.ljust(n, b"\0")), bytearray(y.ljust(n, b"\0"))
+            for s, e in allowed:
+                s, e = max(s - off, 0), min(e - off, n)
+                if s < e:
+                    x[s:e] = y[s:e] = bytes(e - s)
+            if x != y:
+                k = next(i for i in range(n) if x[i] != y[i])
+                raise AssertionError("%s: unexpected difference at 0x%X" % (label, off + k))
+            off += n
+
+
+def check_voice_group(merged, donor, sources, label):
+    """Independent check with tools/datamap/sound.py: every FX of the donor and of each source
+    resolves in the merged bank to the same FX entry, macro steps and samples (data, ADPCM
+    coefficients, rate, length, loop); same group id; FX table sorted (dataGetFX bsearch)."""
+    sys.path.insert(0, str(ROOT / "tools/datamap"))
+    import sound as sd
+    m = sd.Group(merged)
+    assert len(m.groups) == 1 and m.groups[0]["id"] == sd.Group(donor).groups[0]["id"], label + ": group id"
+    ids = [f["id"] for f in m.groups[0]["fx"]]
+    assert ids == sorted(set(ids)), label + ": FX table not sorted/unique"
+    want = set()
+    for raw, base in [(donor, None)] + sources:
+        o = sd.Group(raw)
+        if base is not None:
+            have = {f["id"] for f in o.groups[0]["fx"]}
+            assert all(base + k in have for k in range(13)), label + ": source lines"
+        for _, fx, smp in o.fx_table():
+            want.add(fx["id"])
+            mf = next(f for f in m.groups[0]["fx"] if f["id"] == fx["id"])
+            assert mf == fx, (label, "FX 0x%X entry" % fx["id"])
+            assert m.object_samples(fx["macro"]) == smp, (label, "FX 0x%X samples" % fx["id"])
+            assert m.macro_steps(fx["macro"]) == o.macro_steps(fx["macro"]), (label, "FX 0x%X macro" % fx["id"])
+            for sid in smp:
+                a, b = m.sample(sid), o.sample(sid)
+                assert (a.data[:a.byte_size()], a.adpcm, a.info, a.length_word, a.loop_start, a.loop_length) == \
+                       (b.data[:b.byte_size()], b.adpcm, b.info, b.length_word, b.loop_start, b.loop_length), (label, "sample 0x%X" % sid)
+        for key in ("macros", "samples", "curves", "keymaps", "layers"):
+            assert set(o.groups[0][key]) <= set(m.groups[0][key]), (label, key)
+    assert set(ids) == want, label + ": FX that no input has"
+
+
+def check_voice_tree(a, b, disc, plan, label):
+    """The Rust tree b equals the reference tree a except the intended #29 voice changes."""
+    import struct
+    import clone_character as cc
+    pa, pb = cc.Disc(a), cc.Disc(b)
+    da = cc.Dol((pa.sys / "main.dol").read_bytes())
+    db = cc.Dol((pb.sys / "main.dol").read_bytes())
+    rows = plan["rows"]
+    rel_changed = [plan["no_gameplay"], bool(rows)]  # game.rel, challenge.rel
+    # main.dol: only the merged rows' sound descriptors and the re-packed RELs' descriptors
+    allowed = [(da.off(SOUND_GROUPS + r * 16, 16), da.off(SOUND_GROUPS + r * 16, 16) + 16) for r in rows]
+    allowed += [(da.off(cc.ADDR_REL_DESCS[1 + i], 16), da.off(cc.ADDR_REL_DESCS[1 + i], 16) + 16)
+                for i in range(2) if rel_changed[i]]
+    assert len(da.data) == len(db.data), label + ": main.dol size"
+    chunked_equal(pa.sys / "main.dol", pb.sys / "main.dol", allowed, label + " main.dol")
+    # aaaa.dat: byte-identical outside the re-packed RELs; inside them, the expanded RELs differ
+    # only at the clone rows of 0x8168 (game.rel) and at the merged rows' descriptor copies
+    ends = sorted(da.desc(x, 0)[2] for x in cc.ADDR_REL_DESCS) + [(pa.files / "aaaa.dat").stat().st_size]
+    allowed = []
+    for i in range(2):
+        if rel_changed[i]:
+            off = da.desc(cc.ADDR_REL_DESCS[1 + i], 0)[2]
+            allowed.append((off, min(e for e in ends if e > off)))
+            assert db.desc(cc.ADDR_REL_DESCS[1 + i], 0)[2] == off, label + ": REL moved"
+    chunked_equal(pa.files / "aaaa.dat", pb.files / "aaaa.dat", allowed, label + " aaaa.dat")
+    ga, gb = cc.load_rel(pa, da, 1), cc.load_rel(pb, db, 1)
+    # .data located on the clean game.rel (its signature rows may be clone rows now)
+    od = cc.Disc(disc)
+    base, _ = cc.rel_data_section(bytearray(cc.load_rel(od, cc.Dol((od.sys / "main.dol").read_bytes()), 1)))
+    src_base = struct.unpack_from(">H", gb, base + VOICE_BASE + plan["source"] * 2)[0]
+    for s in plan["slots"]:
+        assert struct.unpack_from(">H", gb, base + VOICE_BASE + s * 2)[0] == src_base, (label, "0x8168 slot", s)
+    ga = bytearray(ga)
+    for s in plan["slots"]:
+        ga[base + VOICE_BASE + s * 2:base + VOICE_BASE + s * 2 + 2] = gb[base + VOICE_BASE + s * 2:base + VOICE_BASE + s * 2 + 2]
+    assert bytes(ga) == bytes(gb), label + ": game.rel differs outside 0x8168"
+    ca, cb = bytearray(cc.load_rel(pa, da, 2)), cc.load_rel(pb, db, 2)
+    zz = []
+    for r in rows:
+        old, new = da.desc(SOUND_GROUPS, r), db.desc(SOUND_GROUPS, r)
+        assert old != new and new[0] == 0 and new[1] == new[3] and new[2] % 0x800 == 0, (label, "sound.%d descriptor" % r)
+        assert cc.replace_desc(ca, old, new) >= 1, (label, "challenge.rel copy of sound.%d" % r)
+        zz.append((new[2], new[2] + new[3]))
+    assert bytes(ca) == bytes(cb), label + ": challenge.rel differs outside the sound descriptors"
+    # ZZZZ.dat: the reference bytes plus the merged banks appended after the reference's data
+    za, zb = pa.zzzz_size(), pb.zzzz_size()
+    used = max([za] + [e for _, e in zz])
+    assert zb == cc.align(used, 0x8000), (label, "ZZZZ.dat size", za, zb)
+    chunked_equal(pa.files / "ZZZZ.dat", pb.files / "ZZZZ.dat", zz, label + " ZZZZ.dat")
+    for s, e in zz:  # only zero padding of the reference under the merged banks
+        assert s >= za or not pa.read_zzzz(s, min(e, za) - s).strip(b"\0"), (label, "merged bank over reference data")
+    # fst.bin: only the ZZZZ.dat size
+    fa, fb = (pa.sys / "fst.bin").read_bytes(), (pb.sys / "fst.bin").read_bytes()
+    ent = [e for e, p in cc.fst_paths(fb) if p == "ZZZZ.dat"][0]
+    assert ent["size"] == zb, label + ": fst.bin ZZZZ.dat size"
+    o = ent["index"] * 12 + 8
+    assert fa[:o] == fb[:o] and fa[o + 4:] == fb[o + 4:], label + ": fst.bin"
+    # every other file byte-identical
+    names = {p.relative_to(a) for p in a.rglob("*") if p.is_file()}
+    assert names == {p.relative_to(b) for p in b.rglob("*") if p.is_file()}, label + ": file sets"
+    for p in sorted(names):
+        if str(p) not in ("sys/main.dol", "sys/fst.bin", "files/aaaa.dat", "files/ZZZZ.dat"):
+            compare_files(a / p, b / p, a)
+    # the merged banks, read back with the datamap reader
+    for r, (s, e) in zip(rows, zz):
+        u = r - 5
+        src_row = 5 + da.u8(cc.ADDR_FAMILY + plan["source"] * 6 + 2)
+        dd = da.desc(SOUND_GROUPS, r)
+        sd_ = da.desc(SOUND_GROUPS, src_row)
+        check_voice_group(pb.read_zzzz(s, e - s), pa.read_zzzz(dd[2], dd[3]),
+                          [(pa.read_zzzz(sd_[2], sd_[3]), src_base)], "%s sound.%d" % (label, r))
+    return len(rows)
+
+
+def voice_log(text, plan):
+    """Drop the log lines the voice changes add or alter."""
+    drop = ["voice: "]
+    if plan["no_gameplay"]:
+        drop.append("game.rel: ")
+    if plan["rows"]:
+        drop += ["challenge.rel: ", "ZZZZ.dat: ", "DRY RUN summary: ", "wrote "]
+    return "".join(line for line in text.splitlines(True) if not any(line.startswith(d) for d in drop))
+
+
+def check_voice_iso(tree, iso, work):
+    """The Rust ISO is the reference ISO writer's image of the Rust tree."""
+    import clone_character as cc
+    expected = work / "voice-expected.iso"
+    try:
+        cc.write_iso(cc.Disc(tree), expected, lambda _: None)
+        compare_files(expected, iso)
+    finally:
+        expected.unlink(missing_ok=True)
+
+
 def codec(probe, work, label, data, size=None, lb=11, rp=4):
     import clone_character as cc
     inp, out = work / "codec.in", work / "codec.out"
@@ -375,10 +551,24 @@ def gui_jobs(probe, work, disc):
                 jobfile.write_text(json.dumps(job))
                 events=[json.loads(line) for line in run([probe,"job",jobfile]).splitlines()]
                 assert events[-1]["event"] == "done"
-                compare_files(py_out,rs_out)
                 done=events[-1]["payload"]
+                plan=voice_plan(disc,["--source",str(source),"--ui","source" if ui else "donor"]+sum((["--slot",str(s)] for s,_ in specs),[]))
+                if voice_changes(plan):
+                    trees=[folder/"py-tree",folder/"rs-tree"]
+                    try:
+                        for iso,tree in zip((py_out,rs_out),trees):
+                            cc.extract_iso(iso,tree,lambda _:None)
+                        check_voice_tree(*trees,disc,plan,label)
+                        check_voice_iso(trees[1],rs_out,folder)
+                    finally:
+                        for tree in trees:
+                            shutil.rmtree(tree,ignore_errors=True)
+                else:
+                    compare_files(py_out,rs_out)
                 assert done["hint"] == g.pick_hint(game.dol,source,[s for s,_ in specs],ui)
-                if keep:
+                if keep and voice_changes(plan):
+                    check_voice_tree(Path(py["work"]),Path(done["work"]),disc,plan,label)
+                elif keep:
                     compare_trees(Path(py["work"]),Path(done["work"]))
                 else:
                     assert done["work"] is None
@@ -394,6 +584,8 @@ def gui_jobs(probe, work, disc):
                 normalized_py=py_log.replace(py_work,"WORK").replace(str(py_out),"ISO").replace("python.partial.iso","PARTIAL")
                 normalized_rs=log.replace(rs_work,"WORK").replace(str(rs_out),"ISO").replace("rust.partial.iso","PARTIAL")
                 if keep:
+                    if voice_changes(plan):
+                        normalized_py,normalized_rs=voice_log(normalized_py,plan),voice_log(normalized_rs,plan)
                     assert normalized_py==normalized_rs, "GUI log mismatch"
                 assert not list(folder.glob("*.partial.iso"))
                 print("PASS GUI job %s: ISO bytes, kept/removed work, log, progress, hint" % label,flush=True)
@@ -438,6 +630,22 @@ def grid_cases(full):
                         (["--slot","%d:%s" % (slot,preset)] for slot,preset in pairs[part*4:(part+1)*4]),[])
 
 
+VOICE_CASES = [
+    ("v-rio", ["--source", "mario", "--slot", "29", "--ui", "donor"]),
+    ("v-three-families", ["--source", "mario", "--slot", "29:blue", "--slot", "44:green", "--slot", "2:red", "--ui", "donor"]),
+    ("v-eight-two-families", ["--source", "mario", "--ui", "donor"] + sum((["--slot", "%d" % s] for s in (29, 30, 31, 32, 44, 45, 46, 47)), [])),
+    ("v-dk-donor", ["--source", "dk", "--slot", "1:green", "--slot", "30:red", "--ui", "donor"]),
+    ("v-same-family", ["--source", "redtoad", "--slot", "29", "--slot", "30", "--ui", "donor"]),
+    ("v-mixed-family", ["--source", "redtoad", "--slot", "29", "--slot", "44", "--ui", "donor"]),
+    ("v-curve-source", ["--source", "monty", "--slot", "29", "--ui", "donor"]),
+    ("v-curve-donor", ["--source", "mario", "--slot", "49:green", "--ui", "donor"]),
+    ("v-bros", ["--source", "hammerbro", "--slot", "44", "--slot", "45", "--ui", "donor"]),
+    ("v-donor-nogameplay", ["--source", "luigi", "--slot", "29", "--slot", "30", "--ui", "donor", "--no-gameplay"]),
+    ("v-source-nogameplay", ["--source", "luigi", "--slot", "29", "--slot", "30", "--no-gameplay"]),
+    ("v-donor-nostats-nooverlay", ["--source", "babymario", "--slot", "34:green", "--ui", "donor", "--no-stats", "--no-aram-overlay"]),
+]
+
+
 def clone_case(cli, work, disc, case):
     label, opts = case
     work = work / label
@@ -476,23 +684,41 @@ def clone_case_in(cli, work, disc, label, opts):
             run([cli.with_name("mssb-clone-probe"),"write-iso",b,bi])
         rs_time = time.perf_counter() - t
         assert py.returncode==rs.returncode,(label,"exit status",py.stderr,rs.stderr)
-        assert normalize(py.stdout,a,ai)==normalize(rs.stdout,b,bi),(label,"stdout",py.stdout,rs.stdout)
+        plan = voice_plan(disc, opts)
+        voice = voice_changes(plan) and py.returncode == 0
+        py_out, rs_out = normalize(py.stdout,a,ai), normalize(rs.stdout,b,bi)
+        # The reference never logs "voice: " lines (a family that already shares the source's
+        # bank logs one without any other change).
+        py_out, rs_out = voice_log(py_out, plan), voice_log(rs_out, plan)
+        if py.returncode == 0:
+            assert sum(line.startswith("voice: ") and "-> ZZZZ.dat+" in line for line in rs.stdout.splitlines()) == len(plan["rows"]), (label, "voice log")
+        assert py_out==rs_out,(label,"stdout",py.stdout,rs.stdout)
         assert normalize(py.stderr,a,ai)==normalize(rs.stderr,b,bi),(label,"stderr",py.stderr,rs.stderr)
-        compare_trees(a, b)
         if py.returncode:
+            compare_trees(a, b)
             print("PASS clone %s matching reference rejection: %s" % (label,py.stderr.strip()),flush=True)
             return
-        compare_files(ai, bi)
+        if voice:
+            merged = check_voice_tree(a, b, disc, plan, label)
+            check_voice_iso(b, bi, work)
+        else:
+            compare_trees(a, b)
+            compare_files(ai, bi)
         source = opts[opts.index("--source")+1] if "--source" in opts else "mario"
         ui = opts[opts.index("--ui")+1] if "--ui" in opts else "source"
         slot_args = sum((["--slot", opts[i+1]] for i, x in enumerate(opts) if x == "--slot"), [])
         validator = [sys.executable, MOD / "test_clone.py", "--disc", disc, "--patched", b,
                      "--source", source, "--ui", ui, *slot_args]
         # The validator assumes the default gameplay/stats/overlay settings.
+        # The validator assumes the reference's sound files (it predates #29): it checks the
+        # reference output when the voice changes apply, and the Rust output (identical) otherwise.
         if (not label[0].isdigit()) and not any(x in opts for x in ("--no-stats", "--no-gameplay", "--no-aram-overlay", "--colour-word", "--relocate-menu-art")):
+            if voice:
+                validator[validator.index("--patched") + 1] = a
             result = run(validator)
             assert "ALL CHECKS PASSED" in result, label + " test_clone"
-        print("PASS clone %s Python %.3fs Rust %.3fs" % (label, py_time, rs_time), flush=True)
+        print("PASS clone %s Python %.3fs Rust %.3fs%s" % (label, py_time, rs_time,
+              " (voice: %d merged bank(s), 0x8168 rows, rest byte-identical)" % merged if voice else ""), flush=True)
     finally:
         for p in (a, b):
             if p.exists():
@@ -506,7 +732,8 @@ def clone_case_in(cli, work, disc, label, opts):
 def clone_grid(cli, work, disc, full, jobs):
     from concurrent.futures import ThreadPoolExecutor
     with ThreadPoolExecutor(max_workers=jobs) as pool:
-        futures = [pool.submit(clone_case, cli, work, disc, case) for case in grid_cases(full) if case[0] not in SKIP_PASSED]
+        cases = VOICE_CASES if full == "voice" else grid_cases(full)
+        futures = [pool.submit(clone_case, cli, work, disc, case) for case in cases if case[0] not in SKIP_PASSED]
         for future in futures:
             future.result()
 
@@ -514,7 +741,7 @@ def clone_grid(cli, work, disc, full, jobs):
 def main():
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--disc", type=Path, default=ROOT / "orig/GYQE01")
-    for flag in ("synthetic", "codecs", "helpers", "iso", "grid", "full-grid", "textures", "api", "gui", "cli"):
+    for flag in ("synthetic", "codecs", "helpers", "iso", "grid", "full-grid", "voice-grid", "sound", "textures", "api", "gui", "cli"):
         ap.add_argument("--" + flag, action="store_true")
     ap.add_argument("--jobs", type=int, default=3, help="independent clone comparisons in parallel")
     ap.add_argument("--ram-isos", action="store_true", help="Linux: store clone comparison ISOs in anonymous RAM files via scratch symlinks")
@@ -534,7 +761,7 @@ def main():
     scratch = ROOT / ".scratch"
     scratch.mkdir(exist_ok=True)
     os.environ["TMPDIR"] = str(scratch)
-    if not any((args.synthetic, args.codecs, args.helpers, args.iso, args.grid, args.full_grid, args.textures, args.api, args.gui, args.cli)):
+    if not any((args.synthetic, args.codecs, args.helpers, args.iso, args.grid, args.full_grid, args.voice_grid, args.sound, args.textures, args.api, args.gui, args.cli)):
         args.synthetic = args.codecs = args.helpers = args.iso = True
     with tempfile.TemporaryDirectory(prefix="core-difftest-", dir=scratch) as tmp:
         work = Path(tmp)
@@ -554,8 +781,12 @@ def main():
             gui_jobs(probe, work, args.disc)
         if args.textures:
             textures(probe, work, args.disc)
+        if args.sound:
+            print(run([probe, "sound", args.disc]).splitlines()[-1], flush=True)
         if args.grid or args.full_grid:
             clone_grid(CORE / "target/release/mssb-clone", work, args.disc, args.full_grid, args.jobs)
+        if args.voice_grid:
+            clone_grid(CORE / "target/release/mssb-clone", work, args.disc, "voice", args.jobs)
     return 0
 
 

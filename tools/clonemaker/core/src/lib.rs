@@ -11,6 +11,7 @@ pub mod constants;
 pub mod disc;
 pub mod lzss;
 pub mod menu;
+pub mod sound;
 pub mod texture;
 
 /// A plain patcher error with optional operating-system details for friendly window messages.
