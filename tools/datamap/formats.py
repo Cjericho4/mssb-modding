@@ -28,7 +28,7 @@ FORMAT_NAMES = {
     "texarc": "texture archive (TextureArchiveHeader)",
     "anim": "charPipeline ANIM bank",
     "sectioned": "sectioned data file (u32 offset header)",
-    "musyx": "MusyX sound group (proj/pool/sdir/samp)",
+    "musyx": "MusyX sound group (proj/sdir/pool/samp)",
     "text": "text bank (glyph-coded strings)",
     "hvqm": "HVQM4 1.3 movie",
     "rel": "REL module",
@@ -136,7 +136,7 @@ def sniff(b, size, stored=False):
         return "text", "text bank: %d strings" % u16(b, 0)
     m = musyx_chunks(b, size)
     if m:
-        return "musyx", "MusyX group: proj 0x%X, pool 0x%X, sdir 0x%X, samp 0x%X bytes" % tuple(s for o, s in m)
+        return "musyx", "MusyX group: proj 0x%X, sdir 0x%X, pool 0x%X, samp 0x%X bytes" % tuple(s for o, s in m)
     if len(b) >= 0x30 and u32(b, 4) == 0x28 and 0 < u32(b, 0) <= 0x400 and u32(b, 8) <= size:
         n = u32(b, 0)
         offs = struct.unpack_from(">%dI" % min(n, (len(b) - 0x28) // 4), b, 0x28)
@@ -331,17 +331,18 @@ def describe(fmt, b):
                 name = b[name_off:end].decode("ascii", "replace") if end > 0 else ""
             lines.append("  seq %2d: %-24s %d tracks" % (i, name or "-", ntr))
     elif fmt == "musyx":
-        names = ("proj", "pool", "sdir", "samp")
+        # chunk order from fn_80021518 -> sndPushGroup(proj, gid, samp, sdir, pool); details: sound.py
+        names = ("proj", "sdir", "pool", "samp")
         pairs = musyx_chunks(b, size) or []
         for n, (o, s) in zip(names, pairs):
             lines.append("%s: offset 0x%X size 0x%X" % (n, o, s))
         if len(pairs) == 4:
-            o, s = pairs[2]
+            o, s = pairs[1]
             cnt = 0
             while o + cnt * 0x20 + 2 <= size and u16(b, o + cnt * 0x20) != 0xFFFF and cnt * 0x20 < s:
                 cnt += 1
-            lines.append("sdir: %d samples (0x20-byte SDIR entries)" % cnt)
-            lines.append("group id (proj word): 0x%X" % u32(b, 0x24) if size > 0x28 else "")
+            lines.append("sdir: %d samples (0x20-byte SDIR entries); `sound-list` shows SFX and samples" % cnt)
+            lines.append("group id (proj word): 0x%X" % u16(b, 0x24) if size > 0x28 else "")
     elif fmt == "text":
         n = u16(b, 0)
         offs = struct.unpack_from(">%dI" % n, b, 4)
