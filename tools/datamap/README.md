@@ -101,7 +101,7 @@ py mssb_files.py music-export $disc mario_01_h .\music      # or 'all'
 * `manifest.json` says which SFX (and for voices which line: 0 = happy, 10 = hurt, ...) uses each
   sample. Several lines can share one sample.
 * Re-encoding is DSP-ADPCM, like the game (about 40 dB SNR). Keep replacements about as long as
-  the originals: all 18 players' voices are held in sound memory during a match.
+  the originals: all 18 players' voice banks are loaded into sound memory at match start.
 * `voice-swap <target> <voice>` takes a character name (`BlueToad`, `Mario`), a charID or a voice
   name (`Toad`). It changes the voice of every character that shares the target's voice bank
   (colour variants, and clones made with `clone_character.py --ui source` of that character).
