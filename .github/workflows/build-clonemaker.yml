@@ -1,0 +1,79 @@
+name: Build Clone Maker (Tauri, Windows)
+
+# Builds the Tauri Clone Maker (tools/clonemaker/app) into one portable MSSB-Clone-Maker.exe (no
+# installer; it uses the WebView2 runtime that ships with Windows 10/11), runs the unit tests and
+# the exe's own --selftest (every widget and feature, the narrow layout, a timed resize).
+# Download it from the run's "Artifacts" section.
+
+on:
+  push:
+    branches: [main, 'tauri-*']
+    paths:
+      - tools/clonemaker/**
+      - .github/workflows/build-clonemaker.yml
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: pwsh
+        working-directory: tools/clonemaker/app
+
+    steps:
+    - name: Checkout
+      uses: actions/checkout@v4
+
+    - name: Set up Rust
+      uses: dtolnay/rust-toolchain@stable
+      with:
+        components: rustfmt, clippy
+
+    - name: Cache
+      uses: Swatinem/rust-cache@v2
+      with:
+        workspaces: tools/clonemaker/app
+
+    - name: Format and lints
+      run: |
+        cargo fmt --check
+        cargo clippy --release -- -D warnings
+
+    - name: Unit tests
+      run: |
+        cargo test --release
+        if (Test-Path ../core/Cargo.toml) { cargo test --release --manifest-path ../core/Cargo.toml }
+
+    - name: Build the .exe
+      run: |
+        cargo build --release
+        Get-ChildItem target/release/* -Include *.exe, *.dll | Format-Table Name, Length   # one portable exe, no DLLs
+
+    # A windows-subsystem exe has no console: it writes to --log; the page reports and exits 0 / 1
+    - name: Self-test (.exe)
+      env:
+        MSSB_SHOT_CMD: ${{ github.workspace }}\tools\clonemaker\app\selftest\windows\shot.cmd
+        SHOT_DIR: ${{ github.workspace }}\shots
+      run: |
+        New-Item -ItemType Directory -Force $env:SHOT_DIR | Out-Null
+        $p = Start-Process -FilePath target/release/MSSB-Clone-Maker.exe -ArgumentList '--selftest', '--log', 'selftest.log' -PassThru
+        $null = $p.Handle   # keeps the exit code readable after WaitForExit
+        if (-not $p.WaitForExit(300000)) { Stop-Process -Id $p.Id -Force; throw "the self-test did not finish in 5 minutes" }
+        Get-Content selftest.log
+        if ($p.ExitCode -ne 0) { throw "MSSB-Clone-Maker.exe --selftest exited with $($p.ExitCode)" }
+
+    - name: Upload the .exe
+      uses: actions/upload-artifact@v4
+      with:
+        name: MSSB-Clone-Maker-Tauri
+        path: tools/clonemaker/app/target/release/MSSB-Clone-Maker.exe
+        if-no-files-found: error
+
+    - name: Upload the self-test screenshots
+      if: always()
+      uses: actions/upload-artifact@v4
+      with:
+        name: clonemaker-selftest-screenshots
+        path: shots/
+        if-no-files-found: ignore
