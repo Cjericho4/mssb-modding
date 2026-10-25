@@ -589,7 +589,7 @@ LINE_USES = {
     4: "pitcher result happy (pitcher anim 68, fn_3_64BDC)",
     5: "regular throw (fn_3_ABDD0)",
     7: "championship / win screen (fn_3_22C20), fn_3_657E4",
-    9: "fn_3_657E4 via fn_3_90150 (distance-scaled volume)",
+    9: "fn_3_657E4 via fn_3_90150 (scaled volume)",
     10: "negative: strikeout (batter anims 93..96), hit by pitch (98), knocked down by hazards, "
         "body check / slide collision, failed catch, anti-chemistry throw",
     11: "big hit: fielder set on fire (anim 16), wall splat (fn_3_2F924)",
