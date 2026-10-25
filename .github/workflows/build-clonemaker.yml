@@ -50,6 +50,11 @@ jobs:
         cargo build --release
         Get-ChildItem target/release/* -Include *.exe, *.dll | Format-Table Name, Length   # one portable exe, no DLLs
 
+    # The runner's screen is 1024 x 768: too small for the two-column layout and the wide resize test
+    - name: Bigger screen
+      continue-on-error: true
+      run: Set-DisplayResolution -Width 1920 -Height 1080 -Force
+
     # A windows-subsystem exe has no console: it writes to --log; the page reports and exits 0 / 1
     - name: Self-test (.exe)
       env:
