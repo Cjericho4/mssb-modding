@@ -69,8 +69,10 @@ screen, lineup, HUD and announcer show the source.  --ui donor keeps every menu/
 import argparse
 import colorsys
 import copy
+import ctypes
 import hashlib
 import math
+import os
 import shutil
 import struct
 import sys
@@ -443,6 +445,47 @@ def lzss_compress_optimal(data, lb_bits=LZSS_LOOKBACK_BITS, rp_bits=LZSS_REPEAT_
         pos += l
     out = bw.finish()
     return out + b"\0" * ((-len(out)) % 32)
+
+
+def _load_fast_lzss():
+    """Swap in the C build of the two slow codecs (lzss.c, ~100x faster) when it sits next to this
+    file or inside the PyInstaller bundle; the pure-Python versions above stay as the fallback."""
+    name = {"win32": "_lzss.dll", "darwin": "_lzss.dylib"}.get(sys.platform, "_lzss.so")
+    for d in (getattr(sys, "_MEIPASS", None), os.path.dirname(os.path.abspath(__file__))):
+        if d and os.path.exists(os.path.join(d, name)):
+            try:
+                lib = ctypes.CDLL(os.path.join(d, name))
+            except OSError:
+                return None
+            lib.lzss_compress_optimal.restype = ctypes.c_size_t
+            lib.lzss_compress_optimal.argtypes = [ctypes.c_char_p, ctypes.c_size_t, ctypes.c_char_p,
+                                                  ctypes.c_int, ctypes.c_int, ctypes.c_int]
+            lib.lzss_decompress.restype = ctypes.c_longlong
+            lib.lzss_decompress.argtypes = [ctypes.c_char_p, ctypes.c_size_t, ctypes.c_char_p, ctypes.c_size_t,
+                                            ctypes.c_int, ctypes.c_int]
+            return lib
+    return None
+
+
+_fast_lzss = _load_fast_lzss()
+if _fast_lzss is not None:
+    _py_lzss_decompress, _py_lzss_compress_optimal = lzss_decompress, lzss_compress_optimal
+
+    def lzss_decompress(data, size, lb_bits=LZSS_LOOKBACK_BITS, rp_bits=LZSS_REPEAT_BITS):
+        data = bytes(data)
+        out = ctypes.create_string_buffer(max(size, 1))
+        used = _fast_lzss.lzss_decompress(data, len(data), out, size, lb_bits, rp_bits)
+        if used < 0:
+            raise LZSSError("compressed stream exhausted" if used == -1 else "bad back-reference")
+        return out.raw[:size], used
+
+    def lzss_compress_optimal(data, lb_bits=LZSS_LOOKBACK_BITS, rp_bits=LZSS_REPEAT_BITS, max_chain=256):
+        data = bytes(data)
+        out = ctypes.create_string_buffer(len(data) * 9 // 8 + 64)
+        n = _fast_lzss.lzss_compress_optimal(data, len(data), out, lb_bits, rp_bits, max_chain)
+        if n == 0 and data:
+            raise MemoryError("lzss_compress_optimal")
+        return out.raw[:n] + b"\0" * ((-n) % 32)
 
 
 # ----------------------------------------------------------------------------------------------
@@ -1907,8 +1950,9 @@ def dol_size(dol_hdr):
     return max(o + s for o, s in zip(offs, sizes) if s)
 
 
-def extract_iso(iso_path, dest, log):
-    """Unpack a GameCube .iso into Dolphin's extracted layout (dest/sys + dest/files)."""
+def extract_iso(iso_path, dest, log, progress=None):
+    """Unpack a GameCube .iso into Dolphin's extracted layout (dest/sys + dest/files).
+    `progress(done, total)` gets byte counts as the files are written."""
     dest = Path(dest)
     with open(iso_path, "rb") as f:
         def read(off, n):
@@ -1935,7 +1979,9 @@ def extract_iso(iso_path, dest, log):
         (sysd / "main.dol").write_bytes(read(dol_off, dol_size(read(dol_off, 0x100))))
         (sysd / "fst.bin").write_bytes(fst)
         log("extracting %s -> %s" % (iso_path, dest))
-        for e, path in fst_paths(fst):
+        entries = list(fst_paths(fst))
+        total, done = sum(e["size"] for e, _ in entries), 0
+        for e, path in entries:
             out = filesd / path
             out.parent.mkdir(parents=True, exist_ok=True)
             f.seek(e["offset"])
@@ -1947,18 +1993,21 @@ def extract_iso(iso_path, dest, log):
                         raise SystemExit("%s is truncated (%s)" % (iso_path, path))
                     g.write(b)
                     left -= len(b)
+                    done += len(b)
+                    if progress:
+                        progress(done, total)
 
 
-def open_disc(path, log, scratch):
+def open_disc(path, log, scratch, progress=None):
     """--disc may be an extracted folder or a .iso; an ISO is unpacked into `scratch` first."""
     path = Path(path)
     if path.is_file():
-        extract_iso(path, scratch, log)
+        extract_iso(path, scratch, log, progress)
         return Disc(scratch)
     return Disc(path)
 
 
-def write_iso(disc_out, iso_path, log):
+def write_iso(disc_out, iso_path, log, progress=None):
     sysd = disc_out.sys
     boot = (sysd / "boot.bin").read_bytes()
     bi2 = (sysd / "bi2.bin").read_bytes()
@@ -1977,14 +2026,23 @@ def write_iso(disc_out, iso_path, log):
         f.write(dol)
         f.seek(fst_off)
         f.write(fst)
-        for e, path in fst_paths(fst):
+        entries = list(fst_paths(fst))
+        total, done = sum(e["size"] for e, _ in entries), 0
+        for e, path in entries:
             src = disc_out.files / path
             size = src.stat().st_size
             if size != e["size"]:
                 raise SystemExit("fst.bin says %s is %d bytes but the file is %d" % (path, e["size"], size))
             f.seek(e["offset"])
             with open(src, "rb") as g:
-                shutil.copyfileobj(g, f, 1 << 20)
+                while True:
+                    b = g.read(1 << 20)
+                    if not b:
+                        break
+                    f.write(b)
+                    done += len(b)
+                    if progress:
+                        progress(done, total)
             end = max(end, e["offset"] + size)
         end = align(end, 0x8000)
         f.truncate(end)
@@ -2067,12 +2125,17 @@ def preflight(disc, dol, log):
     log("preflight: clean retail GYQE01 dump")
 
 
-def clone(args, log=print):
-    """Run the patch described by `args` (see main()); `log` gets every progress line.  Returns
+def clone(args, log=print, progress=None):
+    """Run the patch described by `args` (see main()); `log` gets every progress line and
+    `progress(fraction, label)`, when given, the overall progress (0..1) for a progress bar.  Returns
     {"source": C, "slots": [(S, spec), ...], "out": Path, "iso": Path|None, "dry_run": bool}.
     Errors are raised as SystemExit(<plain message>), as on the command line."""
     dry = args.dry_run
     out = Path(args.out)
+
+    def stage(lo, hi, label):        # a (done, total) callback mapped onto [lo, hi] of the bar
+        return (lambda done, total: progress(lo + (hi - lo) * done / max(total, 1), label)) if progress else None
+    patch_step = stage(0.45, 0.55, "Patching")
     from_iso = Path(args.disc).is_file()
     if from_iso and dry:
         # ponytail: a dry run from an ISO still unpacks it (to a temp folder) to read the tables
@@ -2083,7 +2146,7 @@ def clone(args, log=print):
             if not args.force:
                 raise SystemExit("%s exists; use --force to overwrite it (or delete it to start over)" % out)
             shutil.rmtree(out)
-        src_disc = open_disc(args.disc, log, out)  # unpack straight into --out, then patch in place
+        src_disc = open_disc(args.disc, log, out, stage(0.0, 0.45, "Unpacking the game"))  # straight into --out, patched in place
     else:
         src_disc = Disc(args.disc)
     preflight(src_disc, Dol((src_disc.sys / "main.dol").read_bytes()), log)
@@ -2098,7 +2161,15 @@ def clone(args, log=print):
                 raise SystemExit("%s exists; use --force to overwrite it (or delete it to start over)" % out)
             shutil.rmtree(out)
         log("copying %s -> %s (this includes the 450 MB ZZZZ.dat)" % (src_disc.root, out))
-        shutil.copytree(src_disc.root, out)
+        step, total, done = stage(0.0, 0.45, "Copying the game"), sum(
+            p.stat().st_size for p in src_disc.root.rglob("*") if p.is_file()), [0]
+
+        def copy_counted(a, b):
+            shutil.copy2(a, b)
+            done[0] += os.path.getsize(b)
+            if step:
+                step(done[0], total)
+        shutil.copytree(src_disc.root, out, copy_function=copy_counted)
         disc = Disc(out)
 
     dol = Dol((disc.sys / "main.dol").read_bytes())
@@ -2126,6 +2197,8 @@ def clone(args, log=print):
                              % (S, CHAR_NAMES[C]))
 
     # --- source data
+    if patch_step:
+        patch_step(0, 4)
     log("source: %d %s" % (C, CHAR_NAMES[C]))
     if C in UNSUPPORTED_SOURCES:
         raise SystemExit("%s can't be cloned" % CHAR_NAMES[C])
@@ -2271,6 +2344,8 @@ def clone(args, log=print):
                 dol.write(ADDR_ANIMPARAMS + (k * NUM_CHARS + S) * 2, dol.read(ADDR_ANIMPARAMS + (k * NUM_CHARS + C) * 2, 2))
         report.append((S, rc))
 
+    if patch_step:
+        patch_step(2, 4)
     # --- blob relocation
     if use_overlay:
         blob = bytes(blob) + b"\0" * ((-len(blob)) % 0x20)
@@ -2331,6 +2406,8 @@ def clone(args, log=print):
         log("DRY RUN: no files written")
         return {"source": C, "slots": [(S, rc.spec) for S, rc in report], "out": out, "iso": None, "dry_run": True}
 
+    if patch_step:
+        patch_step(3, 4)
     # --- write ZZZZ.dat: in-place rewrites, then the appendix
     with open(zz_path, "r+b") as f:
         for off, b in inplace + chunks:
@@ -2376,7 +2453,7 @@ def clone(args, log=print):
     log("main.dol and fst.bin written")
 
     if args.iso:
-        write_iso(disc, Path(args.iso), log)
+        write_iso(disc, Path(args.iso), log, stage(0.55, 1.0, "Writing the new ISO"))
 
     log("")
     log("Done.  In the game, pick: " + ", ".join("%s (slot %d) -> %s" % (CHAR_NAMES[S], S, rc.spec) for S, rc in report))

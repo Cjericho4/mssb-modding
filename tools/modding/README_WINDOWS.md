@@ -107,8 +107,9 @@ py .\test_clone.py --disc "C:\mssb\GYQE01" --patched "C:\mssb\GYQE01-marios" --s
 Start over / undo: delete the output folder (or re-run with `--force`).  The extracted input is never
 modified; the patcher refuses to run if `--disc` is already patched or `--out` equals `--disc`.
 
-Optional self-check (runs the patcher into a scratch folder and verifies everything it wrote; takes
-about a minute):
+Optional self-check (runs the patcher into a scratch folder and verifies everything it wrote).
+From source, packing is slow (minutes) unless the C codec is built next to the script:
+`gcc -O2 -shared -static-libgcc -o _lzss.dll lzss.c` (the .exe already includes it).
 
 ```powershell
 py .\test_clone.py --disc "C:\mssb\GYQE01" --work "C:\mssb\clone_test"

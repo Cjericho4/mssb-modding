@@ -678,7 +678,7 @@ class Card(tk.Frame):
         tk.Frame(self, bg=LINE, height=1).grid(row=1, column=0, sticky="ew")
         self.body = tk.Frame(self, bg=PANEL)
         self.body.grid(row=2, column=0, sticky="nsew", padx=px(pad - 4), pady=(px(11), px(pad - 4)))
-        self.bind("<Configure>", lambda e: page.draw_card(self))
+        self.bind("<Configure>", lambda e: page.schedule_card(self))
 
 
 def section(parent, text, red=False, row=0, column=0, columnspan=1, pady=(0, 6)):
@@ -700,6 +700,8 @@ class Page(tk.Canvas):
         self._hot = None
         self._wash_job = None
         self._wash_size = None
+        self._cards_job = None
+        self._dirty_cards = set()
         self.wash_item = self.create_image(0, 0, anchor="nw", tags=("wash",))
         self.r = px(12)
         self.inset = px(5)
@@ -809,6 +811,20 @@ class Page(tk.Canvas):
             layers += [(box, border, 1), (inner, PANEL, 1)]
             self._corner_cache[key] = paint(n, n, layers, bg)
         return self._corner_cache[key]
+
+    def schedule_card(self, card):
+        """Redraw a card's panel at most every 50 ms: a window drag sends a resize per pixel, and each
+        redraw can build new corner images (pure Python) for the wash colour under them."""
+        self._dirty_cards.add(card)
+        if self._cards_job is None:
+            self._cards_job = self.after(50, self._draw_dirty_cards)
+
+    def _draw_dirty_cards(self):
+        self._cards_job = None
+        cards, self._dirty_cards = self._dirty_cards, set()
+        for card in cards:
+            if card.winfo_exists():
+                self.draw_card(card)
 
     def draw_card(self, card):
         tag = "card%d" % id(card)

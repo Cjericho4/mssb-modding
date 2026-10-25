@@ -223,7 +223,7 @@ def main():
 
     print("5. jobs")
     out_iso = work / "Mario Superstar Baseball (US) - Clones.iso"
-    check(g.default_output(args.iso).name == "Mario Superstar Baseball (US) - Clones.iso", "default output next to the ISO")
+    check(g.default_output(args.iso) == Path(args.iso).parent / (Path(args.iso).stem + " - Clones.iso"), "default output next to the ISO")
     check(g.default_output(args.disc) == Path(args.disc).parent / "GYQE01 - Clones.iso", "default output for a folder")
     slots = [(s, g.colour_spec(c)) for s, c in g.default_rows(ch)]
     job = g.Job(args.iso, out_iso, 0, slots, keep_work=True)
@@ -267,9 +267,20 @@ def main():
         m, d = g.friendly_error(e)
     check("log" in m and "KeyError" in d and "Traceback" in d, "unexpected error -> message + traceback details")
 
+    locked = work / "locked"
+    locked.mkdir()
+    locked.chmod(0o555)
+    check(refused(g.Job(args.iso, locked / "x.iso", 0, slots), "won't let", free=10 ** 12), "write-protected folder refused")
+    locked.chmod(0o755)
+    locked.rmdir()
+
     print("6. end to end: ISO in, Toads, kept working folder (the button's code path)")
-    lines = []
-    res = g.run_job(job, lines.append)
+    lines, steps = [], []
+    res = g.run_job(job, lines.append, lambda f, label: steps.append((f, label)))
+    check(steps and steps[-1][0] == 1.0 and all(a[0] <= b[0] for a, b in zip(steps, steps[1:])),
+          "progress rises to 100%% (%d steps, stages %s)" % (len(steps), sorted({l for _, l in steps})))
+    logf = g.log_path(job)
+    check(logf.exists() and "saved " in logf.read_text(encoding="utf-8"), "log file written: %s" % logf.name)
     check(out_iso.exists() and not any(work.glob("*.partial.iso")), "wrote %s, no .partial.iso left" % out_iso.name)
     check(res["work"] is not None and (res["work"] / "sys" / "main.dol").exists(), "working folder kept: %s" % res["work"])
     check(any(l.startswith("Done.") for l in lines) and any("preflight: clean" in l for l in lines), "log lines reached the callback (%d lines)" % len(lines))
@@ -293,6 +304,24 @@ def main():
         cc.extract_iso(out2, ext, lambda l: None)
         run_test_clone(args.disc, ext, 0, slots2, "donor")
         shutil.rmtree(str(ext))
+
+    print("8. cancel: stops at the next progress step, leaves no working folder or .iso")
+    import threading
+    cancel = threading.Event()
+    out3 = work / "cancelled.iso"
+    before = set(work.glob("MSSB-Clone-Maker-work-*"))
+
+    def cancel_soon(f, label):
+        if f > 0.1:
+            cancel.set()
+    try:
+        g.run_job(g.Job(args.iso, out3, 0, slots), lambda l: None, cancel_soon, cancel)
+        check(False, "cancel raised Cancelled")
+    except g.Cancelled:
+        check(True, "cancel raised Cancelled")
+    check(not out3.exists() and not any(work.glob("*.partial.iso")) and set(work.glob("MSSB-Clone-Maker-work-*")) == before,
+          "nothing left behind")
+    check("cancelled" in g.log_path(g.Job(args.iso, out3, 0, slots)).read_text(encoding="utf-8"), "log file says cancelled")
 
     print()
     if FAILS:

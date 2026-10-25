@@ -499,6 +499,15 @@ def validate_job(job, free_bytes=None):
         raise SystemExit("Save the new game outside the game's folder.")
     if not out.parent.is_dir():
         raise SystemExit("The folder %s does not exist." % out.parent)
+    # Windows: a protected folder (Program Files, the drive root) would make tempfile.mkdtemp retry
+    # "forever" (TMP_MAX is 2**31 there), so try a real write first
+    probe = out.parent / (".mssb-clone-write-test-%d" % os.getpid())
+    try:
+        probe.write_bytes(b"")
+        probe.unlink()
+    except OSError:
+        raise SystemExit("Windows won't let this program save in %s. Choose a folder you own, such as "
+                         "Documents or the Desktop." % out.parent)
     if free_bytes is None:
         free_bytes = shutil.disk_usage(str(out.parent)).free
     if free_bytes < NEEDED_FREE_BYTES:
@@ -506,24 +515,62 @@ def validate_job(job, free_bytes=None):
                          "game is being made, %.1f GB is free." % (out.parent, NEEDED_FREE_BYTES / 1e9, free_bytes / 1e9))
 
 
-def run_job(job, log):
+class Cancelled(Exception):
+    pass
+
+
+def log_path(job):
+    return job.output_iso.with_suffix(".log")
+
+
+def run_job(job, log, progress=None, cancel=None):
     """Patch into a temporary working folder next to the output, write the .iso, clean up.
-    Returns clone_character.clone()'s result plus "work" (the kept folder, or None)."""
+    Every log line also goes to <output>.log (with the traceback if something breaks).
+    `progress(fraction, label)` follows clone_character.clone(); setting the `cancel` Event stops the
+    job at its next progress step with Cancelled.  Returns clone_character.clone()'s result plus "work"
+    (the kept folder, or None)."""
     validate_job(job)
-    work = Path(tempfile.mkdtemp(prefix="MSSB-Clone-Maker-work-", dir=str(job.output_iso.parent)))
+    logf = open(log_path(job), "w", encoding="utf-8")
+
+    def out(line):
+        logf.write(line + "\n")
+        logf.flush()
+        log(line)
+
+    def step(fraction, label):
+        if cancel is not None and cancel.is_set():
+            raise Cancelled()
+        if progress:
+            progress(fraction, label)
+    work = job.output_iso.parent / ("MSSB-Clone-Maker-work-%s" % os.urandom(4).hex())
+    try:
+        work.mkdir()
+    except OSError:
+        logf.close()
+        raise
     partial = job.output_iso.with_name(job.output_iso.stem + ".partial.iso")
     try:
-        log("working folder: %s" % work)
+        out("MSSB Clone Maker: %s from %s" % (job.output_iso, job.game_path))
+        out("working folder: %s" % work)
 
         def patch_log(line):
             if not line.startswith("Boot: "):     # the CLI's "open the folder" hint; the GUI hands out the .iso
-                log(line)
-        result = cc.clone(job_args(job, work / "disc", partial), log=patch_log)
+                out(line)
+        result = cc.clone(job_args(job, work / "disc", partial), log=patch_log, progress=step)
         os.replace(str(partial), str(job.output_iso))
-        log("saved %s" % job.output_iso)
+        out("saved %s" % job.output_iso)
         result["iso"] = job.output_iso
         result["work"] = work / "disc" if job.keep_work else None
         return result
+    except Cancelled:
+        out("cancelled")
+        raise
+    except SystemExit as e:
+        out("ERROR: %s" % e.code)
+        raise
+    except BaseException as e:  # noqa: B902 - logged, then shown by the caller
+        out("ERROR: " + "".join(traceback.format_exception(type(e), e, e.__traceback__)).rstrip())
+        raise
     finally:
         if partial.exists():
             try:
@@ -531,14 +578,17 @@ def run_job(job, log):
             except OSError:
                 pass
         if job.keep_work:
-            log("kept the working folder: %s" % (work / "disc"))
+            out("kept the working folder: %s" % (work / "disc"))
         else:
-            log("removing the working folder")
+            out("removing the working folder")
             shutil.rmtree(str(work), ignore_errors=True)
+        logf.close()
 
 
 def friendly_error(exc):
     """(message, details or None) for a dialog; details is a traceback for unexpected errors."""
+    if isinstance(exc, Cancelled):
+        return "Cancelled. Nothing was saved.", None
     if isinstance(exc, SystemExit):
         msg = str(exc.code)
         msg = msg.replace("rerun with --ui donor", "untick \"Show clones as…\" under Advanced and try again")
@@ -554,7 +604,8 @@ def friendly_error(exc):
                 or getattr(exc, "winerror", None) == 32 else "")
         return "Couldn't read or write a file%s: %s.%s" % (where, exc.strerror or exc, busy), None
     return ("Something went wrong while making the game. The technical details are in the log on the "
-            "right of the window.", "".join(traceback.format_exception(type(exc), exc, exc.__traceback__)))
+            "right of the window and in the .log file saved next to the new game.",
+            "".join(traceback.format_exception(type(exc), exc, exc.__traceback__)))
 
 
 
@@ -739,9 +790,19 @@ class App:
         self.btn_go = T.AngledButton(b, "Create patched game", self.create)
         self.btn_go.grid(row=0, column=2, sticky="e", padx=(px(16), 0))
         self.inputs.append(self.btn_go)
-        self.progress = ttk.Progressbar(b, mode="indeterminate", length=px(160))
-        self.progress.grid(row=1, column=0, columnspan=3, sticky="ew", pady=(px(14), px(2)))
-        self.progress.grid_remove()      # shown while the game is being made
+        # shown while the game is being made: stage + percent, the bar, Cancel
+        self.run_box = ttk.Frame(b)
+        self.run_box.grid(row=1, column=0, columnspan=3, sticky="ew", pady=(px(14), px(2)))
+        self.run_box.columnconfigure(0, weight=1)
+        self.progress_lbl = ttk.Label(self.run_box, text="", style="Muted.TLabel")
+        self.progress_lbl.grid(row=0, column=0, sticky="w", pady=(0, px(4)))
+        self.progress = ttk.Progressbar(self.run_box, mode="determinate", maximum=1000, length=px(160))
+        self.progress.grid(row=1, column=0, sticky="ew")
+        self.btn_cancel = ttk.Button(self.run_box, text="Cancel", command=self.cancel)
+        self.btn_cancel.grid(row=1, column=1, padx=(px(10), 0))
+        self.run_box.grid_remove()
+        self.cancel_event = threading.Event()
+        self._progress_shown = None
 
         # preview + log (right column, full height)
         card = page.add_card(T.Card(page, "Preview"), row=1, column=1, rowspan=4, sticky="nsew",
@@ -1028,6 +1089,7 @@ class App:
         self.rows.append(row)
         if len(self.rows) == 1:
             self.preview_row.set(row["id"])
+        self.btn_add.configure(text="+ Add another clone")
         self.schedule_preview()
 
     def choice(self, slot):
@@ -1040,6 +1102,7 @@ class App:
             r["frame"].grid(row=i + 1)
         if self.rows and self.preview_row.get() == row["id"]:
             self.preview_row.set(self.rows[0]["id"])
+        self.btn_add.configure(text="+ Add another clone" if self.rows else "+ Add a clone")
         self.schedule_preview()
 
     def donor_changed(self, row):
@@ -1219,15 +1282,29 @@ class App:
         self.busy = True
         self.set_enabled(False)
         self.page.set_pill("Creating the game…", GOLD)
-        self.progress.grid()
-        self.progress.start(12)
+        self.cancel_event.clear()
+        self._progress_shown = None
+        self.progress.configure(value=0)
+        self.progress_lbl.configure(text="Starting…")
+        self.btn_cancel.state(["!disabled"])
+        self.run_box.grid()
         self.log("---- creating %s" % job.output_iso)
-        self.log("this takes a few minutes (copying 1.4 GB twice and packing the new files)")
+        self.log("the full log is also saved to %s" % log_path(job))
         threading.Thread(target=self._job_worker, args=(job,), daemon=True).start()
 
+    def cancel(self):
+        self.cancel_event.set()
+        self.btn_cancel.state(["disabled"])
+        self.progress_lbl.configure(text="Cancelling…")
+
     def _job_worker(self, job):
+        def progress(fraction, label):
+            shown = (label, int(fraction * 1000))
+            if shown != self._progress_shown:      # ponytail: one message per 0.1 %, not per MB
+                self._progress_shown = shown
+                self.q.put(("progress",) + shown)
         try:
-            result = run_job(job, lambda line: self.q.put(("log", line)))
+            result = run_job(job, lambda line: self.q.put(("log", line)), progress, self.cancel_event)
             hint = pick_hint(self.game.dol, job.source, [s for s, _ in job.slots], job.ui_source)
             self.q.put(("done", result, hint))
         except BaseException as e:  # noqa: B902 - SystemExit in a thread would vanish silently
@@ -1245,6 +1322,10 @@ class App:
         kind = msg[0]
         if kind == "log":
             self.log(msg[1])
+        elif kind == "progress":
+            if not self.cancel_event.is_set():
+                self.progress_lbl.configure(text="%s…  %d%%" % (msg[1], msg[2] // 10))
+            self.progress.configure(value=msg[2])
         elif kind == "preview":
             self.preview_done(msg[1], msg[2])
         elif kind == "game":
@@ -1256,19 +1337,20 @@ class App:
             extra = "\n\nThe working folder was kept: %s" % result["work"] if result.get("work") else ""
             dialogs.showinfo("Done!", "Saved to %s.\n\nOpen it in Dolphin or Project Rio: File → Open…\n\n%s%s"
                              % (result["iso"], hint, extra))
+        elif kind == "error" and msg[1].startswith("Cancelled"):
+            self.finish()
+            self.page.set_pill("Cancelled", GREY)
+            self.log(msg[1])
         elif kind == "error":
             self.finish()
-            message, details = msg[1], msg[2]
+            message = msg[1]
             self.page.set_pill("Not created", RED)
-            self.log("ERROR: " + message)
-            if details:
-                self.log("details:\n" + details)
+            self.log("ERROR: " + message)    # the traceback, if any, is already in the log (run_job)
             dialogs.showerror("Couldn't create the patched game", message)
 
     def finish(self):
         self.busy = False
-        self.progress.stop()
-        self.progress.grid_remove()
+        self.run_box.grid_remove()
         self.set_enabled(self.game is not None)
 
     def on_close(self):
@@ -1292,8 +1374,9 @@ def run_gui():
 def selftest(argv):
     """Build the window, optionally load a game and render a preview, then close.  Exit code 0 = OK.
     Used by the Windows build (the .exe) and for screenshots:
-        clone_gui.py --selftest [--game P] [--hold S] [--expect-fonts]
-    --expect-fonts fails unless Rajdhani / Inter / JetBrains Mono were loaded (bundled or installed)."""
+        clone_gui.py --selftest [--game P] [--hold S] [--expect-fonts] [--expect-fast-lzss]
+    --expect-fonts fails unless Rajdhani / Inter / JetBrains Mono were loaded (bundled or installed);
+    --expect-fast-lzss fails unless the C codec (_lzss.dll, from lzss.c) was loaded."""
     game = hold = None
     if "--game" in argv:
         game = argv[argv.index("--game") + 1]
@@ -1321,6 +1404,9 @@ def selftest(argv):
         app.relayout(app.scroller.view.winfo_width())
         if "--expect-fonts" in argv and theme.FONT_FALLBACK:
             print("selftest: the bundled fonts did not load")
+            return 1
+        if "--expect-fast-lzss" in argv and cc._fast_lzss is None:
+            print("selftest: the C codec (_lzss) did not load; packing would take minutes")
             return 1
         if game:
             app.game_path.set(game)

@@ -79,7 +79,9 @@ The default is four Marios on the four Toad colours: blue, green, purple and yel
 ## 4. Create the game
 
 The new game is saved next to your original as `... - Clones.iso` (change it with **Save as...**).
-Click **Create patched game**.  It takes a few minutes; the **Log** on the right shows what it is doing.
+Click **Create patched game**.  It takes under a minute, mostly copying the 1.4 GB game; the bar shows
+each stage and **Cancel** stops it and cleans up.  The **Log** on the right shows what it is doing, and
+the same log is saved as `... - Clones.log` next to the new game (send that file if something fails).
 When it is done a message says where the file is.
 
 ## 5. Play it in Dolphin or Rio
