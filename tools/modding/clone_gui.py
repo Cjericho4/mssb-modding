@@ -1377,7 +1377,8 @@ def selftest(argv):
         clone_gui.py --selftest [--game P] [--hold S] [--expect-fonts] [--expect-fast-lzss]
     --expect-fonts fails unless Rajdhani / Inter / JetBrains Mono were loaded (bundled or installed);
     --expect-fast-lzss fails unless the C codec (_lzss.dll, from lzss.c) was loaded;
-    --log P writes the output to P (a --windowed .exe has no console)."""
+    --log P writes the output to P (a --windowed .exe has no console);
+    --profile-resize drags the window size through 80 steps under cProfile and prints the hot spots."""
     if "--log" in argv:
         sys.stdout = sys.stderr = open(argv[argv.index("--log") + 1], "w", encoding="utf-8")
     game = hold = None
@@ -1408,6 +1409,19 @@ def selftest(argv):
         if "--expect-fonts" in argv and theme.FONT_FALLBACK:
             print("selftest: the bundled fonts did not load")
             return 1
+        if "--profile-resize" in argv:
+            import cProfile
+            import pstats
+            prof = cProfile.Profile()
+            t0 = time.perf_counter()
+            prof.enable()
+            for i in range(80):        # a drag: one pixel-ish step at a time, a redraw after each
+                root.geometry("%dx%d" % (theme.px(1100) + 4 * i, theme.px(760) + 2 * i))
+                root.update()
+            prof.disable()
+            print("selftest: 80 resizes in %.2f s (%.1f ms each)" % (time.perf_counter() - t0, (time.perf_counter() - t0) * 12.5))
+            pstats.Stats(prof, stream=sys.stdout).sort_stats("cumulative").print_stats(30)
+            pstats.Stats(prof, stream=sys.stdout).sort_stats("tottime").print_stats(15)
         if "--expect-fast-lzss" in argv and cc._fast_lzss is None:
             print("selftest: the C codec did not load (%s); packing would take minutes" % cc._fast_lzss_why)
             return 1
