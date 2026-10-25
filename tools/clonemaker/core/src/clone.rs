@@ -94,9 +94,9 @@ pub fn parse_char(s: &str) -> Result<usize> {
     if !s.is_empty() && s.chars().all(|c| c.is_ascii_digit()) {
         let v = s
             .parse::<usize>()
-            .map_err(|_| Error(format!("character id out of range: {s}")))?;
+            .map_err(|_| Error::new(format!("character id out of range: {s}")))?;
         if v >= 54 {
-            return Err(Error(format!("character id out of range: {v}")));
+            return Err(Error::new(format!("character id out of range: {v}")));
         }
         return Ok(v);
     }
@@ -104,7 +104,7 @@ pub fn parse_char(s: &str) -> Result<usize> {
     CHAR_NAMES
         .iter()
         .position(|n| norm_name(n) == key)
-        .ok_or_else(|| Error(format!("unknown character '{s}' (use --list-slots)")))
+        .ok_or_else(|| Error::new(format!("unknown character '{s}' (use --list-slots)")))
 }
 fn parse_slot(s: &str) -> Result<(usize, Recolour)> {
     let (slot, rc) = s.split_once(':').unwrap_or((s, ""));
@@ -164,7 +164,7 @@ fn tree_size(src: &Path) -> Result<u64> {
 fn prepare_output(out: &Path, force: bool) -> Result<()> {
     if out.exists() {
         if !force {
-            return Err(Error(format!(
+            return Err(Error::new(format!(
                 "{} exists; use --force to overwrite it (or delete it to start over)",
                 out.display()
             )));
@@ -194,7 +194,7 @@ fn compress_checked(data: &[u8], optimal: bool, label: &str) -> Result<Vec<u8>> 
         lzss::compress(data, 11, 4, 48)?
     };
     if lzss::decompress(&comp, data.len(), 11, 4)?.0 != data {
-        return Err(Error(format!(
+        return Err(Error::new(format!(
             "internal error: LZSS round trip failed{label}"
         )));
     }
@@ -203,7 +203,7 @@ fn compress_checked(data: &[u8], optimal: bool, label: &str) -> Result<Vec<u8>> 
 fn load_menu(disc: &Disc, dol: &Dol, addr: u32) -> Result<(Vec<u8>, Descriptor)> {
     let d = dol.desc(addr, 0)?;
     if d.0[0] != 0x40b || d.0[1] & 0x40000000 == 0 {
-        return Err(Error(format!(
+        return Err(Error::new(format!(
             "main.dol: descriptor at {addr:08X} is not an LZSS file"
         )));
     }
@@ -231,10 +231,20 @@ pub fn clone(
     mut progress: Option<&mut PatchProgress<'_>>,
 ) -> Result<CloneResult> {
     // Protect both aliases and output paths nested inside the original extraction.
-    let input = fs::canonicalize(&args.disc)?;
+    let input = absolute_path(&args.disc)?;
     let output = absolute_path(&args.out)?;
-    if output == input || (input.is_dir() && output.starts_with(&input)) {
-        return Err(Error("--out must be a different folder from --disc".into()));
+    if input.starts_with(&output) || (input.is_dir() && output.starts_with(&input)) {
+        return Err(Error::new(
+            "--out must be a different folder from --disc".into(),
+        ));
+    }
+    if let Some(iso) = &args.iso {
+        let iso = absolute_path(iso)?;
+        if iso == input || (input.is_dir() && iso.starts_with(&input)) {
+            return Err(Error::new(
+                "--iso must not replace or modify the original disc".into(),
+            ));
+        }
     }
     let from_iso = args.disc.is_file();
     let mut temp = None;
@@ -293,10 +303,12 @@ pub fn clone(
     };
     let slots = ids(&clones);
     if slots.iter().collect::<std::collections::HashSet<_>>().len() != slots.len() {
-        return Err(Error("duplicate donor slot".into()));
+        return Err(Error::new("duplicate donor slot".into()));
     }
     if slots.contains(&c) {
-        return Err(Error("the source cannot be one of its own donors".into()));
+        return Err(Error::new(
+            "the source cannot be one of its own donors".into(),
+        ));
     }
     let use_overlay = !args.no_aram_overlay;
     let default_case = dol.u32(ADDR_JUMPTABLE)?;
@@ -307,13 +319,13 @@ pub fn clone(
     };
     for (s, _) in &clones {
         if use_overlay && dol.private_entry(*s)?.is_none() {
-            return Err(Error(format!(
+            return Err(Error::new(format!(
                 "slot {s} ({}) shares its ARAM body with other slots; pick a colour variant (Toads 29-32, Shy Guys 44-47, ...) or a stand-alone character, or use --no-aram-overlay",
                 CHAR_NAMES[*s]
             )));
         }
         if *s >= 48 && src_case != default_case {
-            return Err(Error(format!(
+            return Err(Error::new(format!(
                 "slot {s} is outside the per-character setup switch (0..47) but {} needs its own case",
                 CHAR_NAMES[c]
             )));
@@ -388,7 +400,7 @@ pub fn clone(
         let mut comp = compress_checked(&pf.data, true, " (portraits)")?;
         let packed = comp.len();
         if packed > pdesc.0[3] as usize {
-            return Err(Error(format!(
+            return Err(Error::new(format!(
                 "the re-packed HUD portrait file is {packed} B but only {} B fit at its disc offset; rerun with --ui donor",
                 pdesc.0[3]
             )));
@@ -439,7 +451,7 @@ pub fn clone(
                 ]);
                 let n = replace_desc(&mut dol.data, desc, new);
                 if n != 2 {
-                    return Err(Error(format!(
+                    return Err(Error::new(format!(
                         "main.dol: expected 2 copies of the {label} descriptor, found {n}"
                     )));
                 }
@@ -570,7 +582,7 @@ pub fn clone(
         )?;
         let old_alloc = dol.blob_alloc_size()?;
         if old_alloc != blob_desc.0[3] {
-            return Err(Error(format!(
+            return Err(Error::new(format!(
                 "ARAM allocation (0x{old_alloc:X}) does not match the blob descriptor (0x{:X})",
                 blob_desc.0[3]
             )));
@@ -624,7 +636,7 @@ pub fn clone(
                 (0x17000, 4),
             ] {
                 if off + 54 * rs > size {
-                    return Err(Error(format!(
+                    return Err(Error::new(format!(
                         "game.rel table at 0x{off:X} is outside .data"
                     )));
                 }
@@ -640,7 +652,7 @@ pub fn clone(
         for m in edits {
             let n = replace_desc(&mut rel, m.old, m.new);
             if n != m.counts[i] {
-                return Err(Error(format!(
+                return Err(Error::new(format!(
                     "{}: expected {} copies of the {} descriptor, found {n}",
                     rel_names[i], m.counts[i], m.label
                 )));
@@ -651,7 +663,7 @@ pub fn clone(
         let packed = comp.len();
         let room = rel_ends.iter().find(|end| **end > old.0[2] as u64).unwrap() - old.0[2] as u64;
         if packed as u64 > room {
-            return Err(Error(format!(
+            return Err(Error::new(format!(
                 "patched {} packs to {packed} B but only {room} B fit in aaaa.dat; rerun with {}",
                 rel_names[i],
                 if i == 1 {
@@ -710,7 +722,7 @@ pub fn clone(
             .map(|i| u16_at(&stats, i * 0xa0 + 0x24).map(|v| v as i16))
             .collect::<Result<_>>()?;
         if stat_ids != (0..54).collect::<Vec<_>>() {
-            return Err(Error(format!(
+            return Err(Error::new(format!(
                 "stat block at ZZZZ.dat+0x6CF8800 does not look right (CharIDs {:?}...)",
                 &stat_ids[..5]
             )));
@@ -752,7 +764,7 @@ pub fn clone(
         let mut step = |done: u64, total: u64| {
             stage(
                 &mut progress,
-                0.55 + 0.45 * done as f64 / total.max(1) as f64,
+                0.55 + (1.0 - 0.55) * done as f64 / total.max(1) as f64,
                 "Writing the new ISO",
             )
         };
@@ -787,27 +799,43 @@ pub fn clone(
 }
 /// Resolve an output path even if its final components do not yet exist.
 pub fn absolute_path(path: &Path) -> Result<PathBuf> {
-    if path.exists() {
-        return Ok(fs::canonicalize(path)?);
-    }
-    let mut tail = Vec::new();
-    let mut p = path;
-    while !p.exists() {
-        if let Some(name) = p.file_name() {
-            tail.push(name.to_owned());
+    let path = if path.as_os_str().is_empty() {
+        Path::new(".")
+    } else {
+        path
+    };
+    let absolute = std::path::absolute(path)?;
+    let mut resolved = PathBuf::new();
+    for component in absolute.components() {
+        match component {
+            std::path::Component::ParentDir => {
+                resolved.pop();
+            }
+            std::path::Component::CurDir => {}
+            other => {
+                resolved.push(other.as_os_str());
+                if resolved.exists() {
+                    resolved = fs::canonicalize(&resolved)?;
+                }
+            }
         }
-        let Some(parent) = p.parent() else {
-            break;
-        };
-        if parent.as_os_str().is_empty() {
-            p = Path::new(".");
-            break;
-        }
-        p = parent;
     }
-    let mut out = fs::canonicalize(p)?;
-    for part in tail.into_iter().rev() {
-        out.push(part);
+    Ok(resolved)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn resolves_missing_components_and_parents() {
+        let temp = tempfile::tempdir().unwrap();
+        assert_eq!(
+            absolute_path(&temp.path().join("missing/../output.iso")).unwrap(),
+            temp.path().join("output.iso")
+        );
+        assert_eq!(
+            absolute_path(Path::new("")).unwrap(),
+            std::env::current_dir().unwrap()
+        );
     }
-    Ok(out)
 }

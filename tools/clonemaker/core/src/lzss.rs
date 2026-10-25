@@ -57,7 +57,7 @@ impl BitReader<'_> {
         let bytes = self
             .data
             .get(self.pos..self.pos + 4)
-            .ok_or_else(|| Error("compressed stream exhausted".into()))?;
+            .ok_or_else(|| Error::new("compressed stream exhausted".into()))?;
         let w = u32::from_be_bytes(bytes.try_into().unwrap());
         self.pos += 4;
         self.n = 32 - need;
@@ -67,7 +67,7 @@ impl BitReader<'_> {
 }
 fn validate_bits(lb: u32, rp: u32) -> Result<()> {
     if !(1..=16).contains(&lb) || !(1..=16).contains(&rp) {
-        return Err(Error("invalid LZSS bit widths".into()));
+        return Err(Error::new("invalid LZSS bit widths".into()));
     }
     Ok(())
 }
@@ -88,7 +88,7 @@ pub fn decompress(data: &[u8], size: usize, lb: u32, rp: u32) -> Result<(Vec<u8>
             let back = reader.read(lb)? + 1;
             let count = reader.read(rp)? + 2;
             if back > out.len() || count > size - out.len() {
-                return Err(Error("bad back-reference".into()));
+                return Err(Error::new("bad back-reference".into()));
             }
             for _ in 0..count {
                 out.push(out[out.len() - back]);
@@ -231,11 +231,11 @@ mod tests {
     #[test]
     fn invalid_streams() {
         assert_eq!(
-            decompress(&[], 1, 11, 4).unwrap_err().0,
+            decompress(&[], 1, 11, 4).unwrap_err().message,
             "compressed stream exhausted"
         );
         assert_eq!(
-            decompress(&[0; 4], 2, 11, 4).unwrap_err().0,
+            decompress(&[0; 4], 2, 11, 4).unwrap_err().message,
             "bad back-reference"
         );
     }

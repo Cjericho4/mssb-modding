@@ -5,7 +5,7 @@ use crate::{Error, Result};
 pub fn u16_at(data: &[u8], off: usize) -> Result<u16> {
     Ok(u16::from_be_bytes(
         data.get(off..off + 2)
-            .ok_or_else(|| Error("truncated binary data".into()))?
+            .ok_or_else(|| Error::new("truncated binary data".into()))?
             .try_into()
             .unwrap(),
     ))
@@ -14,7 +14,7 @@ pub fn u16_at(data: &[u8], off: usize) -> Result<u16> {
 pub fn u32_at(data: &[u8], off: usize) -> Result<u32> {
     Ok(u32::from_be_bytes(
         data.get(off..off + 4)
-            .ok_or_else(|| Error("truncated binary data".into()))?
+            .ok_or_else(|| Error::new("truncated binary data".into()))?
             .try_into()
             .unwrap(),
     ))
@@ -22,7 +22,7 @@ pub fn u32_at(data: &[u8], off: usize) -> Result<u32> {
 /// Write a big-endian word without resizing a game structure.
 pub fn put_u32(data: &mut [u8], off: usize, value: u32) -> Result<()> {
     data.get_mut(off..off + 4)
-        .ok_or_else(|| Error("truncated binary data".into()))?
+        .ok_or_else(|| Error::new("truncated binary data".into()))?
         .copy_from_slice(&value.to_be_bytes());
     Ok(())
 }
@@ -94,7 +94,7 @@ impl Dol {
                 return Ok((s.offset + ram - s.address) as usize);
             }
         }
-        Err(Error(format!(
+        Err(Error::new(format!(
             "RAM address 0x{ram:08X} not inside any DOL section"
         )))
     }
@@ -103,14 +103,14 @@ impl Dol {
         let off = self.off(ram, size)?;
         self.data
             .get(off..off + size)
-            .ok_or_else(|| Error("truncated binary data".into()))
+            .ok_or_else(|| Error::new("truncated binary data".into()))
     }
     /// Replace game bytes at their runtime address.
     pub fn write(&mut self, ram: u32, bytes: &[u8]) -> Result<()> {
         let off = self.off(ram, bytes.len())?;
         self.data
             .get_mut(off..off + bytes.len())
-            .ok_or_else(|| Error("truncated binary data".into()))?
+            .ok_or_else(|| Error::new("truncated binary data".into()))?
             .copy_from_slice(bytes);
         Ok(())
     }
@@ -152,7 +152,7 @@ impl Dol {
         let lis = self.u32(0x800227ec)?;
         let addi = self.u32(0x800227f4)?;
         if lis >> 16 != 0x3c60 || addi >> 16 != 0x3863 {
-            return Err(Error(
+            return Err(Error::new(
                 "fn_800227E4 ARAM allocation instructions not found (patched DOL?)".into(),
             ));
         }
@@ -212,7 +212,7 @@ pub struct FstEntry {
 pub fn fst_entries(data: &[u8]) -> Result<Vec<FstEntry>> {
     let count = u32_at(data, 8)? as usize;
     if count > data.len() / 12 {
-        return Err(Error("truncated binary data".into()));
+        return Err(Error::new("truncated binary data".into()));
     }
     let strings = &data[count * 12..];
     let mut out = Vec::new();
@@ -224,11 +224,11 @@ pub fn fst_entries(data: &[u8]) -> Result<Vec<FstEntry>> {
         } else {
             let tail = strings
                 .get(start..)
-                .ok_or_else(|| Error("invalid FST string offset".into()))?;
+                .ok_or_else(|| Error::new("invalid FST string offset".into()))?;
             let end = tail
                 .iter()
                 .position(|b| *b == 0)
-                .ok_or_else(|| Error("unterminated FST name".into()))?;
+                .ok_or_else(|| Error::new("unterminated FST name".into()))?;
             tail[..end]
                 .iter()
                 .map(|b| if b.is_ascii() { *b as char } else { '\u{fffd}' })
@@ -272,7 +272,7 @@ pub fn patch_fst_size(data: &[u8], name: &str, size: u32) -> Result<Vec<u8>> {
             return Ok(out);
         }
     }
-    Err(Error(format!("{name} not in fst.bin")))
+    Err(Error::new(format!("{name} not in fst.bin")))
 }
 /// Module ID, section locations and import relocation streams of a REL image.
 #[derive(Debug)]
@@ -379,7 +379,7 @@ pub fn rel_data_section(data: &[u8]) -> Result<(usize, usize)> {
             return Ok((o, size));
         }
     }
-    Err(Error(
+    Err(Error::new(
         "game.rel: .data section with the voice table not found (already patched or wrong file?)"
             .into(),
     ))

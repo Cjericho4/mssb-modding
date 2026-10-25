@@ -41,7 +41,7 @@ impl TextureFile {
             .map(|t| t.index)
             .collect();
         if out.len() != 54 {
-            return Err(Error(format!(
+            return Err(Error::new(format!(
                 "portrait file: expected 54 50x50 CI8 textures, found {}",
                 out.len()
             )));
@@ -49,7 +49,7 @@ impl TextureFile {
         for i in &out {
             let t = &self.textures[*i];
             if t.colours != 256 || t.tlut_fmt != 2 {
-                return Err(Error(format!(
+                return Err(Error::new(format!(
                     "portrait {} is not CI8 with a 256-entry RGB5A3 palette",
                     t.index
                 )));
@@ -63,7 +63,7 @@ impl TextureFile {
         let src = self.textures[por[c]].clone();
         let dst = self.textures[por[s]].clone();
         if src.size != dst.size {
-            return Err(Error("portrait sizes differ".into()));
+            return Err(Error::new("portrait sizes differ".into()));
         }
         self.data
             .copy_within(src.data..src.data + src.size, dst.data);
@@ -76,12 +76,12 @@ impl TextureFile {
 pub fn portrait_desc(dol: &Dol) -> Result<Descriptor> {
     let d = dol.desc(crate::constants::ADDR_PORTRAIT_DESC, 0)?;
     if dol.desc(crate::constants::ADDR_PORTRAIT_DESC2, 0)? != d {
-        return Err(Error(
+        return Err(Error::new(
             "main.dol: the two portrait-file descriptor rows disagree (patched DOL?)".into(),
         ));
     }
     if d.0[0] != 0x40b || d.0[1] & 0x40000000 == 0 {
-        return Err(Error(
+        return Err(Error::new(
             "main.dol: portrait file descriptor is not an LZSS file".into(),
         ));
     }
@@ -92,11 +92,13 @@ pub fn frame_textures(data: &[u8], sequence: usize) -> Result<Vec<usize>> {
     let bank = u32_at(data, 4)? as usize;
     let table = bank + u32_at(data, bank + 8)? as usize;
     if sequence >= u32_at(data, table)? as usize {
-        return Err(Error("sequence outside sprite bank".into()));
+        return Err(Error::new("sequence outside sprite bank".into()));
     }
     let seq = table + u32_at(data, table + 8 + sequence * 4)? as usize;
     if u32_at(data, seq)? & 0x7fffffff != 2 {
-        return Err(Error("expected header list plus one image list".into()));
+        return Err(Error::new(
+            "expected header list plus one image list".into(),
+        ));
     }
     let group = seq + u32_at(data, seq + 12)? as usize;
     let count = u16_at(data, group)? as usize;
@@ -104,7 +106,7 @@ pub fn frame_textures(data: &[u8], sequence: usize) -> Result<Vec<usize>> {
     let mut pos = group + 4;
     let template = data
         .get(pos..pos + stride)
-        .ok_or_else(|| Error("truncated sprite template".into()))?;
+        .ok_or_else(|| Error::new("truncated sprite template".into()))?;
     let mut frames = vec![None; count];
     for _ in 0..count {
         let kind = u16_at(data, pos)? & 0x7fff;
@@ -120,30 +122,30 @@ pub fn frame_textures(data: &[u8], sequence: usize) -> Result<Vec<usize>> {
                 for i in 0..changes {
                     let dst = 4 + u16_at(data, pos + 8 + i * 2)? as usize * 4;
                     if dst + 4 > stride {
-                        return Err(Error("delta outside expanded record".into()));
+                        return Err(Error::new("delta outside expanded record".into()));
                     }
                     record[dst..dst + 4].copy_from_slice(&data[values + i * 4..values + i * 4 + 4]);
                 }
                 size
             }
             _ => {
-                return Err(Error(format!(
+                return Err(Error::new(format!(
                     "unexpected record type {kind} in a character list"
                 )));
             }
         };
         if frame >= count {
-            return Err(Error("character frames are not contiguous".into()));
+            return Err(Error::new("character frames are not contiguous".into()));
         }
         if frames[frame].is_some() {
-            return Err(Error("duplicate frame".into()));
+            return Err(Error::new("duplicate frame".into()));
         }
         frames[frame] = Some(u16_at(&record, 6)? as usize);
         pos += size;
     }
     frames
         .into_iter()
-        .map(|f| f.ok_or_else(|| Error("character frames are not contiguous".into())))
+        .map(|f| f.ok_or_else(|| Error::new("character frames are not contiguous".into())))
         .collect()
 }
 /// A UI texture editor that allocates private palettes only from unreferenced buffers.
@@ -160,7 +162,7 @@ impl MenuTextures {
         let tf = TextureFile::new(data)?;
         for t in &tf.textures {
             if ![8, 9].contains(&t.fmt) {
-                return Err(Error(format!(
+                return Err(Error::new(format!(
                     "menu art: texture {} has unsupported format {}",
                     t.index, t.fmt
                 )));
@@ -208,7 +210,7 @@ impl MenuTextures {
         let d = self.tf.textures[dst].clone();
         let s = self.tf.textures[src].clone();
         if (d.w, d.h, d.fmt, d.colours, d.tlut_fmt) != (s.w, s.h, s.fmt, s.colours, s.tlut_fmt) {
-            return Err(Error(format!(
+            return Err(Error::new(format!(
                 "menu art: textures {dst} and {src} differ in size/format"
             )));
         }
@@ -224,7 +226,7 @@ impl MenuTextures {
             return Ok(());
         }
         if tlut.len() != s.colours * 2 {
-            return Err(Error("palette size".into()));
+            return Err(Error::new("palette size".into()));
         }
         let off = self.alloc(tlut.len());
         self.tf.data[off..off + tlut.len()].copy_from_slice(tlut);
@@ -250,7 +252,7 @@ pub fn patch_menu_art(
                 || portraits[c] != 4 + c
         })
     {
-        return Err(Error("menu art: the name/picture/portrait frame lists are not the retail ones (patched disc?)".into()));
+        return Err(Error::new("menu art: the name/picture/portrait frame lists are not the retail ones (patched disc?)".into()));
     }
     let mut ce = MenuTextures::new(common)?;
     let mut ge = MenuTextures::new(grid)?;
@@ -290,7 +292,7 @@ pub fn patch_colour_word(rel: &mut [u8], donors: &[usize]) -> Result<Vec<usize>>
     let text = hdr.sections[1].0 as usize;
     for (lab, case) in cases.iter().enumerate() {
         if u32_at(rel, text + case)? != 0x38000000 | lab as u32 {
-            return Err(Error(format!(
+            return Err(Error::new(format!(
                 "menus.rel: fn_2_74F40's colour-word case {lab} is not li r0, {lab}"
             )));
         }
@@ -300,7 +302,7 @@ pub fn patch_colour_word(rel: &mut [u8], donors: &[usize]) -> Result<Vec<usize>>
         if r.section == Some(5) && (0x2d844..0x2d844 + 4 * 42).contains(&r.offset) {
             let c = 12 + (r.offset as usize - 0x2d844) / 4;
             if r.kind != 1 || r.target_section != 1 || r.addend != cases[colour_label(c)] as u32 {
-                return Err(Error(format!(
+                return Err(Error::new(format!(
                     "menus.rel: colour-word jump-table entry for charID {c} is not retail"
                 )));
             }
@@ -308,7 +310,9 @@ pub fn patch_colour_word(rel: &mut [u8], donors: &[usize]) -> Result<Vec<usize>>
         }
     }
     if found.keys().copied().collect::<Vec<_>>() != (12..54).collect::<Vec<_>>() {
-        return Err(Error("menus.rel: colour-word jump table not found".into()));
+        return Err(Error::new(
+            "menus.rel: colour-word jump table not found".into(),
+        ));
     }
     let mut out = Vec::new();
     for s in donors {

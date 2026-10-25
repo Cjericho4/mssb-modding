@@ -18,14 +18,14 @@ pub struct Disc {
 impl Disc {
     /// Open a Dolphin extraction without changing it.
     pub fn folder(root: impl AsRef<Path>) -> Result<Self> {
-        let root = root.as_ref().to_path_buf();
+        let root = crate::normalize_path(root.as_ref());
         for p in [
             root.join("sys/main.dol"),
             root.join("files/ZZZZ.dat"),
             root.join("sys/fst.bin"),
         ] {
             if !p.exists() {
-                return Err(Error(format!(
+                return Err(Error::new(format!(
                     "not an extracted GameCube disc folder (missing {})",
                     p.display()
                 )));
@@ -64,7 +64,7 @@ impl Disc {
                 .iter()
                 .find(|(n, _)| n == name)
                 .map(|(_, b)| b.clone())
-                .ok_or_else(|| Error(format!("missing sys/{name}")))
+                .ok_or_else(|| Error::new(format!("missing sys/{name}")))
         } else {
             Ok(fs::read(self.root.join("sys").join(name))?)
         }
@@ -75,7 +75,7 @@ impl Disc {
             let (e, _) = entries
                 .iter()
                 .find(|(_, p)| p == name)
-                .ok_or_else(|| Error(format!("{name} not in fst.bin")))?;
+                .ok_or_else(|| Error::new(format!("{name} not in fst.bin")))?;
             (self.root.clone(), e.offset as u64)
         } else {
             (self.root.join("files").join(name), 0)
@@ -93,7 +93,7 @@ impl Disc {
                 .iter()
                 .find(|(_, p)| p == name)
                 .map(|(e, _)| e.size as u64)
-                .ok_or_else(|| Error(format!("{name} not in fst.bin")))
+                .ok_or_else(|| Error::new(format!("{name} not in fst.bin")))
         } else {
             Ok(fs::metadata(self.root.join("files").join(name))?.len())
         }
@@ -131,7 +131,7 @@ impl Disc {
             let off = u32_at(&bytes, 0)? as usize;
             let target = bytes
                 .get_mut(off..off + ov.len())
-                .ok_or_else(|| Error("overlay outside body".into()))?;
+                .ok_or_else(|| Error::new("overlay outside body".into()))?;
             target.copy_from_slice(&ov);
         }
         Ok(bytes)
@@ -141,7 +141,7 @@ fn read_at(f: &mut File, off: u64, size: usize, path: &Path) -> Result<Vec<u8>> 
     f.seek(SeekFrom::Start(off))?;
     let mut b = vec![0; size];
     f.read_exact(&mut b).map_err(|_| {
-        Error(format!(
+        Error::new(format!(
             "{} is truncated or not a GameCube disc image",
             path.display()
         ))
@@ -152,7 +152,7 @@ type SystemFiles = (Vec<u8>, Vec<u8>, Vec<u8>, Vec<u8>, Vec<u8>);
 fn read_system(f: &mut File, path: &Path) -> Result<SystemFiles> {
     let boot = read_at(f, 0, 0x440, path)?;
     if u32_at(&boot, 0x1c)? != 0xc2339f3d {
-        return Err(Error(format!(
+        return Err(Error::new(format!(
             "{} is not a GameCube disc image (no disc magic); .rvz/.nkit images must be converted to .iso first (Dolphin: right-click the game -> Convert File -> ISO)",
             path.display()
         )));
@@ -179,7 +179,7 @@ fn safe_relative(path: &str) -> Result<&Path> {
         .any(|c| !matches!(c, std::path::Component::Normal(_)))
         || path.contains('\\')
     {
-        return Err(Error("invalid FST path".into()));
+        return Err(Error::new("invalid FST path".into()));
     }
     Ok(p)
 }
@@ -221,7 +221,10 @@ pub fn extract_iso(
         while left != 0 {
             let n = f.read(&mut buf[..left.min(1 << 20)])?;
             if n == 0 {
-                return Err(Error(format!("{} is truncated ({name})", path.display())));
+                return Err(Error::new(format!(
+                    "{} is truncated ({name})",
+                    path.display()
+                )));
             }
             g.write_all(&buf[..n])?;
             left -= n;
@@ -276,7 +279,7 @@ pub fn write_iso(
         let src = disc.root.join("files").join(safe_relative(&name)?);
         let size = fs::metadata(&src)?.len();
         if size != e.size as u64 {
-            return Err(Error(format!(
+            return Err(Error::new(format!(
                 "fst.bin says {name} is {} bytes but the file is {size}",
                 e.size
             )));
@@ -344,21 +347,21 @@ pub fn preflight(disc: &Disc, dol: &Dol, log: &mut dyn FnMut(&str)) -> Result<()
         Ok(())
     })();
     if let Err(e) = checks {
-        problems.push(e.0);
+        problems.push(e.message);
     }
     if let Ok(boot) = disc.system("boot.bin")
         && !boot.starts_with(b"GYQE01")
     {
         problems.push(format!(
-            "sys/boot.bin game id is {:?}, expected GYQE01 (USA)",
-            &boot[..boot.len().min(6)]
+            "sys/boot.bin game id is {}, expected GYQE01 (USA)",
+            python_bytes(&boot[..boot.len().min(6)])
         ));
     }
     if !problems.is_empty() {
         for p in problems {
             log(&format!("preflight: {p}"));
         }
-        return Err(Error(
+        return Err(Error::new(
             "--disc must be a clean, complete Dolphin extraction of the USA disc (GYQE01)".into(),
         ));
     }
@@ -366,8 +369,117 @@ pub fn preflight(disc: &Disc, dol: &Dol, log: &mut dyn FnMut(&str)) -> Result<()
     Ok(())
 }
 
+fn python_bytes(bytes: &[u8]) -> String {
+    let quote = if bytes.contains(&b'\'') && !bytes.contains(&b'"') {
+        b'"'
+    } else {
+        b'\''
+    };
+    let mut out = format!("b{}", quote as char);
+    for &b in bytes {
+        if b == quote || b == b'\\' {
+            out.push('\\');
+            out.push(b as char);
+        } else {
+            match b {
+                b'\n' => out.push_str("\\n"),
+                b'\r' => out.push_str("\\r"),
+                b'\t' => out.push_str("\\t"),
+                32..=126 => out.push(b as char),
+                _ => out += &format!("\\x{b:02x}"),
+            }
+        }
+    }
+    out.push(quote as char);
+    out
+}
+
 const FINDCHAR_RETAIL: &[u8] = &[
     148, 33, 255, 240, 124, 8, 2, 166, 60, 128, 128, 17, 60, 160, 128, 14, 144, 1, 0, 20, 56, 0, 0,
     32, 56, 132, 141, 184, 147, 225, 0, 12, 59, 229, 105, 184, 56, 160, 0, 0, 124, 9, 3, 166, 136,
     4, 0, 0, 124, 0, 24, 0, 64, 130, 0, 60, 44, 5, 0, 17, 64, 130, 0, 28,
 ];
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::binary::put_u32;
+    #[test]
+    fn iso_progress_cancel_and_roundtrip() {
+        let temp = tempfile::tempdir().unwrap();
+        let root = temp.path().join("disc");
+        fs::create_dir_all(root.join("sys")).unwrap();
+        fs::create_dir(root.join("files")).unwrap();
+        let mut boot = vec![0; 0x440];
+        boot[..6].copy_from_slice(b"GYQE01");
+        put_u32(&mut boot, 0x1c, 0xc2339f3d).unwrap();
+        put_u32(&mut boot, 0x420, 0x3000).unwrap();
+        put_u32(&mut boot, 0x424, 0x4000).unwrap();
+        put_u32(&mut boot, 0x428, 27).unwrap();
+        let mut dol = vec![0; 0x104];
+        put_u32(&mut dol, 0, 0x100).unwrap();
+        put_u32(&mut dol, 0x90, 4).unwrap();
+        dol[0x100..].copy_from_slice(b"DOL!");
+        let mut fst = vec![0; 24];
+        put_u32(&mut fst, 0, 0x1000000).unwrap();
+        put_u32(&mut fst, 8, 2).unwrap();
+        put_u32(&mut fst, 12, 1).unwrap();
+        put_u32(&mut fst, 16, 0x8000).unwrap();
+        put_u32(&mut fst, 20, 5).unwrap();
+        fst.extend(b"\0x\0");
+        for (n, b) in [
+            ("boot.bin", boot),
+            ("main.dol", dol),
+            ("fst.bin", fst),
+            ("bi2.bin", vec![0; 0x2000]),
+            ("apploader.img", vec![0; 0x20]),
+        ] {
+            fs::write(root.join("sys").join(n), b).unwrap();
+        }
+        fs::write(root.join("files/x"), b"hello").unwrap();
+        // Disc::folder requires retail resource names; the synthetic handle needs none of those.
+        let disc = Disc {
+            root: root.clone(),
+            iso_files: None,
+            system: Vec::new(),
+        };
+        let iso = temp.path().join("game.iso");
+        let mut calls = Vec::new();
+        write_iso(
+            &disc,
+            &iso,
+            &mut |_| {},
+            Some(&mut |done, total| {
+                calls.push((done, total));
+                Ok(())
+            }),
+        )
+        .unwrap();
+        assert_eq!(calls, [(5, 5)]);
+        let extracted = temp.path().join("extracted");
+        extract_iso(&iso, &extracted, &mut |_| {}, None).unwrap();
+        assert_eq!(fs::read(extracted.join("files/x")).unwrap(), b"hello");
+        let second = temp.path().join("second.iso");
+        write_iso(
+            &Disc {
+                root: extracted,
+                iso_files: None,
+                system: Vec::new(),
+            },
+            &second,
+            &mut |_| {},
+            None,
+        )
+        .unwrap();
+        assert_eq!(fs::read(&iso).unwrap(), fs::read(second).unwrap());
+        let err = extract_iso(
+            &iso,
+            &temp.path().join("cancelled"),
+            &mut |_| {},
+            Some(&mut |_, _| Err(Error::new("cancelled".into()))),
+        )
+        .unwrap_err();
+        assert_eq!(err.message, "cancelled");
+        assert_eq!(fs::read(root.join("files/x")).unwrap(), b"hello");
+    }
+}

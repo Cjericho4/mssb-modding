@@ -65,7 +65,7 @@ pub fn parse(argv: &[String]) -> Result<Command> {
             if key.starts_with("--") && opts.len() == 1 {
                 *opts[0]
             } else if key.starts_with("--") && opts.len() > 1 {
-                return Err(Error(format!(
+                return Err(Error::new(format!(
                     "ambiguous option: {key} could match {}",
                     opts.iter().map(|s| **s).collect::<Vec<_>>().join(", ")
                 )));
@@ -76,6 +76,11 @@ pub fn parse(argv: &[String]) -> Result<Command> {
             }
         };
         if key == "--help" {
+            if let Some(v) = explicit {
+                return Err(Error::new(format!(
+                    "argument -h/--help: ignored explicit argument '{v}'"
+                )));
+            }
             return Ok(Command::Help);
         }
         if [
@@ -94,25 +99,25 @@ pub fn parse(argv: &[String]) -> Result<Command> {
             } else {
                 i += 1;
                 if i >= argv.len() || argv[i].starts_with("--") {
-                    return Err(Error(format!("argument {key}: expected one argument")));
+                    return Err(Error::new(format!("argument {key}: expected one argument")));
                 }
                 argv[i].clone()
             };
             match key {
                 "--disc" => {
-                    args.disc = value.into();
+                    args.disc = crate::normalize_path(Path::new(&value));
                     disc = true;
                 }
                 "--out" => {
-                    args.out = value.into();
+                    args.out = crate::normalize_path(Path::new(&value));
                     out = true;
                 }
                 "--source" => args.source = value,
                 "--slot" => args.slots.push(value),
-                "--iso" => args.iso = Some(value.into()),
+                "--iso" => args.iso = Some(crate::normalize_path(Path::new(&value))),
                 "--ui" => {
                     if !["source", "donor"].contains(&value.as_str()) {
-                        return Err(Error(format!(
+                        return Err(Error::new(format!(
                             "argument --ui: invalid choice: '{value}' (choose from 'source', 'donor')"
                         )));
                     }
@@ -120,7 +125,7 @@ pub fn parse(argv: &[String]) -> Result<Command> {
                 }
                 "--colour-word" => {
                     if !["none", "donor"].contains(&value.as_str()) {
-                        return Err(Error(format!(
+                        return Err(Error::new(format!(
                             "argument --colour-word: invalid choice: '{value}' (choose from 'none', 'donor')"
                         )));
                     }
@@ -130,7 +135,7 @@ pub fn parse(argv: &[String]) -> Result<Command> {
             }
         } else {
             if let Some(v) = explicit {
-                return Err(Error(format!(
+                return Err(Error::new(format!(
                     "argument {key}: ignored explicit argument '{v}'"
                 )));
             }
@@ -149,10 +154,12 @@ pub fn parse(argv: &[String]) -> Result<Command> {
         i += 1;
     }
     if !disc {
-        return Err(Error("the following arguments are required: --disc".into()));
+        return Err(Error::new(
+            "the following arguments are required: --disc".into(),
+        ));
     }
     if !unknown.is_empty() {
-        return Err(Error(format!(
+        return Err(Error::new(format!(
             "unrecognized arguments: {}",
             unknown.join(" ")
         )));
@@ -165,12 +172,14 @@ pub fn parse(argv: &[String]) -> Result<Command> {
         });
     }
     if !out && !args.dry_run {
-        return Err(Error(
+        return Err(Error::new(
             "--out is required (a new folder; the input is never modified)".into(),
         ));
     }
     if out && absolute_path(&args.out)? == absolute_path(&args.disc)? {
-        return Err(Error("--out must be a different folder from --disc".into()));
+        return Err(Error::new(
+            "--out must be a different folder from --disc".into(),
+        ));
     }
     if !out {
         args.out = args.disc.parent().unwrap_or(Path::new(".")).join("dry-run");
@@ -280,7 +289,7 @@ mod tests {
     fn argparse_defaults_and_choices() {
         assert!(matches!(parse(&["--help".into()]).unwrap(), Command::Help));
         assert_eq!(
-            parse(&[]).err().unwrap().0,
+            parse(&[]).err().unwrap().message,
             "the following arguments are required: --disc"
         );
         assert_eq!(parse_char(" Baby Mario ").unwrap(), 7);

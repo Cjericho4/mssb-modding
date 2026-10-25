@@ -441,20 +441,20 @@ fn match_luma(rgb: [f64; 3], target: f64) -> [f64; 3] {
 }
 fn parse_float(v: &str) -> Result<f64> {
     v.parse()
-        .map_err(|_| Error(format!("could not convert string to float: {v:?}")))
+        .map_err(|_| Error::new(format!("could not convert string to float: {v:?}")))
 }
 fn parse_indices(v: &str) -> Result<Vec<usize>> {
     v.split('/')
         .filter(|s| !s.is_empty())
         .map(|s| {
             s.parse()
-                .map_err(|_| Error(format!("invalid literal for int() with base 10: {s:?}")))
+                .map_err(|_| Error::new(format!("invalid literal for int() with base 10: {s:?}")))
         })
         .collect()
 }
 fn parse_hex(v: &str) -> Result<u32> {
     u32::from_str_radix(v, 16)
-        .map_err(|_| Error(format!("invalid literal for int() with base 16: {v:?}")))
+        .map_err(|_| Error::new(format!("invalid literal for int() with base 16: {v:?}")))
 }
 /// A parsed recolour spec, resolved to this source's regions before patching its textures.
 #[derive(Clone)]
@@ -520,7 +520,7 @@ impl Recolour {
                     crate::constants::PRESETS
                         .iter()
                         .find(|p| p.0 == part.to_lowercase())
-                        .ok_or_else(|| Error(format!("bad recolour token '{part}'")))?
+                        .ok_or_else(|| Error::new(format!("bad recolour token '{part}'")))?
                         .1,
                 );
                 continue;
@@ -568,11 +568,11 @@ impl Recolour {
                     }
                 }
                 "solid" => rc.solid = Some(parse_hex(v)?),
-                _ => return Err(Error(format!("unknown recolour key '{k}'"))),
+                _ => return Err(Error::new(format!("unknown recolour key '{k}'"))),
             }
         }
         if rc.region.is_some() && (rc.explicit_band || rc.all) {
-            return Err(Error(format!(
+            return Err(Error::new(format!(
                 "recolour spec '{spec}': region= cannot be combined with from/width/minsat/.../all"
             )));
         }
@@ -587,7 +587,7 @@ impl Recolour {
                 .map(|i| i.to_string())
                 .collect();
             if !bad.is_empty() {
-                return Err(Error(format!(
+                return Err(Error::new(format!(
                     "recolour spec '{}': the source has {} colour regions (0..{}), not {}",
                     self.spec,
                     regions.len(),

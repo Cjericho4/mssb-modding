@@ -32,7 +32,7 @@ impl Texture {
         let hdr = archive + 4 + index * 0x20;
         let fmt = *data
             .get(hdr + 0x17)
-            .ok_or_else(|| Error("truncated texture header".into()))?;
+            .ok_or_else(|| Error::new("truncated texture header".into()))?;
         let w = u16_at(data, hdr + 10)? as usize;
         let h = u16_at(data, hdr + 8)? as usize;
         let size = match fmt {
@@ -62,12 +62,12 @@ impl Texture {
     pub fn bytes(&self, data: &[u8]) -> Result<Vec<u8>> {
         let mut out = data
             .get(self.data..self.data + self.size)
-            .ok_or_else(|| Error("texture runs past the archive".into()))?
+            .ok_or_else(|| Error::new("texture runs past the archive".into()))?
             .to_vec();
         if self.colours != 0 {
             out.extend(
                 data.get(self.tlut..self.tlut + 2 * self.colours)
-                    .ok_or_else(|| Error("palette runs past the archive".into()))?,
+                    .ok_or_else(|| Error::new("palette runs past the archive".into()))?,
             );
         }
         Ok(out)
@@ -95,7 +95,7 @@ impl Gpc {
         let texture = u32_at(&data, 0)? as usize;
         let layout = u32_at(&data, 4)? as usize;
         if texture == 0 || layout == 0 || layout <= texture {
-            return Err(Error(format!(
+            return Err(Error::new(format!(
                 "not a character .gpc (root header {texture:08X} {layout:08X})"
             )));
         }
@@ -104,7 +104,7 @@ impl Gpc {
             let t = Texture::parse(&data, texture, i)?;
             if t.fmt != 14 {
                 if ![8, 9].contains(&t.fmt) || ![1, 2].contains(&t.tlut_fmt) {
-                    return Err(Error(format!(
+                    return Err(Error::new(format!(
                         "texture {i} is format {} (palette format {}); only CMPR, CI4 and CI8 are supported",
                         t.fmt, t.tlut_fmt
                     )));
@@ -113,7 +113,7 @@ impl Gpc {
                     || t.colours > if t.fmt == 8 { 16 } else { 256 }
                     || t.tlut + 2 * t.colours > layout
                 {
-                    return Err(Error(format!(
+                    return Err(Error::new(format!(
                         "texture {i}: bad palette ({} colours at 0x{:X})",
                         t.colours,
                         t.tlut - texture
@@ -121,7 +121,7 @@ impl Gpc {
                 }
             }
             if t.data + t.size > layout {
-                return Err(Error(format!("texture {i} runs past the archive")));
+                return Err(Error::new(format!("texture {i} runs past the archive")));
             }
             textures.push(t);
         }
@@ -143,7 +143,7 @@ impl Gpc {
         let skin = u16_at(&self.data, self.layout + 20)? as usize;
         let num = u32_at(&self.data, self.geo + 12)? as usize;
         if skin != 0xffff && skin >= num {
-            return Err(Error(format!(
+            return Err(Error::new(format!(
                 "layout skinFileID {skin} >= numDescriptors {num} (this is the 0x800233A0 crash)"
             )));
         }
@@ -152,7 +152,7 @@ impl Gpc {
             && self.geo < self.skn
             && self.skn <= self.data.len())
         {
-            return Err(Error("root header offsets are not ordered".into()));
+            return Err(Error::new("root header offsets are not ordered".into()));
         }
         Ok(())
     }
@@ -235,7 +235,7 @@ pub fn ci_indices(data: &[u8], t: &Texture) -> Result<Vec<u8>> {
             let off = if t.fmt == 8 { k / 2 } else { k };
             let v = *data
                 .get(off)
-                .ok_or_else(|| Error("truncated CI pixels".into()))?;
+                .ok_or_else(|| Error::new("truncated CI pixels".into()))?;
             out.push(if t.fmt == 8 {
                 (v >> (4 * (1 - k % 2))) & 15
             } else {
@@ -277,13 +277,13 @@ pub fn decode_texture(data: &[u8], t: &Texture) -> Result<Vec<u8>> {
     }
     let pal = tlut_rgba(
         data.get(t.size..t.size + 2 * t.colours)
-            .ok_or_else(|| Error("truncated palette".into()))?,
+            .ok_or_else(|| Error::new("truncated palette".into()))?,
         t.tlut_fmt,
     )?;
     for (i, k) in ci_indices(data, t)?.into_iter().enumerate() {
         let rgba = pal
             .get(k as usize)
-            .ok_or_else(|| Error("invalid palette index".into()))?;
+            .ok_or_else(|| Error::new("invalid palette index".into()))?;
         let bg = checker[(((i % t.w) >> 3) ^ ((i / t.w) >> 3)) & 1];
         let a = rgba[3] as u32;
         for c in 0..3 {
