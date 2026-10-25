@@ -1,8 +1,59 @@
 //! File-oriented differential-test interface, separate from the user-facing CLI.
 use mssb_clone_core::{Error, Result, binary::*, disc::*, lzss};
 use std::{env, fs, path::Path};
+
+#[derive(serde::Deserialize)]
+struct RecolourCases {
+    source: usize,
+    cases: Vec<RecolourCase>,
+}
+
+#[derive(serde::Deserialize)]
+struct RecolourCase {
+    name: String,
+    colour: String,
+    keeplum: f64,
+    regions: Option<Vec<usize>>,
+}
+
+fn recolour(disc: &str, source: &str, cases: &str, out: &str) -> Result<()> {
+    use mssb_clone_core::api::{SourcePreview, colour_spec, region_selection};
+
+    let source: usize = source
+        .parse()
+        .map_err(|_| Error::new("invalid char id".into()))?;
+    let cases: RecolourCases =
+        serde_json::from_slice(&fs::read(cases)?).map_err(|e| Error::new(e.to_string()))?;
+    if cases.source != source {
+        return Err(Error::new("cases source does not match char id".into()));
+    }
+    let disc = Disc::folder(disc)?;
+    let dol = Dol::new(disc.system("main.dol")?)?;
+    let preview = SourcePreview::new(&disc, &dol, source)?;
+    let out = Path::new(out);
+    fs::create_dir_all(out)?;
+    for case in cases.cases {
+        // Names are output stems, never paths outside the requested folder.
+        if case.name.is_empty()
+            || case.name.contains(['/', '\\'])
+            || matches!(case.name.as_str(), "." | "..")
+        {
+            return Err(Error::new("invalid case name".into()));
+        }
+        let regions = case
+            .regions
+            .as_deref()
+            .and_then(|indices| region_selection(&preview.regions, indices));
+        let spec = colour_spec(&case.colour, case.keeplum, regions.as_deref())?;
+        let body = preview.recoloured(&spec)?;
+        fs::write(out.join(format!("{}.gpc", case.name)), body.data)?;
+    }
+    Ok(())
+}
+
 fn run(a: &[String]) -> Result<()> {
     match a.first().map(String::as_str) {
+        Some("recolour") if a.len()==5 => recolour(&a[1], &a[2], &a[3], &a[4])?,
         Some("codec") if a.len()==8 => {
             let data=fs::read(&a[2])?;
             let parse=|s: &str| s.parse::<usize>().map_err(|_| Error::new("invalid codec parameter".into()));
@@ -78,13 +129,39 @@ fn run(a: &[String]) -> Result<()> {
             for c in 0..54 {let (b,o)=dol.pair(c)?;println!("char {c} {b} {o} {:?} {:?}",dol.private_entry(c)?,dol.family(c)?);}
             for i in 0..3 {let rel=d.load_rel(&dol,i)?;let hdr=rel_header(&rel)?;println!("rel {i} {} {:?} {:?}",hdr.module,hdr.sections,hdr.imports);for r in rel_self_relocs(&rel)? {println!("reloc {} {:?} {} {} {} {}",r.entry,r.section,r.offset,r.kind,r.target_section,r.addend);}}
         }
-        _=>return Err(Error::new("usage: mssb-clone-probe codec KIND IN OUT SIZE LB RP CHAIN | write-iso IN OUT | extract-iso IN OUT | inspect FOLDER".into()))
+        _=>return Err(Error::new("usage: mssb-clone-probe codec KIND IN OUT SIZE LB RP CHAIN | recolour DISC CHARID CASES.json OUTDIR | write-iso IN OUT | extract-iso IN OUT | inspect FOLDER".into()))
     }
     Ok(())
 }
+
 fn main() {
     if let Err(e) = run(&env::args().skip(1).collect::<Vec<_>>()) {
         eprintln!("{e}");
         std::process::exit(1);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn audit_cases_preserve_default_and_explicit_regions() {
+        let cases: RecolourCases = serde_json::from_str(
+            r##"{"source":2,"cases":[
+                {"name":"blue_keep0.5","colour":"blue","keeplum":0.5,"regions":null},
+                {"name":"20c040_only1","colour":"#20c040","keeplum":0.2,"regions":[1]},
+                {"name":"blue_empty","colour":"blue","keeplum":0.8,"regions":[]}
+            ]}"##,
+        )
+        .unwrap();
+        assert_eq!(cases.source, 2);
+        assert_eq!(cases.cases.len(), 3);
+        assert_eq!(cases.cases[0].name, "blue_keep0.5");
+        assert_eq!(cases.cases[0].regions, None);
+        assert_eq!(cases.cases[1].colour, "#20c040");
+        assert_eq!(cases.cases[1].keeplum, 0.2);
+        assert_eq!(cases.cases[1].regions, Some(vec![1]));
+        assert_eq!(cases.cases[2].regions, Some(vec![]));
     }
 }

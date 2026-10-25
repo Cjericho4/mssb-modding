@@ -349,7 +349,7 @@ class RustBackend:
     """Recoloured bodies written by the Rust core: <dir>/<charID>/<colour>_<setting>.gpc (colour without '#').
     prepare() writes <dir>/<charID>/cases.json, one {name, colour, keeplum, regions} per case (regions: the
     source's region indices, or null for its defaults), which is what a Rust probe command reads to write the
-    files (`mssb-clone-probe recolour <disc> <charID> <dir>/<charID>/cases.json <dir>/<charID>`, not there yet).
+    files (`mssb-clone-probe recolour <disc> <charID> <dir>/<charID>/cases.json <dir>/<charID>`).
     The Rust colour handling (custom colours included) is what gets measured; the Python regions decide which
     texels belong to the region, so a Rust region-detection change shows up as missed/protected texels."""
     name = "rust"
