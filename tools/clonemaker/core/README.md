@@ -62,9 +62,12 @@ python tools/clonemaker/difftest.py --full-grid
 
 `--grid` runs the sampled matrix and option switches. `--full-grid` additionally
 compares every source with every preset, grouping the eight presets into eight
-clone rows per source. Each case compares all output files,
+clone rows per source. Bowser uses two four-clone groups because eight HUD
+portraits exceed the reference slot; the eight-clone rejection is compared too.
+Each successful case compares all output files,
 the ISO bytes and normalized logs; sampled default-compatible cases also run
-`test_clone.py --patched`. `--textures` compares every source's decoded textures,
+`test_clone.py --patched` (excluding disabling flags and forced menu relocation,
+whose changed behavior contradicts some validator assumptions). `--textures` compares every source's decoded textures,
 regions, 12 recolours and all 65,536 RGB5A3 entries per spec. `--api` checks all
 54 sources' donor choices, defaults, hints, region controls, captions and preview
 pixels. `--gui` checks end-to-end ISO/folder jobs, logs, cancellation and cleanup.

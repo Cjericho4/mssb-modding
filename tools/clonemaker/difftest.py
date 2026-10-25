@@ -429,8 +429,13 @@ def grid_cases(full):
         import clone_character as cc
         for src in range(54):
             donors=[s for s in (29,30,31,32,34,35,36,44,45) if s!=src][:8]
+            pairs=list(zip(donors,cc.COLOUR_PRESETS))
             yield "%d-all-presets" % src, ["--source",str(src)]+sum(
-                (["--slot","%d:%s" % (slot,preset)] for slot,preset in zip(donors,cc.COLOUR_PRESETS)),[])
+                (["--slot","%d:%s" % (slot,preset)] for slot,preset in pairs),[])
+            if src==9:  # Eight Bowser portraits exceed the reference's HUD slot; four fit.
+                for part in range(2):
+                    yield "9-presets-%d" % part, ["--source","9"]+sum(
+                        (["--slot","%d:%s" % (slot,preset)] for slot,preset in pairs[part*4:(part+1)*4]),[])
 
 
 def clone_case(cli, work, disc, case):
@@ -454,28 +459,37 @@ def clone_case_in(cli, work, disc, label, opts):
                 ram_handles.append(fd)
                 path.symlink_to("/proc/%d/fd/%d" % (os.getpid(),fd))
         base = ["--disc", disc, *opts]
+        def capture(cmd):
+            return subprocess.run([str(x) for x in cmd],stdout=subprocess.PIPE,stderr=subprocess.PIPE,text=True)
+        def normalize(text,folder,iso):
+            return text.replace(str(iso),"ISO").replace(str(folder),"OUT")
         t = time.perf_counter()
-        py = run([sys.executable, MOD / "clone_character.py", *base, "--out", a,
-                  *([] if RAM_ISOS else ["--iso",ai])])
-        if RAM_ISOS:
+        py = capture([sys.executable, MOD / "clone_character.py", *base, "--out", a,
+                      *([] if RAM_ISOS else ["--iso",ai])])
+        if RAM_ISOS and py.returncode==0:
             import clone_character as cc
             cc.write_iso(cc.Disc(a),ai,lambda _:None)
         py_time = time.perf_counter() - t
         t = time.perf_counter()
-        rs = run([cli, *base, "--out", b, *([] if RAM_ISOS else ["--iso",bi])])
-        if RAM_ISOS:
+        rs = capture([cli, *base, "--out", b, *([] if RAM_ISOS else ["--iso",bi])])
+        if RAM_ISOS and rs.returncode==0:
             run([cli.with_name("mssb-clone-probe"),"write-iso",b,bi])
         rs_time = time.perf_counter() - t
+        assert py.returncode==rs.returncode,(label,"exit status",py.stderr,rs.stderr)
+        assert normalize(py.stdout,a,ai)==normalize(rs.stdout,b,bi),(label,"stdout",py.stdout,rs.stdout)
+        assert normalize(py.stderr,a,ai)==normalize(rs.stderr,b,bi),(label,"stderr",py.stderr,rs.stderr)
         compare_trees(a, b)
+        if py.returncode:
+            print("PASS clone %s matching reference rejection: %s" % (label,py.stderr.strip()),flush=True)
+            return
         compare_files(ai, bi)
-        assert py.replace(str(a), "OUT").replace(str(ai), "ISO") == rs.replace(str(b), "OUT").replace(str(bi), "ISO"), "log mismatch: " + label
         source = opts[opts.index("--source")+1] if "--source" in opts else "mario"
         ui = opts[opts.index("--ui")+1] if "--ui" in opts else "source"
         slot_args = sum((["--slot", opts[i+1]] for i, x in enumerate(opts) if x == "--slot"), [])
         validator = [sys.executable, MOD / "test_clone.py", "--disc", disc, "--patched", b,
                      "--source", source, "--ui", ui, *slot_args]
         # The validator assumes the default gameplay/stats/overlay settings.
-        if (not label[0].isdigit()) and not any(x in opts for x in ("--no-stats", "--no-gameplay", "--no-aram-overlay", "--colour-word")):
+        if (not label[0].isdigit()) and not any(x in opts for x in ("--no-stats", "--no-gameplay", "--no-aram-overlay", "--colour-word", "--relocate-menu-art")):
             result = run(validator)
             assert "ALL CHECKS PASSED" in result, label + " test_clone"
         print("PASS clone %s Python %.3fs Rust %.3fs" % (label, py_time, rs_time), flush=True)
