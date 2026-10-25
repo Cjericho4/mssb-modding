@@ -213,13 +213,8 @@ function regionsChanged(index, chk) {
   schedulePreview();
 }
 
-/** Ticked regions for the core: null when they are exactly the defaults (or not known yet). */
-function regionSelection() {
-  if (!state.ticks || state.infoSource !== sourceId()) return null;
-  const ticked = [...state.ticks].sort((a, b) => a - b);
-  const defaults = state.info.regions.filter((r) => r.default).map((r) => r.index);
-  return ticked.join() === defaults.join() ? null : ticked;
-}
+/** Ticked region indices (the core drops them when they are exactly the defaults). */
+const tickedRegions = () => [...state.ticks].sort((a, b) => a - b);
 
 async function rebuildRows(reset) {
   $("no-game-hint").hidden = true;
@@ -359,7 +354,7 @@ async function requestPreview() {
   if (!state.game || !row || state.infoSource !== sourceId()) return;
   const src = sourceId(), seq = ++state.previewSeq;
   if (!state.previewed.has(src)) $("preview-caption").textContent = `Loading ${sourceName(src)}'s textures…`;
-  const request = { source: src, slot: row.slot, colour: row.colour, keeplum: keeplum(), regions: regionSelection() };
+  const request = { source: src, slot: row.slot, colour: row.colour, keeplum: keeplum(), regions: tickedRegions() };
   let res, failure;
   try {
     res = await invoke("preview", { request });
@@ -419,7 +414,7 @@ function makeJob() {
     source: sourceId(),
     clones: state.rows.map((r) => ({ slot: r.slot, colour: r.colour })),
     keeplum: keeplum(),
-    regions: regionSelection(),
+    regions: tickedRegions(),
     ui_source: $("chk-ui").checked,
     copy_stats: $("chk-stats").checked,
     keep_colour_word: $("chk-colour").checked,
@@ -428,7 +423,7 @@ function makeJob() {
 }
 
 async function create() {
-  if (!state.game || state.busy) return;
+  if (!state.game || state.busy || state.infoSource !== sourceId()) return;   // the source is still loading
   if (!$("out-path").value.trim()) {
     await chooseOutput();
     if (!$("out-path").value.trim()) return;

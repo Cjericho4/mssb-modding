@@ -7,24 +7,23 @@ file in the same commit as any change to a command.
 
 Types: `colour` is a preset name (`red orange yellow green cyan blue purple pink`) or `"#rrggbb"`
 (custom). Paths are strings. Errors are `{ "error": "<friendly message>" }` (see `friendly_error`).
-`regions: null` (in `preview` and `job`) means the source's default regions: the window sends null
-until it knows them and whenever the ticked ones are exactly the defaults (`region_selection`).
-The app's Rust side sees these exact shapes (`app/src/api.rs`); `fraction` is 0..1 of the whole job.
+`regions` (in `preview` and `job`) are the ticked region indices; the core drops them when they are
+exactly the source's defaults (`region_selection`). `fraction` is 0..1 of the whole job.
 
 ## Commands
 | Command | Args | Returns | Python reference |
 |---|---|---|---|
-| `open_game` | `path` | `{ ok, message, kind: "iso"\|"folder"\|null }` (null when not ok) | `load_game`, `friendly_preflight` |
+| `open_game` | `path` | `{ ok, message, kind: "iso"\|"folder" }` | `load_game`, `friendly_preflight` |
 | `sources` | | `[{ id, name }]` | `SOURCES`, `pretty_name` |
 | `source_info` | `source` | `{ regions: [{ index, label, default, swatch }], slots: [{ id, label }], default_rows: [{ slot, colour }] }` | `source_regions`, `region_label`, `donor_choices`, `default_rows` |
 | `next_free_slot` | `source, used: [id]` | `id \| null` (in `source_info().slots` order) | `next_free_slot` |
-| `preview` | `request: { source, slot, colour, keeplum, regions: [index] \| null }` | `{ before_png, after_png, caption }` (base64 PNG) | `SourcePreview`, `colour_spec`, `atlas_layout` |
+| `preview` | `request: { source, slot, colour, keeplum, regions: [index] }` | `{ before_png, after_png, caption }` (base64 PNG) | `SourcePreview`, `colour_spec`, `atlas_layout` |
 | `default_output` | `game_path` | `path` | `default_output` |
 | `validate_job` | `job` | `null \| { error }` | `validate_job` |
 | `create` | `job` | starts the job; results come as events | `run_job` |
 | `cancel` | | stops the running job at its next progress step | `run_job(cancel=)` |
 
-`job` = `{ game, output, source, clones: [{ slot, colour }], keeplum, regions: [index] | null, ui_source,
+`job` = `{ game, output, source, clones: [{ slot, colour }], keeplum, regions: [index], ui_source,
 copy_stats, keep_colour_word, keep_work }`.
 
 ## Events (core → window, while `create` runs)
@@ -39,6 +38,6 @@ copy_stats, keep_colour_word, keep_work }`.
 | Command | Args | Returns | Why |
 |---|---|---|---|
 | `path_exists` | `path` | `bool` | the "`<name>` already exists. Replace it?" question before `create` |
-| `launch_options` | | `{ selftest, dir, game }` | tells the page to run its `--selftest` walk-through (stand-in game in `dir`) |
+| `launch_options` | | `{ selftest, dir, game }` | tells the page to run its `--selftest` walk-through (`--game`, scratch `dir`) |
 | `selftest_mark` | `name` | | screenshot hook between self-test states (`MSSB_SHOT_CMD`) |
 | `selftest_report` | `ok, lines` | exits the app | the self-test result (stdout or `--log`), exit code 0/1 |

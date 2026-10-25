@@ -1,7 +1,9 @@
-//! `--selftest [--log P]`: the page walks through every feature against a stand-in game, measures
-//! resizing, reports here and the app exits 0 (pass) or 1. The CI runs it on the built exe; a
-//! `--windows`-subsystem exe has no console, hence `--log`. With `MSSB_SHOT_CMD` set, the page
-//! calls that program with a name at each state (screenshots, see `selftest/`).
+//! `--selftest [--game P] [--log P]`: the page walks through the window (every widget, the narrow
+//! layout, a game that can't be used, timed resizing) and, given a game, through every feature
+//! (rows, colours, regions, previews, Advanced, errors, create, cancel), reports here and the app
+//! exits 0 (pass) or 1. The CI runs it on the built exe without a game (retail files can't go
+//! there); a `--windows`-subsystem exe has no console, hence `--log`. With `MSSB_SHOT_CMD` set,
+//! the page calls that program with a name at each state (screenshots, see `selftest/`).
 
 use std::fs;
 use std::io::Write;
@@ -11,13 +13,12 @@ use std::process::Command;
 use serde::Serialize;
 use tauri::{AppHandle, State};
 
-const GAME: &str = "Mario Superstar Baseball.iso";
-
 #[derive(Default)]
 pub struct Options {
     selftest: bool,
     log: Option<PathBuf>,
-    /// Scratch folder holding the stand-in game; removed when the self-test reports.
+    game: Option<PathBuf>,
+    /// Scratch folder for the outputs; removed when the self-test reports.
     dir: Option<PathBuf>,
 }
 
@@ -27,24 +28,22 @@ impl Options {
         if !args.iter().any(|a| a == "--selftest") {
             return Options::default();
         }
-        let log = args
-            .iter()
-            .position(|a| a == "--log")
-            .and_then(|i| args.get(i + 1))
-            .map(PathBuf::from);
+        let value = |flag: &str| {
+            args.iter()
+                .position(|a| a == flag)
+                .and_then(|i| args.get(i + 1))
+                .map(PathBuf::from)
+        };
         let dir = std::env::temp_dir().join(format!("mssb-clone-selftest-{}", std::process::id()));
-        let mut disc = vec![0u8; 0x440];
-        disc[..6].copy_from_slice(b"GYQE01");
-        disc[0x1C..0x20].copy_from_slice(&0xC233_9F3Du32.to_be_bytes());
-        // the game, and an output that already exists (for the "Replace it?" question)
+        // an output that already exists, for the "Replace it?" question
         let dir = fs::create_dir_all(&dir)
-            .and_then(|_| fs::write(dir.join(GAME), disc))
             .and_then(|_| fs::write(dir.join("Old Clones.iso"), b""))
             .is_ok()
             .then_some(dir);
         Options {
             selftest: true,
-            log,
+            log: value("--log"),
+            game: value("--game"),
             dir,
         }
     }
@@ -53,23 +52,17 @@ impl Options {
 #[derive(Serialize)]
 pub struct LaunchOptions {
     selftest: bool,
-    /// The scratch folder and the stand-in game in it (null when not self-testing).
-    dir: Option<String>,
-    game: Option<String>,
+    /// The scratch folder and the game to test with (null when not given).
+    dir: Option<PathBuf>,
+    game: Option<PathBuf>,
 }
 
 #[tauri::command]
 pub fn launch_options(options: State<Options>) -> LaunchOptions {
     LaunchOptions {
         selftest: options.selftest,
-        dir: options
-            .dir
-            .as_ref()
-            .map(|d| d.to_string_lossy().into_owned()),
-        game: options
-            .dir
-            .as_ref()
-            .map(|d| d.join(GAME).to_string_lossy().into_owned()),
+        dir: options.dir.clone(),
+        game: options.game.clone(),
     }
 }
 

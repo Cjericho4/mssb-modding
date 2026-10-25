@@ -1,83 +1,91 @@
 //! MSSB Clone Maker: the window. The page (`ui/`) calls the commands below; they forward to the
-//! backend, which is the mock until the Rust core lands (see `tools/clonemaker/API.md`).
+//! core (`tools/clonemaker/core`, `api::Core`) as described in `tools/clonemaker/API.md`.
 #![cfg_attr(windows, windows_subsystem = "windows")]
 
-mod api;
-mod mock;
 mod selftest;
 
-use std::path::Path;
+use std::path::PathBuf;
 
+use mssb_clone_core::api::{
+    ApiError, Core, Event, Job, OpenGame, Preview, PreviewRequest, Source, SourceInfo,
+};
 use tauri::{AppHandle, Emitter, LogicalSize, Manager, State};
 
-use api::{Failure, GameCheck, Job, Preview, PreviewRequest, SourceInfo, SourceName};
-
-/// The core behind the commands; replacing this alias (and `mock.rs`) wires in the real one.
-type Backend = mock::Mock;
-
-/// Runs slow backend work off the main thread so the window keeps painting.
-async fn blocking<T: Send + 'static>(f: impl FnOnce() -> T + Send + 'static) -> T {
-    tauri::async_runtime::spawn_blocking(f)
+/// Runs slow core work (reading the disc, unpacking textures) off the main thread so the window
+/// keeps painting.
+async fn blocking<T: Send + 'static>(
+    f: impl FnOnce(&Core) -> T + Send + 'static,
+    app: AppHandle,
+) -> T {
+    tauri::async_runtime::spawn_blocking(move || f(&app.state::<Core>()))
         .await
-        .expect("backend task panicked")
+        .expect("core task panicked")
 }
 
 #[tauri::command]
-async fn open_game(app: AppHandle, path: String) -> GameCheck {
-    blocking(move || app.state::<Backend>().open_game(&path)).await
+async fn open_game(app: AppHandle, path: PathBuf) -> OpenGame {
+    blocking(move |core| core.open_game(&path), app).await
 }
 
 #[tauri::command]
-fn sources(backend: State<Backend>) -> Vec<SourceName> {
-    backend.sources()
+fn sources(core: State<Core>) -> Vec<Source> {
+    core.sources()
 }
 
 #[tauri::command]
-async fn source_info(app: AppHandle, source: u32) -> Result<SourceInfo, Failure> {
-    blocking(move || app.state::<Backend>().source_info(source)).await
+async fn source_info(app: AppHandle, source: usize) -> Result<SourceInfo, ApiError> {
+    blocking(move |core| core.source_info(source), app).await
 }
 
 #[tauri::command]
 fn next_free_slot(
-    backend: State<Backend>,
-    source: u32,
-    used: Vec<u32>,
-) -> Result<Option<u32>, Failure> {
-    backend.next_free_slot(source, &used)
+    core: State<Core>,
+    source: usize,
+    used: Vec<usize>,
+) -> Result<Option<usize>, ApiError> {
+    core.next_free_slot(source, &used)
 }
 
 #[tauri::command]
-async fn preview(app: AppHandle, request: PreviewRequest) -> Result<Preview, Failure> {
-    blocking(move || app.state::<Backend>().preview(&request)).await
+async fn preview(app: AppHandle, request: PreviewRequest) -> Result<Preview, ApiError> {
+    blocking(move |core| core.preview(&request), app).await
 }
 
 #[tauri::command]
-fn default_output(backend: State<Backend>, game_path: String) -> String {
-    backend.default_output(&game_path)
+fn default_output(core: State<Core>, game_path: PathBuf) -> PathBuf {
+    core.default_output(&game_path)
 }
 
 #[tauri::command]
-async fn validate_job(app: AppHandle, job: Job) -> Option<Failure> {
-    blocking(move || app.state::<Backend>().validate_job(&job)).await
+async fn validate_job(app: AppHandle, job: Job) -> Option<ApiError> {
+    blocking(move |core| core.validate_job(&job), app).await
+}
+
+/// Starts the job; its events reach the page as `log`, `progress`, `done` and `error`.
+#[tauri::command]
+fn create(app: AppHandle, core: State<Core>, job: Job) -> Result<(), ApiError> {
+    core.create(job, move |event: Event| {
+        // the core serialises events as { event, payload }
+        if let Ok(value) = serde_json::to_value(&event) {
+            if let Some(name) = value["event"].as_str() {
+                // the window may already be closing; nothing left to tell then
+                let _ = app.emit(name, &value["payload"]);
+            }
+        }
+    })
+    .map(drop)
+    .map_err(ApiError::from)
 }
 
 #[tauri::command]
-fn create(app: AppHandle, backend: State<Backend>, job: Job) {
-    backend.create(job, move |event| {
-        // the window may already be closing; nothing left to tell then
-        let _ = app.emit(event.name(), &event);
-    });
-}
-
-#[tauri::command]
-fn cancel(backend: State<Backend>) {
-    backend.cancel();
+fn cancel(core: State<Core>) {
+    core.cancel();
 }
 
 /// Window-side helper (not core): the "already exists. Replace it?" question.
 #[tauri::command]
-fn path_exists(path: String) -> bool {
-    Path::new(&path).exists()
+fn path_exists(path: PathBuf) -> bool {
+    path.exists()
 }
 
 /// Opens at 1320 x 780, or the screen minus a taskbar's height if that is smaller.
@@ -95,7 +103,7 @@ fn main() {
     let options = selftest::Options::from_args();
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
-        .manage(Backend::default())
+        .manage(Core::default())
         .manage(options)
         .setup(|app| {
             if let Some(window) = app.get_webview_window("main") {
