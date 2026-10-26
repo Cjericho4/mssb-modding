@@ -17,6 +17,28 @@ The CLI accepts the Python patcher's flags and retains its help, planned-edit,
 listing and patch messages. `mssb-clone-probe` is a file-oriented interface for
 local differential tests, separate from the user CLI.
 
+The `textures DISC CHARID OUTDIR` probe writes decoded textures and fixed-spec
+recolours; `api DISC OUTDIR` captures window API results. To measure recolours
+through the window's colour-spec path, use:
+
+```sh
+./tools/clonemaker/core/target/release/mssb-clone-probe \
+  recolour orig/GYQE01 2 .scratch/recolour/2/cases.json .scratch/recolour/2
+```
+
+`recolour DISC CHARID CASES.json OUTDIR` reads the audit tool's
+`{"source":2,"cases":[{"name":"blue_keep0.5","colour":"blue","keeplum":0.5,"regions":null}]}`
+format and writes `OUTDIR/<name>.gpc` from the source's effective body. Colours
+accept presets or custom `#rrggbb`; regions are indices, or `null`/omitted for
+defaults (an empty list selects no regions). It calls `api::colour_spec`,
+`api::region_selection` and `SourcePreview::recoloured`, preserving the current
+window behaviour, including custom-colour limitations.
+
+`recolour_audit.py --backend rust --rust-dir .scratch/recolour` writes a
+`cases.json` per source and requires the corresponding GPC files. On the first
+run it reports missing bodies; generate each source's files with the probe,
+then rerun the audit with the same `--rust-dir`.
+
 ## Window integration
 
 `api::Core` implements the commands in [`../API.md`](../API.md). Keep one
@@ -100,3 +122,31 @@ normal runs use ordinary files and start the complete grid.
 The CLI additionally rejects output folders that overlap the original input,
 and ISO destinations inside the original extraction. These guards enforce the
 original-disc boundary even when `--force` is used.
+
+Parity covers outputs and the expected validation messages. Where the Python
+reference would die with an interpreter traceback (malformed numeric recolour
+input, badly corrupt binary data), the core returns its own error instead.
+
+## Standalone texture encoding
+
+`texture_encode::encode_texture(rgba, &target)` accepts row-major RGBA8 and a
+`texture::Texture`, returning tiled pixel bytes and an optional separate TLUT.
+It checks dimensions, byte count, palette capacity and the exact pixel slot size.
+It supports the retail sources' CMPR, CI4 and CI8 formats with IA8, RGB565 or
+RGB5A3 palettes. `decode_texture_rgba` reads pixels followed by the TLUT and
+preserves alpha; the older `decode_texture` remains the checkerboard RGB preview.
+The encoder is not connected to cloning, PNG import or the window.
+
+The read-only local inventory/quality probe scans all 54 sources, both disc
+tracks, effective ARAM bodies, menu art and HUD portraits. It writes no assets:
+
+```sh
+cargo run --release --manifest-path tools/clonemaker/core/Cargo.toml \
+  --example texture_quality -- orig/GYQE01
+# Add --inventory-only to skip round-trip measurements.
+```
+
+It reports texture counts, exact RGBA matches and per-texture mean/worst PSNR
+(infinite for exact results). The probe also cross-checks RGBA compositing
+against the established preview decoder, except IA8 menu names, which the
+legacy preview decoder does not support.

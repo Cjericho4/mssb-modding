@@ -13,6 +13,7 @@ pub mod lzss;
 pub mod menu;
 pub mod sound;
 pub mod texture;
+pub mod texture_encode;
 
 /// A plain patcher error with optional operating-system details for friendly window messages.
 #[derive(Debug, Clone, PartialEq, Eq)]

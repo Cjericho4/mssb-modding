@@ -12,26 +12,23 @@ You need:
 
 ## 1. Get the program
 
-**Option A: download the ready-made `.exe` (no Python needed)**
+**Download it (Windows or Mac, nothing else to install)**
 
 1. You need a (free) GitHub account and to be signed in; GitHub only lets signed-in users download
    build files.
-2. Open https://github.com/Cjericho4/mssb-dtk/actions/workflows/build-gui.yml
-3. Click the newest run in the list that has a **green tick**.
-4. Scroll to the bottom of that page, to **Artifacts**, and click **MSSB-Clone-Maker**.  A `.zip`
-   downloads.
-5. Open the `.zip` and drag **MSSB-Clone-Maker.exe** to your Desktop (or any folder).
-6. Double-click **MSSB-Clone-Maker.exe**.  The first start takes a few seconds.  If Windows shows a
-   blue "Windows protected your PC" box, see *Troubleshooting* below.
+2. Open the build page for your system and click the newest run with a **green tick**:
+   * Windows: https://github.com/Cjericho4/mssb-dtk/actions/workflows/build-clonemaker.yml
+   * Mac: https://github.com/Cjericho4/mssb-dtk/actions/workflows/build-clonemaker-mac.yml
+3. Scroll to **Artifacts** and click **MSSB-Clone-Maker-Tauri** (Windows) or
+   **MSSB-Clone-Maker-Mac** (Mac). A `.zip` downloads.
+4. Windows: open the `.zip` and drag **MSSB-Clone-Maker.exe** to your Desktop, then double-click it.
+   If Windows shows a blue "Windows protected your PC" box, see *Troubleshooting* below.
+5. Mac: unzip it, then unzip the zip inside to get **MSSB Clone Maker.app**. The first open is
+   blocked because the app isn't signed with a paid Apple account: double-click it, click **Done**,
+   then **System Settings -> Privacy & Security -> Open Anyway**.
 
-(If there is no run yet, someone with access to the repository can start one: same page ->
-**Run workflow** -> **Run workflow**.)
-
-**Option B: run it with Python**
-
-1. Install Python 3 from https://www.python.org/downloads/windows/ (tick **"Add python.exe to PATH"**).
-2. Put `clone_gui.py` and `clone_character.py` (both from `tools/modding/`) in the same folder.
-3. Double-click `clone_gui.py`, or open PowerShell in that folder and run: `py clone_gui.py`
+**Or build it yourself** (any system with Rust from https://rustup.rs): clone this repository, then
+in `tools/clonemaker/app` run `cargo run --release`.
 
 ## 2. Choose your game
 
@@ -104,7 +101,7 @@ When it is done a message says where the file is.
 
 * **"Windows protected your PC" / "unrecognized app"** when starting the `.exe`: the program isn't
   signed by a company, so Windows SmartScreen warns about it.  Click **More info**, then
-  **Run anyway**.  (If you'd rather not, use option B with Python.)
+  **Run anyway**.  (If you'd rather not, build it yourself, see section 1.)
 * **"This is a compressed .rvz file"**: the program needs a plain `.iso`.  In Dolphin or Rio,
   right-click the game in the list -> **Convert File...** -> Format **ISO** -> **Convert...**, then
   choose the new `.iso`.  `.nkit`, `.gcz` and `.wbfs` files are converted the same way.
@@ -115,9 +112,20 @@ When it is done a message says where the file is.
   and ranked modes expect the original game, so play the clones game offline.
 * **Not enough disk space**: free up about 3.5 GB on the drive you save to, or **Save as...** onto
   another drive.
+* **The game will not start, or hangs on a loading screen, in Dolphin or Rio**: first check that
+  your *original* game still starts (if it does not, the problem is your Dolphin/Rio setup, not the
+  clones).  Then open the new `.iso` (not an extracted folder) and, in Dolphin, make sure no cheat
+  or Gecko codes are enabled for it.
+* **A clone looks like plain Mario in matches, has black or garbled textures, or the roster screen
+  shows an odd name or picture**: untick **Show clones as Mario** under Advanced and make the game
+  again to see whether that part is the cause, and send the `.log` file with a short description of
+  which screen it happened on.
+* **Colours look wrong but the game runs**: tick the other colour boxes, or pick a different colour.
+  The four Toad (and Shy Guy, Koopa, ...) slots are the safest choices.
 * **Something else went wrong**: the message box says what; the **Log** on the right of the window has
   the technical details.  Copy them when you ask for help.
 
 To undo everything, delete the `- Clones.iso`; your original game was never changed.
 
-For command-line use and the technical details, see `README_WINDOWS.md`.
+Developers: the command-line patcher is `tools/modding/clone_character.py` (`--help` lists every
+option); the app's design is in `tools/clonemaker/app/README.md`.

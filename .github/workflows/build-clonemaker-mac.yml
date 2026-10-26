@@ -1,0 +1,68 @@
+name: Build Clone Maker (Tauri, Mac)
+
+# Builds the Tauri Clone Maker (tools/clonemaker/app) into a universal (Apple Silicon + Intel)
+# "MSSB Clone Maker.app", ad-hoc signed (no Apple developer account), zipped so the app keeps its
+# permissions, and runs the app's own --selftest. Download it from the run's "Artifacts" section.
+# Free: GitHub-hosted runners cost nothing for public repos.
+
+on:
+  push:
+    branches: [main, 'tauri-*']
+    paths:
+      - tools/clonemaker/**
+      - .github/workflows/build-clonemaker-mac.yml
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: macos-15-intel   # the arm64 queue kept timing out (capacity); the .app is still universal
+    defaults:
+      run:
+        working-directory: tools/clonemaker/app
+
+    steps:
+    - name: Checkout
+      uses: actions/checkout@v4
+
+    - name: Set up Rust
+      uses: dtolnay/rust-toolchain@stable
+      with:
+        targets: aarch64-apple-darwin, x86_64-apple-darwin
+
+    - name: Cache
+      uses: Swatinem/rust-cache@v2
+      with:
+        workspaces: tools/clonemaker/app
+
+    - name: Unit tests
+      run: |
+        cargo test --release
+        cargo test --release --manifest-path ../core/Cargo.toml
+
+    - name: Build the .app
+      run: |
+        npx --yes @tauri-apps/cli@2.12.4 build --target universal-apple-darwin --bundles app \
+          --config '{"bundle":{"active":true,"macOS":{"signingIdentity":"-"}}}'
+        ls -la target/universal-apple-darwin/release/bundle/macos/
+
+    - name: Self-test (.app)
+      run: |
+        app="target/universal-apple-darwin/release/bundle/macos/MSSB Clone Maker.app"
+        bin=$(ls "$app/Contents/MacOS/" | head -1)
+        "$app/Contents/MacOS/$bin" --selftest --log selftest.log &
+        pid=$!
+        for i in $(seq 300); do kill -0 $pid 2>/dev/null || break; sleep 1; done
+        if kill -0 $pid 2>/dev/null; then kill -9 $pid; cat selftest.log; echo "the self-test did not finish in 5 minutes"; exit 1; fi
+        wait $pid; code=$?
+        cat selftest.log
+        exit $code
+
+    - name: Zip the .app
+      run: ditto -c -k --keepParent "target/universal-apple-darwin/release/bundle/macos/MSSB Clone Maker.app" MSSB-Clone-Maker-Mac.zip
+
+    - name: Upload the .app
+      uses: actions/upload-artifact@v4
+      with:
+        name: MSSB-Clone-Maker-Mac
+        path: tools/clonemaker/app/MSSB-Clone-Maker-Mac.zip
+        if-no-files-found: error
