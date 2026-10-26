@@ -80,7 +80,7 @@ fn run(a: &[String]) -> Result<()> {
                 fs::write(folder.join(format!("before-{source}.png")),&pv.before_png)?;
                 let selected=pv.regions.iter().enumerate().filter(|(_,r)|r.default).map(|(i,_)|i).collect::<Vec<_>>();
                 for (i,colour) in ["blue","green","#00ff00"].into_iter().enumerate() {
-                    let request=PreviewRequest{source,slot:slots[0],colour:colour.into(),keeplum:0.5,regions:selected.clone()};let result=core.preview(&request).map_err(|e|Error::new(e.error))?;
+                    let request=PreviewRequest{source,slot:slots[0],colour:colour.into(),keeplum:0.5,regions:selected.clone(),textures:None};let result=core.preview(&request).map_err(|e|Error::new(e.error))?;
                     fs::write(folder.join(format!("preview-{source}-{i}.json")),serde_json::to_vec(&result).unwrap())?;
                 }
             }

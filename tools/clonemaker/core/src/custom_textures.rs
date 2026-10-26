@@ -173,10 +173,8 @@ fn readme(source: &str, body: &Gpc) -> String {
          - Keep each picture's size and file name (t03_64x64.png is texture 3, 64 x 64 pixels).\r\n\
          - Transparent stays transparent. Most textures have no half-transparency: a pixel\r\n\
          \x20 there is either see-through (alpha below 128) or solid.\r\n\
-         - Delete a file to keep that texture as it was (it is then recoloured like the rest).\r\n\
-         - Unchanged files change nothing.\r\n\
-         - Your pictures are used as painted: the clone's colour only recolours the textures\r\n\
-         \x20 you did not change.\r\n\
+         - Delete a file, or leave it unchanged, to keep that texture as it was.\r\n\
+         - Your pictures are used as painted; a clone with its own textures gets no colour change.\r\n\
          - Fielders and runners far away use a low-detail model. Where its texture is a smaller\r\n\
          \x20 copy of yours, a shrunk copy of your picture is used there; otherwise it keeps the\r\n\
          \x20 original.\r\n\

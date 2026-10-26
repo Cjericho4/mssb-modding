@@ -928,6 +928,9 @@ pub struct PreviewRequest {
     pub keeplum: f64,
     /// Checked region indices.
     pub regions: Vec<usize>,
+    /// The row's painted texture folder; the after side then shows those instead of the colour.
+    #[serde(default)]
+    pub textures: Option<PathBuf>,
 }
 /// Before/after atlas images and the Python window's explanatory caption.
 #[derive(Serialize)]
@@ -1016,11 +1019,28 @@ impl Core {
             error: "Choose a game first.".into(),
         })?;
         let pv = game.preview(request.source)?;
+        let before_png = base64::engine::general_purpose::STANDARD.encode(&pv.before_png);
+        if let Some(folder) = &request.textures {
+            let painted = Painted::load(folder, &pv.body, &pretty_name(request.source))?;
+            let mut g = pv.body.clone();
+            painted.paint(&pv.body, &pv.body, &mut g)?;
+            let after = png_bytes(256, pv.height, &pv.atlas(&g)?)?;
+            return Ok(Preview {
+                before_png,
+                after_png: base64::engine::general_purpose::STANDARD.encode(after),
+                caption: format!(
+                    "All {} textures of {}, before and as {} with your textures ({} painted)",
+                    pv.body.textures.len(),
+                    pretty_name(request.source),
+                    pretty_name(request.slot),
+                    painted.edited.len()
+                ),
+            });
+        }
         let regions = region_selection(&pv.regions, &request.regions);
         let spec = colour_spec(&request.colour, request.keeplum, regions.as_deref())?;
         let mut rc = Recolour::new(&spec)?;
         rc.resolve(&pv.regions)?;
-        let before_png = base64::engine::general_purpose::STANDARD.encode(&pv.before_png);
         let after_png = base64::engine::general_purpose::STANDARD.encode(pv.after_png(&spec)?);
         Ok(Preview {
             before_png,

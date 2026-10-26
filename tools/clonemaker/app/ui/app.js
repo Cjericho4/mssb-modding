@@ -386,6 +386,9 @@ function setRowTextures(row, folder) {
     ? `Painted textures from ${row.textures}\nClick to pick another folder.`
     : "Use textures you painted (export them first with \"Export textures…\")";
   row.texturesClear.hidden = !row.textures;
+  // Painted rows keep the source's colours, so the colour choice does not apply.
+  row.colourSelect.style.visibility = row.swatch.style.visibility = row.textures ? "hidden" : "";
+  if (row.radio.checked) schedulePreview(true);
 }
 
 function sourceChanged() {
@@ -406,7 +409,7 @@ async function requestPreview() {
   if (!state.game || !row || state.infoSource !== sourceId()) return;
   const src = sourceId(), seq = ++state.previewSeq;
   if (!state.previewed.has(src)) $("preview-caption").textContent = `Loading ${sourceName(src)}'s textures…`;
-  const request = { source: src, slot: row.slot, colour: row.colour, keeplum: keeplum(), regions: tickedRegions() };
+  const request = { source: src, slot: row.slot, colour: row.colour, keeplum: keeplum(), regions: tickedRegions(), textures: row.textures };
   let res, failure;
   try {
     res = await invoke("preview", { request });

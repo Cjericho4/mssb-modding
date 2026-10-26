@@ -499,7 +499,10 @@ pub fn clone(
         }
         for (t, src_track) in src_tracks.iter().enumerate() {
             let mut g = src_track.clone();
-            rc.recolour_gpc(&mut g)?;
+            // A painted clone keeps the source's colours wherever it was not painted.
+            if !painted.contains_key(s) {
+                rc.recolour_gpc(&mut g)?;
+            }
             if let Some(p) = painted.get(s) {
                 log(&format!(
                     "  track {t}: {}",
@@ -535,7 +538,9 @@ pub fn clone(
         if use_overlay {
             let o = dol.private_entry(*s)?.unwrap();
             let mut g = src_body.clone();
-            rc.recolour_gpc(&mut g)?;
+            if !painted.contains_key(s) {
+                rc.recolour_gpc(&mut g)?;
+            }
             if let Some(p) = painted.get(s) {
                 log(&format!(
                     "  ARAM body: {}",
