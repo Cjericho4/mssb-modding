@@ -166,8 +166,8 @@ legacy preview decoder does not support.
 
 Only `*.png` files are read; other files (README.txt, editor files) are ignored. A PNG whose
 pixels equal the original (colour under fully transparent texels aside) changes nothing, so an
-unedited export gives a byte-identical ISO. Each edited PNG is encoded with `encode_texture`
-after the recolour into every body copy: track 0 and the ARAM body by index, and track 1 (the
+unedited export gives a byte-identical ISO. A clone with a texture folder is not recoloured;
+each edited PNG is encoded with `encode_texture` into every body copy: track 0 and the ARAM body by index, and track 1 (the
 low-detail model of fielders and runners) wherever its retail texture is the same picture or a
 shrunk copy of it (whole factor, at least 25 dB after a box filter); a box-filtered copy of the
 PNG goes there. Low-detail textures drawn separately (Mario's eyes, 128x128 in the body, 32x32 in
