@@ -87,3 +87,7 @@ normal runs use ordinary files and start the complete grid.
 The CLI additionally rejects output folders that overlap the original input,
 and ISO destinations inside the original extraction. These guards enforce the
 original-disc boundary even when `--force` is used.
+
+Parity covers outputs and the expected validation messages. Where the Python
+reference would die with an interpreter traceback (malformed numeric recolour
+input, badly corrupt binary data), the core returns its own error instead.
