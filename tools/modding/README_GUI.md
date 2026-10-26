@@ -17,8 +17,8 @@ You need:
 1. You need a (free) GitHub account and to be signed in; GitHub only lets signed-in users download
    build files.
 2. Open the build page for your system and click the newest run with a **green tick**:
-   * Windows: https://github.com/Cjericho4/mssb-dtk/actions/workflows/build-clonemaker.yml
-   * Mac: https://github.com/Cjericho4/mssb-dtk/actions/workflows/build-clonemaker-mac.yml
+   * Windows: https://github.com/Cjericho4/mssb-modding/actions/workflows/build-clonemaker.yml
+   * Mac: https://github.com/Cjericho4/mssb-modding/actions/workflows/build-clonemaker-mac.yml
 3. Scroll to **Artifacts** and click **MSSB-Clone-Maker-Tauri** (Windows) or
    **MSSB-Clone-Maker-Mac** (Mac). A `.zip` downloads.
 4. Windows: open the `.zip` and drag **MSSB-Clone-Maker.exe** to your Desktop, then double-click it.

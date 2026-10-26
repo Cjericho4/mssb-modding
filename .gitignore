@@ -1,0 +1,10 @@
+# your own copy of the game: never commit it
+/orig/
+*.iso
+*.gcm
+*.rvz
+__pycache__
+/.scratch/
+target/
+# C build of tools/modding/lzss.c
+tools/modding/_lzss.*

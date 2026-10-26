@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
-"""Developer helper (needs the mssb-dtk checkout: config/ symbols and build/ asm).
+"""Developer helper (needs a built mssb-dtk checkout for config/ symbols and build/ asm: $MSSB_DTK,
+or ../mssb-dtk next to this repository).
 
 Scans main.dol and the three RELs for disk-file descriptors, groups them into runs, names each run
 by the symbol that contains it and lists the functions that reference that symbol.  The output was
@@ -15,7 +16,8 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import disc as dm  # noqa: E402
 
-ROOT = Path(__file__).resolve().parents[2]
+import os  # noqa: E402
+ROOT = Path(os.environ.get("MSSB_DTK") or Path(__file__).resolve().parents[3] / "mssb-dtk")
 SYMFILES = {"dol": ROOT / "config/GYQE01/symbols.txt", "menus": ROOT / "config/GYQE01/menus/symbols.txt",
             "game": ROOT / "config/GYQE01/game/symbols.txt", "challenge": ROOT / "config/GYQE01/challenge/symbols.txt"}
 ASMDIRS = {"dol": ROOT / "build/GYQE01/asm", "menus": ROOT / "build/GYQE01/menus/asm",

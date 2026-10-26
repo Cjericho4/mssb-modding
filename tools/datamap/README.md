@@ -20,7 +20,7 @@ Extracted files are for your own copy of the game only. Don't share them.
 ## Quick start (Windows PowerShell)
 
 ```powershell
-cd C:\mssb-dtk\tools\datamap
+cd C:\mssb-modding\tools\datamap
 $disc = "D:\Games\Mario Superstar Baseball (US).iso"
 
 # every file: id, offset, sizes, format, what it is
@@ -97,7 +97,7 @@ It takes several minutes. The inspector dumps key **settings** and interpolation
 it does not evaluate curves, decode auxiliary curve payloads or write animations. Files/JSON
 with key values are local game data; don't redistribute them. Extraction uses canonical alias
 filenames (check the output manifest). Track purposes, binary layouts, swap requirements and
-remaining Blender work: [.agent/animations.md](../../.agent/animations.md).
+remaining Blender work: [.agent/animations.md](https://github.com/Cjericho4/mssb-dtk/blob/main/.agent/animations.md).
 
 ## Voices, announcer, sound effects and music
 
