@@ -80,7 +80,20 @@ source .venv/bin/activate
 python tools/clonemaker/difftest.py --synthetic --codecs --helpers --iso
 python tools/clonemaker/difftest.py --textures --api --gui
 python tools/clonemaker/difftest.py --full-grid
+python tools/clonemaker/difftest.py --sound --voice-grid
 ```
+
+Voice (#29): a clone always speaks with its source's voice. The core writes the
+source's SFX base (game.rel 0x8168) to the clone rows in every mode, and with
+`--ui donor` merges the source's voice into the donor family's bank
+(`src/sound.rs`), checks the merged file (`verify_merged`) and refuses a merge
+whose worst-case match could overflow MusyX's ARAM sample heap. These are the
+only intended differences from the frozen Python reference: `--voice-grid` runs
+the voice cases and every other case accepts exactly those bytes (0x8168 rows,
+merged banks at the end of ZZZZ.dat, their DOL/challenge.rel descriptors, the
+re-packed RELs) and reads each merged bank back with `tools/datamap/sound.py`.
+`--sound` rebuilds all 32 retail voice banks byte-identically and verifies all
+992 donor/source merges.
 
 `--grid` runs the sampled matrix and option switches. `--full-grid` additionally
 compares every source with every preset, grouping the eight presets into eight

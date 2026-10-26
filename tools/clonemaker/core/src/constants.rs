@@ -13,6 +13,8 @@ pub const ADDR_SUBITEM_FILES: u32 = 0x800F5D98;
 pub const ADDR_GLOVE: u32 = 0x800EEAAC;
 /// Runtime address of the game table used by the reference patcher.
 pub const ADDR_MODELMAP: u32 = 0x800EEB18;
+/// `charSizeMultipliers`: 54 × {in-game, menu scene} f32 model scale per charID (#38).
+pub const ADDR_CHARSIZE: u32 = 0x800E8300;
 /// Runtime address of the game table used by the reference patcher.
 pub const ADDR_JUMPTABLE: u32 = 0x800EEC40;
 /// Runtime address of the game table used by the reference patcher.
@@ -35,6 +37,10 @@ pub const ADDR_PORTRAIT_DESC2: u32 = 0x800E8B18;
 pub const ADDR_MENU_COMMON_DESC: u32 = 0x800E8BF8;
 /// Runtime address of the game table used by the reference patcher.
 pub const ADDR_MENU_GRID_DESC: u32 = 0x800E8CD8;
+/// MusyX sound-group descriptors `lbl_800EF508` (row 5 + unique index = that voice bank).
+pub const ADDR_SOUND_GROUPS: u32 = 0x800EF508;
+/// game.rel .data offset of the per-charID voice SFX base table (`lbl_3_data_8168`, u16[54]).
+pub const REL_VOICE_BASE: usize = 0x8168;
 /// Character names in charID order.
 pub const CHAR_NAMES: [&str; 54] = [
     "Mario",

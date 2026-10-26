@@ -5,6 +5,11 @@ and events. Each one ports a function of the Python reference (`tools/modding/cl
 layer, `clone_character.py`); behaviour, wording of messages and outputs must match it. Change this
 file in the same commit as any change to a command.
 
+Intended divergence (#29): the core always copies the source's voice SFX base (game.rel 0x8168) to
+the clone rows, and with `ui_source: false` merges the source's voice into each donor family's
+voice bank (`sound.(5+u)`, appended to ZZZZ.dat; DOL and challenge.rel descriptors updated), with
+`voice: ` log lines. The Python reference does neither; `difftest.py` allows exactly these bytes.
+
 Types: `colour` is a preset name (`red orange yellow green cyan blue purple pink`) or `"#rrggbb"`
 (custom). Paths are strings. Errors are `{ "error": "<friendly message>" }` (see `friendly_error`).
 `regions` (in `preview` and `job`) are the ticked region indices; the core drops them when they are
