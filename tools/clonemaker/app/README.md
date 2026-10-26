@@ -9,7 +9,7 @@ defaults, error messages and layout) and talks to the core only through the comm
   each core `Event` (`{event, payload}`) as the Tauri event of that name.
 - `src/selftest.rs`: the `--selftest` mode and the screenshot hook.
 - `ui/`: plain HTML/CSS/JS, no framework and no npm (`withGlobalTauri`). `theme.css` holds the
-  gui_theme palette as custom properties; the fonts are bundled with `@font-face` (OFL texts in
+  night-arena palette as custom properties; the fonts are bundled with `@font-face` (OFL texts in
   `ui/fonts/`).
 - Its own crate and `Cargo.lock` (no workspace root), depending on `../core` by path.
 
@@ -55,5 +55,3 @@ in CI, so the full walk-through is run locally.
   (Windows' own; its title cannot be set), the quit-while-busy confirm, hover glow on Windows, and
   dragging the window by hand: part of the user's Rio walk-through (#34).
 - Dialogs are overlays inside the window, not separate OS windows (styled like Tk's).
-- The fonts duplicate `tools/modding/fonts/`; drop one copy when #34 retires the Tk GUI and its
-  PyInstaller build.

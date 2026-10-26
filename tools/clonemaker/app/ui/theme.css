@@ -1,4 +1,4 @@
-/* The "night arena" look of the Tk window (tools/modding/gui_theme.py): near-black panels with
+/* The "night arena" look of the Tk window: near-black panels with
    hairline borders, a red accent, uppercase tracked Rajdhani headings, Inter text, JetBrains Mono
    for paths and the log. Sizes are the Tk ones in CSS px (1 px at 96 dpi). */
 
@@ -25,7 +25,7 @@
   --danger: #ef4444;
   --ok: #22c55e;
   --gold: #f5bb00;
-  /* mixes of the palette (gui_theme.mix) */
+  /* mixes of the palette (the old Tk theme.mix) */
   --hover: #250e19;
   --press: #3b0d18;
   --red-line: #630712;
@@ -60,7 +60,7 @@ body {
   flex-direction: column;
   color: var(--text);
   font: 400 13px var(--sans);
-  /* the ambient wash: a red bleed from the top, a faint gold one from the bottom (gui_theme.wash_png) */
+  /* the ambient wash: a red bleed from the top, a faint gold one from the bottom */
   background:
     radial-gradient(120% 80% at 50% -10%, rgb(230 0 18 / 0.16), transparent 68%),
     radial-gradient(120% 60% at 50% 110%, rgb(245 187 0 / 0.05), transparent 55%),
