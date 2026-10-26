@@ -122,7 +122,7 @@ It checks dimensions, byte count, palette capacity and the exact pixel slot size
 It supports the retail sources' CMPR, CI4 and CI8 formats with IA8, RGB565 or
 RGB5A3 palettes. `decode_texture_rgba` reads pixels followed by the TLUT and
 preserves alpha; the older `decode_texture` remains the checkerboard RGB preview.
-The encoder is not connected to cloning, PNG import or the window.
+Cloning uses it for painted textures (below).
 
 The read-only local inventory/quality probe scans all 54 sources, both disc
 tracks, effective ARAM bodies, menu art and HUD portraits. It writes no assets:
@@ -137,3 +137,42 @@ It reports texture counts, exact RGBA matches and per-texture mean/worst PSNR
 (infinite for exact results). The probe also cross-checks RGBA compositing
 against the established preview decoder, except IA8 menu names, which the
 legacy preview decoder does not support.
+
+## Painted textures (#37)
+
+`custom_textures` lets players paint a clone's body textures:
+
+```sh
+# one PNG per body texture (tNN_WxH.png, alpha kept, unrecoloured) and a README.txt
+./tools/clonemaker/core/target/release/mssb-clone --disc orig/GYQE01 --source mario \
+  --export-textures .scratch/mario-textures
+# use a painted folder for one clone row (repeat per row; SLOT is an id or name)
+./tools/clonemaker/core/target/release/mssb-clone --disc orig/GYQE01 --source mario \
+  --slot 29:blue --textures 29:.scratch/mario-textures --out .scratch/m --iso .scratch/m.iso
+```
+
+Only `*.png` files are read; other files (README.txt, editor files) are ignored. A PNG whose
+pixels equal the original (colour under fully transparent texels aside) changes nothing, so an
+unedited export gives a byte-identical ISO. Each edited PNG is encoded with `encode_texture`
+after the recolour into every body copy: track 0 and the ARAM body by index, and track 1 (the
+low-detail model of fielders and runners) wherever its retail texture is the same picture or a
+shrunk copy of it (whole factor, at least 25 dB after a box filter); a box-filtered copy of the
+PNG goes there. Low-detail textures drawn separately (Mario's eyes, 128x128 in the body, 32x32 in
+track 1) keep the original, and the log says so. Bad folders fail before any game data is copied
+(`validate_job` in the window, before the copy in the CLI) with a friendly message: unknown
+names, wrong sizes, files that are not PNGs, textures exported from another source.
+
+`--help` and the usage text stay the Python reference's (`difftest --cli` compares them), so the
+two flags are documented here. The window exports with `export_textures` and sets
+`clones[].textures` (API.md).
+
+Read-only check of a painted clone against the same clone without textures (every copy must
+equal the plain copy with the folder painted over it, each painted texture must be exactly the
+encoder's output); it prints per-texture RGB PSNR:
+
+```sh
+cargo run --release --manifest-path tools/clonemaker/core/Cargo.toml --example \
+  custom_texture_check -- orig/GYQE01 plain.iso painted.iso mario 29 .scratch/mario-textures
+```
+
+Not covered yet: menu art and HUD portraits (they stay the recoloured source's).

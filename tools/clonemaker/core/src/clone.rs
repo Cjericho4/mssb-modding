@@ -2,6 +2,7 @@
 use crate::binary::*;
 use crate::colour::{Recolour, source_regions};
 use crate::constants::*;
+use crate::custom_textures;
 use crate::disc::{Disc, open_disc, preflight, write_iso};
 use crate::lzss;
 use crate::menu::*;
@@ -40,6 +41,8 @@ pub struct CloneArgs {
     pub force: bool,
     /// Compute and log edits without writing.
     pub dry_run: bool,
+    /// Painted texture folders by donor slot (`custom_textures`), empty for recolours only.
+    pub textures: Vec<(usize, PathBuf)>,
 }
 impl Default for CloneArgs {
     fn default() -> Self {
@@ -57,6 +60,7 @@ impl Default for CloneArgs {
             no_gameplay: false,
             force: false,
             dry_run: false,
+            textures: Vec::new(),
         }
     }
 }
@@ -366,6 +370,7 @@ pub fn clone(
     for (_, rc) in &mut clones {
         rc.resolve(&regions)?;
     }
+    let painted = custom_textures::load_for_clones(&args.textures, &src_body, c, &slots, log)?;
     let start = align(disc.file_size("ZZZZ.dat")? as usize, 0x800);
     let mut appendix = Appendix {
         start,
@@ -494,6 +499,12 @@ pub fn clone(
         for (t, src_track) in src_tracks.iter().enumerate() {
             let mut g = src_track.clone();
             rc.recolour_gpc(&mut g)?;
+            if let Some(p) = painted.get(s) {
+                log(&format!(
+                    "  track {t}: {}",
+                    p.paint(&src_body, src_track, &mut g)?
+                ));
+            }
             g.check()?;
             let comp = compress_checked(&g.data, false, "")?;
             let packed = comp.len();
@@ -524,6 +535,12 @@ pub fn clone(
             let o = dol.private_entry(*s)?.unwrap();
             let mut g = src_body.clone();
             rc.recolour_gpc(&mut g)?;
+            if let Some(p) = painted.get(s) {
+                log(&format!(
+                    "  ARAM body: {}",
+                    p.paint(&src_body, &src_body, &mut g)?
+                ));
+            }
             let archive = g.archive_bytes();
             let comp = compress_checked(archive, false, "")?;
             let packed = comp.len();
@@ -549,6 +566,9 @@ pub fn clone(
             let (b, o) = dol.pair(c)?;
             dol.set_pair(*s, b, o)?;
             log("  ARAM body = source's (no recolour in the ARAM path)");
+            if painted.contains_key(s) {
+                log("  (so batting and menus show the original textures, not yours)");
+            }
         }
         for (addr, rs) in [(ADDR_GLOVE, 2), (ADDR_MODELMAP, 2), (ADDR_ROWKIND, 1)] {
             let b = dol.read(addr + c as u32 * rs, rs as usize)?.to_vec();

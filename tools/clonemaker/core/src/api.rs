@@ -3,6 +3,7 @@ use crate::binary::{Dol, fst_paths, u32_at};
 use crate::clone::{CloneArgs, CloneResult, absolute_path};
 use crate::colour::{Recolour, Region, hsv_to_rgb, rgb_to_hsv, source_regions};
 use crate::constants::*;
+use crate::custom_textures::{self, Painted};
 use crate::disc::{Disc, preflight};
 use crate::texture::{Gpc, decode_texture};
 use crate::{Error, Result};
@@ -143,6 +144,7 @@ pub fn default_rows(choices: &[SlotChoice]) -> Vec<CloneRow> {
         .map(|(slot, colour)| CloneRow {
             slot,
             colour: colour.into(),
+            textures: None,
         })
         .collect()
 }
@@ -541,6 +543,9 @@ pub struct CloneRow {
     pub slot: usize,
     /// Preset name or #rrggbb custom colour.
     pub colour: String,
+    /// Folder of painted textures for this clone (`export_textures`), if any.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub textures: Option<PathBuf>,
 }
 /// Window job arguments from API.md.
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -802,6 +807,11 @@ pub fn run_job(job: &Job, emit: &dyn Fn(Event), cancel: &AtomicBool) -> Result<D
             no_stats: !job.copy_stats,
             keep_colour_word: job.keep_colour_word,
             force: true,
+            textures: job
+                .clones
+                .iter()
+                .filter_map(|r| Some((r.slot, r.textures.clone()?)))
+                .collect(),
             ..CloneArgs::default()
         };
         let mut log_error = None;
@@ -929,6 +939,14 @@ pub struct Preview {
     /// Description of source, slot, colour and affected regions.
     pub caption: String,
 }
+/// Where `export_textures` wrote the PNGs, and how many.
+#[derive(Debug, Serialize)]
+pub struct ExportedTextures {
+    /// The new folder holding the PNGs and README.txt.
+    pub folder: PathBuf,
+    /// Number of PNGs written.
+    pub count: usize,
+}
 /// Stateful command facade for the Tauri window; create runs on its own worker thread.
 #[derive(Default)]
 pub struct Core {
@@ -1021,9 +1039,41 @@ impl Core {
     pub fn default_output(&self, path: &Path) -> PathBuf {
         default_output(path)
     }
-    /// Return null on success or the contract's friendly {error} object.
+    /// Return null on success or the contract's friendly {error} object; painted texture
+    /// folders are checked against the source here, before the long job starts.
     pub fn validate_job(&self, job: &Job) -> Option<ApiError> {
-        validate_job(job, None).err().map(Into::into)
+        let folders = || -> Result<()> {
+            validate_job(job, None)?;
+            if job.clones.iter().all(|r| r.textures.is_none()) {
+                return Ok(());
+            }
+            let mut lock = self.game.lock().unwrap();
+            let game = lock
+                .as_mut()
+                .ok_or_else(|| Error::new("Choose a game first.".into()))?;
+            let body = &game.preview(job.source)?.body;
+            for folder in job.clones.iter().filter_map(|r| r.textures.as_ref()) {
+                Painted::load(folder, body, &pretty_name(job.source))?;
+            }
+            Ok(())
+        };
+        folders().err().map(Into::into)
+    }
+    /// Write the source's original body textures as PNGs into `<folder>/<Name> textures`.
+    pub fn export_textures(
+        &self,
+        source: usize,
+        folder: &Path,
+    ) -> std::result::Result<ExportedTextures, ApiError> {
+        check_id(source)?;
+        let mut lock = self.game.lock().unwrap();
+        let game = lock.as_mut().ok_or_else(|| ApiError {
+            error: "Choose a game first.".into(),
+        })?;
+        let name = pretty_name(source);
+        let folder = folder.join(format!("{name} textures"));
+        let count = custom_textures::export(&game.preview(source)?.body, &name, &folder)?;
+        Ok(ExportedTextures { folder, count })
     }
     /// Start the job, sending progress/log/done/error events through a thread-safe callback.
     pub fn create(
@@ -1120,5 +1170,17 @@ mod tests {
             .unwrap(),
             serde_json::json!({"event":"progress","payload":{"fraction":0.5,"label":"Patching"}})
         );
+    }
+    #[test]
+    fn clone_row_textures_are_optional() {
+        let row: CloneRow = serde_json::from_str(r#"{"slot":29,"colour":"blue"}"#).unwrap();
+        assert_eq!(row.textures, None);
+        assert_eq!(
+            serde_json::to_value(&row).unwrap(),
+            serde_json::json!({"slot":29,"colour":"blue"})
+        );
+        let row: CloneRow =
+            serde_json::from_str(r#"{"slot":29,"colour":"blue","textures":"art"}"#).unwrap();
+        assert_eq!(row.textures, Some(PathBuf::from("art")));
     }
 }

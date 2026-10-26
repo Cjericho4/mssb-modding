@@ -26,7 +26,7 @@ const state = {
   info: null,          // source_info of the shown source: { regions, slots, default_rows }
   infoSource: null,
   infoSeq: 0,
-  rows: [],            // { id, slot, colour, el }
+  rows: [],            // { id, slot, colour, textures, el }
   rowSeq: 0,
   previewRow: null,
   previewSeq: 0,
@@ -83,7 +83,7 @@ function log(line) {
 
 /** Inputs that wait for a game and are locked while one is being made. */
 function setEnabled(on) {
-  const inputs = ["source", "btn-add", "chk-ui", "chk-colour", "chk-stats", "keeplum", "chk-keep", "out-path", "btn-out", "btn-go"]
+  const inputs = ["source", "btn-add", "btn-export", "chk-ui", "chk-colour", "chk-stats", "keeplum", "chk-keep", "out-path", "btn-out", "btn-go"]
     .map($)
     .concat([...document.querySelectorAll("#rows input, #rows select, #rows button, #regions-box input")]);
   for (const w of inputs) w.disabled = !on;
@@ -93,6 +93,7 @@ function setEnabled(on) {
 
 function updateSourceLabels() {
   const n = sourceName();
+  $("btn-export").title = `Save ${n}'s textures as PNG pictures to paint your own`;
   $("chk-ui-text").textContent = `Show clones as ${n}: name and pictures in menus, HUD, announcer (recommended)`;
   $("chk-stats-text").textContent = `Give clones ${n}'s stats`;
 }
@@ -222,6 +223,7 @@ async function rebuildRows(reset) {
   let wanted;
   if (reset || !state.rows.length) {
     wanted = state.info.default_rows;
+    for (const r of state.rows) setRowTextures(r, null);
   } else {
     wanted = [];
     const used = [];
@@ -282,8 +284,11 @@ async function addRow(slot = null, colour = null) {
   row.slotSelect = el("select");
   row.colourSelect = el("select");
   row.swatch = el("div", { className: "swatch" });
-  row.remove = el("button", { className: "icon", textContent: "×", title: "Remove this clone" });
-  row.el = el("div", { className: "clone-row" }, [row.radio, row.slotSelect, row.colourSelect, row.swatch, row.remove]);
+  row.texturesPick = el("button", { className: "pick" });
+  row.texturesClear = el("button", { className: "icon clear", textContent: "×", title: "Stop using these textures" });
+  row.texturesBox = el("div", { className: "textures" }, [row.texturesPick, row.texturesClear]);
+  row.remove = el("button", { className: "icon remove", textContent: "×", title: "Remove this clone" });
+  row.el = el("div", { className: "clone-row" }, [row.radio, row.slotSelect, row.colourSelect, row.swatch, row.texturesBox, row.remove]);
   row.radio.addEventListener("change", () => selectPreviewRow(row, true));
   row.slotSelect.addEventListener("change", () => {
     row.slot = Number(row.slotSelect.value);
@@ -291,8 +296,11 @@ async function addRow(slot = null, colour = null) {
   });
   row.colourSelect.addEventListener("change", () => colourChanged(row));
   row.remove.addEventListener("click", () => removeRow(row));
+  row.texturesPick.addEventListener("click", () => pickRowTextures(row));
+  row.texturesClear.addEventListener("click", () => setRowTextures(row, null));
   fillSlots(row);
   setRow(row, slot, colour);
+  setRowTextures(row, null);
   state.rows.push(row);
   $("rows").append(row.el);
   if (state.rows.length === 1) selectPreviewRow(row);
@@ -334,6 +342,50 @@ function colourChanged(row) {
   };
   row.colourSelect.value = row.colour;
   picker.click();
+}
+
+// ---------------------------------------------------------------- painted textures
+/** Save the shown source's textures as PNGs into a new "<Name> textures" folder inside `folder`. */
+async function exportTextures(folder = null) {
+  if (!state.game || state.busy) return null;
+  const name = sourceName();
+  if (folder === null) {
+    folder = await dialog.open({ title: `Choose where to save ${name}'s textures (a "${name} textures" folder is made there)`, directory: true });
+    if (!folder) return null;
+  }
+  let res;
+  try {
+    res = await invoke("export_textures", { source: sourceId(), folder });
+  } catch (e) {
+    await showError(APP_TITLE, e.error ?? String(e));
+    return null;
+  }
+  state.lastExport = res.folder;
+  log(`exported ${res.count} textures of ${name} to ${res.folder}`);
+  await showInfo("Textures exported", `Saved ${res.count} pictures of ${name} to\n${res.folder}\n\n`
+    + "Paint over them in any paint program, keeping each picture's size and file name. Then press "
+    + "\"My textures…\" on a clone row and pick that folder. README.txt in the folder has the details.");
+  return res;
+}
+
+async function pickRowTextures(row) {
+  const folder = await dialog.open({
+    title: "Choose the folder with your painted textures",
+    directory: true,
+    defaultPath: row.textures || state.lastExport || undefined,
+  });
+  if (folder) setRowTextures(row, folder);
+}
+
+/** A clone row's painted texture folder (null: recolour only), shown by its folder name. */
+function setRowTextures(row, folder) {
+  row.textures = folder || null;
+  row.texturesBox.classList.toggle("set", Boolean(row.textures));
+  row.texturesPick.textContent = row.textures ? fileName(row.textures.replace(/[\\/]+$/, "")) : "My textures…";
+  row.texturesPick.title = row.textures
+    ? `Painted textures from ${row.textures}\nClick to pick another folder.`
+    : "Use textures you painted (export them first with \"Export textures…\")";
+  row.texturesClear.hidden = !row.textures;
 }
 
 function sourceChanged() {
@@ -412,7 +464,7 @@ function makeJob() {
     game: $("game-path").value,
     output: $("out-path").value.trim(),
     source: sourceId(),
-    clones: state.rows.map((r) => ({ slot: r.slot, colour: r.colour })),
+    clones: state.rows.map((r) => (r.textures ? { slot: r.slot, colour: r.colour, textures: r.textures } : { slot: r.slot, colour: r.colour })),
     keeplum: keeplum(),
     regions: tickedRegions(),
     ui_source: $("chk-ui").checked,
@@ -505,6 +557,7 @@ async function main() {
   $("source").addEventListener("change", sourceChanged);
   $("btn-add").addEventListener("click", () => serial(() => addRow()));
   $("btn-adv").addEventListener("click", toggleAdvanced);
+  $("btn-export").addEventListener("click", () => exportTextures());
   $("chk-ui").addEventListener("change", () => { $("chk-colour").disabled = !$("chk-ui").checked || state.busy || !state.game; });
   $("keeplum").addEventListener("input", () => {
     $("keeplum-value").textContent = Number($("keeplum").value).toFixed(2);
@@ -524,7 +577,7 @@ async function main() {
 
   const options = await invoke("launch_options");
   if (options.selftest) {
-    await import("./selftest.js").then((m) => m.run(options, { state, startLoad }));
+    await import("./selftest.js").then((m) => m.run(options, { state, startLoad, exportTextures, setRowTextures }));
   }
 }
 

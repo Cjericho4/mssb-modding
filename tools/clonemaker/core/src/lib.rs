@@ -8,6 +8,7 @@ pub mod cli;
 pub mod clone;
 pub mod colour;
 pub mod constants;
+pub mod custom_textures;
 pub mod disc;
 pub mod lzss;
 pub mod menu;

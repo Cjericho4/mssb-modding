@@ -9,7 +9,7 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const painted = () => new Promise((r) => requestAnimationFrame(() => setTimeout(r, 0)));
 
 const WIDGETS = ["pill", "btn-iso", "btn-dir", "game-path", "status", "source", "regions-box", "rows", "btn-add",
-  "btn-adv", "adv", "chk-ui", "chk-colour", "chk-stats", "keeplum", "chk-keep", "out-path", "btn-out", "btn-go",
+  "btn-export", "btn-adv", "adv", "chk-ui", "chk-colour", "chk-stats", "keeplum", "chk-keep", "out-path", "btn-out", "btn-go",
   "run-box", "progress-bar", "btn-cancel", "preview-chip", "preview-caption", "img-before", "img-after", "log"];
 
 export async function run(options, app) {
@@ -57,7 +57,7 @@ export async function run(options, app) {
     const { dialog } = window.__TAURI__;
     check(typeof dialog?.open === "function" && typeof dialog?.save === "function", "the file dialogs are available");
     say(`window ${innerWidth}x${innerHeight}, device pixel ratio ${devicePixelRatio}, screen ${screen.availWidth}x${screen.availHeight}`);
-    check($("btn-go").disabled && $("source").disabled && !$("btn-iso").disabled, "inputs wait for a game");
+    check($("btn-go").disabled && $("source").disabled && $("btn-export").disabled && !$("btn-iso").disabled, "inputs wait for a game");
     await shot("empty");
 
     // narrow window: the preview goes under the form; wide again: two columns
@@ -157,11 +157,43 @@ export async function run(options, app) {
     check($("btn-add").textContent === "+ Add another clone", "add button label");
     check(new Set(rows().map((r) => r.querySelector("select").value)).size === 8, "new rows take free slots");
     await shot("many_rows");
-    for (const r of rows().slice(4)) r.querySelector("button").click();
-    rows()[1].querySelector("button").click();
+    for (const r of rows().slice(4)) r.querySelector("button.remove").click();
+    rows()[1].querySelector("button.remove").click();
     check(rows().length === 3 && rows()[0].querySelector("input").checked, "removing the previewed row previews the first");
     $("btn-add").click();
     await waitFor(() => rows().length === 4, "back to four rows");
+
+    // painted textures: export, a broken folder, then a painted picture on the first clone
+    const textures = () => rows()[0].querySelector(".textures");
+    check(textures().querySelector(".pick").textContent === "My textures…" && textures().querySelector(".clear").hidden,
+      "a new row has no textures");
+    const exporting = app.exportTextures(options.dir);
+    await waitFor(() => dialogOpen("Saved 9 pictures of Mario to"), "the export dialog");
+    await shot("textures_exported");
+    dialogButton("OK").click();
+    const exported = await exporting;
+    check(exported?.count === 9 && exported.folder === inDir("Mario textures"), "export result: " + JSON.stringify(exported));
+    check(logHas(`exported 9 textures of Mario to ${inDir("Mario textures")}`), "the export log line");
+    const exportingBroken = app.exportTextures(inDir("broken"));
+    await waitFor(() => dialogOpen(inDir("broken")), "the second export dialog");
+    dialogButton("OK").click();
+    await exportingBroken;
+    await invoke("selftest_edit_png", { path: [inDir("broken"), "Mario textures", "t04_64x64.png"].join(sep), how: "junk" });
+    app.setRowTextures(app.state.rows[0], [inDir("broken"), "Mario textures"].join(sep));
+    $("out-path").value = inDir("Broken.iso");
+    $("btn-go").click();
+    await waitFor(() => dialogOpen("t04_64x64.png is not a PNG picture"), "the broken-texture error");
+    check($("dialog-text").textContent.startsWith("Your textures in \"Mario textures\": "), "error names the folder: " + $("dialog-text").textContent);
+    await shot("textures_error");
+    dialogButton("OK").click();
+    await invoke("selftest_edit_png", { path: [exported.folder, "t01_256x256.png"].join(sep), how: "paint" });
+    app.setRowTextures(app.state.rows[0], exported.folder);
+    check(textures().classList.contains("set") && textures().querySelector(".pick").textContent === "Mario textures"
+      && !textures().querySelector(".clear").hidden, "the row shows the folder");
+    await shot("textures_row");
+    textures().querySelector(".clear").click();
+    check(!textures().classList.contains("set") && textures().querySelector(".pick").textContent === "My textures…", "clear");
+    app.setRowTextures(app.state.rows[0], exported.folder);
 
     // a wrong output name, an existing file
     $("out-path").value = inDir("x.gcm");
@@ -187,6 +219,7 @@ export async function run(options, app) {
     await waitFor(() => !$("dialog").hidden && $("dialog-title").textContent === "Done!", "the done dialog", 900000);
     check($("dialog-text").textContent.startsWith("Saved to " + inDir("My Clones.iso") + ".\n\nOpen it in Dolphin"), "done text");
     check($("dialog-text").textContent.includes("In the game, put several Toads on one team"), "done hint");
+    check(logHas("1 of 9 PNGs") && logHas("track 0: painted t01") && logHas("ARAM body: painted t01"), "the painted texture went in");
     await shot("done");
     dialogButton("OK").click();
     check($("pill").textContent === "Game created" && !$("btn-go").disabled, "Game created");
