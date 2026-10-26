@@ -164,6 +164,9 @@ pub struct Fit {
     pub still: BoneTracks,
     /// Driven bones whose parent bone differs between the two skeletons.
     pub reparented: BoneTracks,
+    /// Bones of the body that a bank has tracks for although the animations' own character
+    /// lacks them: they bind by ID and play motion never seen in the retail game.
+    pub foreign: BoneTracks,
 }
 impl Fit {
     /// Whether the animations need bones the body does not have.
@@ -182,7 +185,8 @@ fn add(map: &mut BoneTracks, bone: u16, track: usize) {
 
 /// Compare `anims`' banks with `body`'s skeletons (both variants, per track). A bone counts as
 /// driven by a bank only if the bank's own character has it: banks also carry tracks for IDs
-/// their body lacks (Luigi's track 3 has 60 and 61), which the game never binds there.
+/// their body lacks (Luigi's track 3 has 60 and 61), which never bind on that character. On the
+/// clone's body such a track does bind if the body has the ID (`foreign`, a warning).
 pub fn fit(body: &Rig, anims: &Rig) -> Fit {
     let mut out = Fit::default();
     for v in 0..2 {
@@ -190,6 +194,9 @@ pub fn fit(body: &Rig, anims: &Rig) -> Fit {
         for (i, t) in ANIM_TRACKS.enumerate() {
             for &b in &anims.banks[i] {
                 let Some(parent) = theirs.get(&b) else {
+                    if own.contains_key(&b) {
+                        add(&mut out.foreign, b, t);
+                    }
                     continue;
                 };
                 match own.get(&b) {
@@ -278,6 +285,12 @@ pub fn warnings(fit: &Fit, body: &str, anims: &str) -> Vec<String> {
         out.push(format!(
             "bones attached to a different parent in {anims}'s skeleton (may bend oddly): {}",
             describe(&fit.reparented)
+        ));
+    }
+    if !fit.foreign.is_empty() {
+        out.push(format!(
+            "{body} bones moved by tracks {anims}'s own body has no use for (motion never seen in the game): {}",
+            describe(&fit.foreign)
         ));
     }
     if !fit.missing_unused.is_empty() {
@@ -454,16 +467,27 @@ mod tests {
         let anims = rig([b, b], &[&[4, 60], &[], &[], &[], &[], &[70]]);
         let f = fit(&body, &anims);
         assert!(!f.refused() && !f.exact());
-        // 60 is ignored: the animations' own body has no bone 60
+        // 60 is ignored: neither body has a bone 60
         assert_eq!(
             f.missing_unused,
             BoneTracks::from([(70, BTreeSet::from([7]))])
         );
+        assert!(f.foreign.is_empty());
         let w = warnings(&f, "Mario", "Luigi");
         assert_eq!(w.len(), 2, "{w:?}");
         assert!(w[0].ends_with("36 (track 7)"), "{w:?}");
     }
 
+    #[test]
+    fn tracks_the_animations_own_body_ignores_warn_where_they_bind() {
+        let a: &[(u16, Option<usize>)] = &[(0, None), (4, Some(0)), (47, Some(0))];
+        let b: &[(u16, Option<usize>)] = &[(0, None), (4, Some(0))];
+        // the bank has a track for 47, which its own body lacks but the clone body has
+        let f = fit(&rig([a, a], &[&[4, 47]]), &rig([b, b], &[&[4, 47]]));
+        assert!(!f.refused());
+        assert_eq!(f.foreign, BoneTracks::from([(47, BTreeSet::from([2]))]));
+        assert!(warnings(&f, "Peach", "Toad")[0].starts_with("Peach bones moved by tracks"));
+    }
     #[test]
     fn reparented_bones_warn() {
         let a: &[(u16, Option<usize>)] = &[(0, None), (90, Some(0)), (4, Some(0))];

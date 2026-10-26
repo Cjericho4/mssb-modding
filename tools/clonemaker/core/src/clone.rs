@@ -387,7 +387,9 @@ pub fn clone(
         rc.resolve(&regions)?;
     }
     let painted = custom_textures::load_for_clones(&args.textures, &src_body, c, &slots, log)?;
-    // Before any descriptor changes: the check reads the clean tables.
+    // Before any descriptor changes: the check, and the copies below, read the clean tables (an
+    // "Animations from" character can itself be a clone slot whose rows get replaced).
+    let clean = dol.clone();
     let anim_plan = anims::plan(
         &mut anims::Rigs::default(),
         &disc,
@@ -522,7 +524,7 @@ pub fn clone(
         let a = plan.anims;
         log_animations(plan, c, args.no_gameplay, log);
         for t in anims::ANIM_TRACKS {
-            let d = dol.desc(ADDR_SUBFILES, a * 19 + t)?;
+            let d = clean.desc(ADDR_SUBFILES, a * 19 + t)?;
             dol.set_desc(ADDR_SUBFILES, *s * 19 + t, d)?;
         }
         for (t, src_track) in src_tracks.iter().enumerate() {
@@ -562,7 +564,7 @@ pub fn clone(
         }
         // track 15's ARAM copy: fn_80021BBC plays it instead of disc track 15 once the ARAM
         // blob is loaded, so it must follow the disc banks (animations.md §1, §4 step 3)
-        let d = dol.desc(ADDR_MASTER, 432 + a)?;
+        let d = clean.desc(ADDR_MASTER, 432 + a)?;
         dol.set_desc(ADDR_MASTER, 432 + *s, d)?;
         let src_body_entry = dol.pair(c)?.0;
         if use_overlay {
@@ -627,7 +629,7 @@ pub fn clone(
             // The 15 DOL windows are frame numbers inside the playing clip, so they follow the
             // animations (see TIMING_ROWS).
             for k in 0..15 {
-                let b = dol
+                let b = clean
                     .read(ADDR_ANIMPARAMS + ((k * 54 + a) * 2) as u32, 2)?
                     .to_vec();
                 dol.write(ADDR_ANIMPARAMS + ((k * 54 + *s) * 2) as u32, &b)?;
@@ -732,6 +734,7 @@ pub fn clone(
                     (0x7f10, 2),
                 ]
             };
+            let clean_rel = rel.clone();
             for &(off, rs) in tables {
                 if off + 54 * rs > size {
                     return Err(Error::new(format!(
@@ -754,9 +757,9 @@ pub fn clone(
                 for plan in anim_plan.iter().filter(|p| p.anims != c) {
                     let a = plan.anims;
                     for &(off, rs, bytes) in TIMING_ROWS {
-                        rel.copy_within(
-                            base + off + a * rs..base + off + a * rs + bytes,
-                            base + off + plan.slot * rs,
+                        let row = base + off + plan.slot * rs;
+                        rel[row..row + bytes].copy_from_slice(
+                            &clean_rel[base + off + a * rs..base + off + a * rs + bytes],
                         );
                     }
                     lines.push(format!(

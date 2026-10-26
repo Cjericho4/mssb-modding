@@ -704,6 +704,8 @@ def anim_checks(cli, work, disc):
     anim_case(cli, work, disc, "mario-luigi", ["--source", "mario", "--slot", "29:blue", "--slot", "30:green"], [("29", "luigi")])
     anim_case(cli, work, disc, "toad-two", ["--source", "redtoad", "--slot", "30:blue", "--slot", "44:green", "--ui", "donor"],
               [("30", "luigi"), ("44", "babymario")])
+    # the animations' character is itself a clone slot: its retail banks and rows are used
+    anim_case(cli, work, disc, "from-a-slot", ["--source", "mario", "--slot", "29:blue", "--slot", "30:green"], [("30", "bluetoad")])
     anim_case(cli, work, disc, "no-gameplay", ["--source", "mario", "--slot", "29", "--no-gameplay"], [("29", "wario")])
     anim_case(cli, work, disc, "same-banks", ["--source", "bluetoad", "--slot", "30"], [("30", "redtoad")], same=True)
     anim_case(cli, work, disc, "missing-bones", ["--source", "mario", "--slot", "29"], [("29", "dk")],

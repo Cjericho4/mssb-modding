@@ -66,6 +66,7 @@ fn main() -> Result<()> {
                     (!fit.still.is_empty(), "still"),
                     (!fit.reparented.is_empty(), "parent"),
                     (!fit.missing_unused.is_empty(), "7/8"),
+                    (!fit.foreign.is_empty(), "foreign"),
                 ]
                 .iter()
                 .filter(|k| k.0)
