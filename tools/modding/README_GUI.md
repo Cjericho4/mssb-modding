@@ -12,26 +12,23 @@ You need:
 
 ## 1. Get the program
 
-**Option A: download the ready-made `.exe` (no Python needed)**
+**Download it (Windows or Mac, nothing else to install)**
 
 1. You need a (free) GitHub account and to be signed in; GitHub only lets signed-in users download
    build files.
-2. Open https://github.com/Cjericho4/mssb-dtk/actions/workflows/build-gui.yml
-3. Click the newest run in the list that has a **green tick**.
-4. Scroll to the bottom of that page, to **Artifacts**, and click **MSSB-Clone-Maker**.  A `.zip`
-   downloads.
-5. Open the `.zip` and drag **MSSB-Clone-Maker.exe** to your Desktop (or any folder).
-6. Double-click **MSSB-Clone-Maker.exe**.  The first start takes a few seconds.  If Windows shows a
-   blue "Windows protected your PC" box, see *Troubleshooting* below.
+2. Open the build page for your system and click the newest run with a **green tick**:
+   * Windows: https://github.com/Cjericho4/mssb-dtk/actions/workflows/build-clonemaker.yml
+   * Mac: https://github.com/Cjericho4/mssb-dtk/actions/workflows/build-clonemaker-mac.yml
+3. Scroll to **Artifacts** and click **MSSB-Clone-Maker-Tauri** (Windows) or
+   **MSSB-Clone-Maker-Mac** (Mac). A `.zip` downloads.
+4. Windows: open the `.zip` and drag **MSSB-Clone-Maker.exe** to your Desktop, then double-click it.
+   If Windows shows a blue "Windows protected your PC" box, see *Troubleshooting* below.
+5. Mac: unzip it, then unzip the zip inside to get **MSSB Clone Maker.app**. The first open is
+   blocked because the app isn't signed with a paid Apple account: double-click it, click **Done**,
+   then **System Settings -> Privacy & Security -> Open Anyway**.
 
-(If there is no run yet, someone with access to the repository can start one: same page ->
-**Run workflow** -> **Run workflow**.)
-
-**Option B: run it with Python**
-
-1. Install Python 3 from https://www.python.org/downloads/windows/ (tick **"Add python.exe to PATH"**).
-2. Put `clone_gui.py` and `clone_character.py` (both from `tools/modding/`) in the same folder.
-3. Double-click `clone_gui.py`, or open PowerShell in that folder and run: `py clone_gui.py`
+**Or build it yourself** (any system with Rust from https://rustup.rs): clone this repository, then
+in `tools/clonemaker/app` run `cargo run --release`.
 
 ## 2. Choose your game
 
