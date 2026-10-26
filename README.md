@@ -14,10 +14,19 @@ or share yours.
 
 ## Download
 
-Windows and Mac builds are made by GitHub Actions on every change to `tools/clonemaker`:
-[Windows](https://github.com/Cjericho4/mssb-modding/actions/workflows/build-clonemaker.yml),
-[Mac](https://github.com/Cjericho4/mssb-modding/actions/workflows/build-clonemaker-mac.yml).
-Open the newest green run and download the artifact under **Artifacts**.
+Get the newest version from **[Releases](https://github.com/Cjericho4/mssb-modding/releases/latest)**:
+`MSSB-Clone-Maker.exe` (Windows) or `MSSB-Clone-Maker-Mac.zip` (Mac). The app tells you when a newer
+release is out. Test builds of every change are under
+[Actions](https://github.com/Cjericho4/mssb-modding/actions) (artifacts, GitHub login needed).
+
+Found a problem? [Report it](https://github.com/Cjericho4/mssb-modding/issues/new/choose).
+
+## Making a release
+
+1. Set the same new version in `tools/clonemaker/app/tauri.conf.json` and `tools/clonemaker/app/Cargo.toml`, commit and push.
+2. `git tag v0.2.0 && git push origin v0.2.0`. Both build workflows check the tag matches the version,
+   run the tests and attach the Windows exe and the Mac zip to the release `v0.2.0`.
+3. Edit the release notes on GitHub (known issues!).
 
 ## How it relates to mssb-dtk
 

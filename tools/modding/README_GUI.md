@@ -14,16 +14,12 @@ You need:
 
 **Download it (Windows or Mac, nothing else to install)**
 
-1. You need a (free) GitHub account and to be signed in; GitHub only lets signed-in users download
-   build files.
-2. Open the build page for your system and click the newest run with a **green tick**:
-   * Windows: https://github.com/Cjericho4/mssb-modding/actions/workflows/build-clonemaker.yml
-   * Mac: https://github.com/Cjericho4/mssb-modding/actions/workflows/build-clonemaker-mac.yml
-3. Scroll to **Artifacts** and click **MSSB-Clone-Maker-Tauri** (Windows) or
-   **MSSB-Clone-Maker-Mac** (Mac). A `.zip` downloads.
-4. Windows: open the `.zip` and drag **MSSB-Clone-Maker.exe** to your Desktop, then double-click it.
+1. Open **https://github.com/Cjericho4/mssb-modding/releases/latest** (no account needed).
+2. Under **Assets**, click **MSSB-Clone-Maker.exe** (Windows) or **MSSB-Clone-Maker-Mac.zip** (Mac).
+3. The app shows a **New version** button in its header when a newer release is out.
+4. Windows: drag **MSSB-Clone-Maker.exe** to your Desktop, then double-click it.
    If Windows shows a blue "Windows protected your PC" box, see *Troubleshooting* below.
-5. Mac: unzip it, then unzip the zip inside to get **MSSB Clone Maker.app**. The first open is
+5. Mac: double-click the zip to get **MSSB Clone Maker.app** (a test build from Actions is zipped twice). The first open is
    blocked because the app isn't signed with a paid Apple account: double-click it, click **Done**,
    then **System Settings -> Privacy & Security -> Open Anyway**.
 

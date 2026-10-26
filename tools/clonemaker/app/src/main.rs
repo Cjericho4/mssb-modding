@@ -110,6 +110,19 @@ fn fit_to_screen(window: &tauri::WebviewWindow) -> tauri::Result<()> {
     Ok(())
 }
 
+/// Opens the releases page in the browser (fixed URL: the page cannot open anything else).
+#[tauri::command]
+fn open_releases() {
+    const URL: &str = "https://github.com/Cjericho4/mssb-modding/releases/latest";
+    #[cfg(windows)]
+    let mut cmd = std::process::Command::new("explorer");
+    #[cfg(target_os = "macos")]
+    let mut cmd = std::process::Command::new("open");
+    #[cfg(all(unix, not(target_os = "macos")))]
+    let mut cmd = std::process::Command::new("xdg-open");
+    let _ = cmd.arg(URL).spawn();
+}
+
 fn main() {
     let options = selftest::Options::from_args();
     tauri::Builder::default()
@@ -134,6 +147,7 @@ fn main() {
             cancel,
             export_textures,
             path_exists,
+            open_releases,
             selftest::launch_options,
             selftest::selftest_mark,
             selftest::selftest_report,

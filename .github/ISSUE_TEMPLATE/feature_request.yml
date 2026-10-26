@@ -1,0 +1,16 @@
+name: Idea or request
+description: Something the Clone Maker or the other tools should do
+labels: [enhancement]
+body:
+  - type: textarea
+    id: idea
+    attributes:
+      label: What would you like?
+      description: What you want to make or change in the game, and how you imagine doing it.
+    validations:
+      required: true
+  - type: textarea
+    id: why
+    attributes:
+      label: Anything else?
+      description: Examples, pictures, or other mods that do something similar.

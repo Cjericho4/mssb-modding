@@ -1,0 +1,70 @@
+name: Bug report
+description: Something went wrong in the Clone Maker or in the game after patching
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for testing! Please don't attach game files (ISOs, extracted files): screenshots and the log text are enough.
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened?
+      description: What you expected, and what you saw instead.
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: How to make it happen
+      description: Character to clone, the slots and colours, own textures or not, and the Advanced options you changed.
+      placeholder: |
+        1. Clone Mario onto Blue Toad, colour Blue
+        2. Untick "Show clones as Mario"
+        3. Play a match with no Mario
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Clone Maker version
+      description: The release (e.g. v0.1.0), or the build run link if you downloaded an artifact.
+    validations:
+      required: true
+  - type: dropdown
+    id: os
+    attributes:
+      label: Your computer
+      options: [Windows, Mac (Apple Silicon), Mac (Intel), Linux]
+    validations:
+      required: true
+  - type: dropdown
+    id: where
+    attributes:
+      label: Where does the problem show?
+      options: [In the Clone Maker window, In the game (Project Rio), In the game (Dolphin), In the game (real GameCube / Wii)]
+    validations:
+      required: true
+  - type: input
+    id: emulator
+    attributes:
+      label: Emulator version
+      placeholder: Project Rio 2.2.0
+  - type: textarea
+    id: log
+    attributes:
+      label: Log
+      description: Copy the text from the Clone Maker's Log box.
+      render: text
+  - type: textarea
+    id: shots
+    attributes:
+      label: Screenshots
+      description: Drag pictures here.
+  - type: checkboxes
+    id: game
+    attributes:
+      label: Game
+      options:
+        - label: My game is the USA version (GYQE01) and the Clone Maker said it was OK
+          required: true

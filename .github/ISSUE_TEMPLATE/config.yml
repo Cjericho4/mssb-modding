@@ -1,0 +1,5 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Game research and the decompilation
+    url: https://github.com/Cjericho4/mssb-dtk/issues
+    about: Questions about how the game works (tables, formats, code) belong in mssb-dtk.

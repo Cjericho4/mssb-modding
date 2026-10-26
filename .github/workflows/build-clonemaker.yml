@@ -8,10 +8,14 @@ name: Build Clone Maker (Tauri, Windows)
 on:
   push:
     branches: [main, 'tauri-*']
+    tags: ['v*']   # a v1.2.3 tag also attaches the build to that GitHub release
     paths:
       - tools/clonemaker/**
       - .github/workflows/build-clonemaker.yml
   workflow_dispatch:
+
+permissions:
+  contents: write   # create the release on a tag
 
 jobs:
   build:
@@ -67,6 +71,19 @@ jobs:
         if (-not $p.WaitForExit(300000)) { Stop-Process -Id $p.Id -Force; throw "the self-test did not finish in 5 minutes" }
         Get-Content selftest.log
         if ($p.ExitCode -ne 0) { throw "MSSB-Clone-Maker.exe --selftest exited with $($p.ExitCode)" }
+
+    - name: Tag matches the app version
+      if: startsWith(github.ref, 'refs/tags/v')
+      run: |
+        $v = (Get-Content tauri.conf.json | ConvertFrom-Json).version
+        if ("v$v" -ne "${{ github.ref_name }}") { throw "tag ${{ github.ref_name }} but tauri.conf.json says $v" }
+
+    - name: Attach to the release
+      if: startsWith(github.ref, 'refs/tags/v')
+      uses: softprops/action-gh-release@v2
+      with:
+        files: tools/clonemaker/app/target/release/MSSB-Clone-Maker.exe
+        generate_release_notes: true
 
     - name: Upload the .exe
       uses: actions/upload-artifact@v4

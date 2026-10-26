@@ -579,8 +579,28 @@ async function main() {
   });
 
   const options = await invoke("launch_options");
+  if (!options.selftest) checkForUpdate();
   if (options.selftest) {
     await import("./selftest.js").then((m) => m.run(options, { state, startLoad, exportTextures, setRowTextures }));
+  }
+}
+
+/** Show a header button when GitHub has a newer release; quietly does nothing offline. */
+async function checkForUpdate() {
+  const parse = (v) => v.replace(/^v/, "").split(/[.-]/).slice(0, 3).map(Number);
+  const newer = (a, b) => { for (let i = 0; i < 3; i++) if (a[i] !== b[i]) return a[i] > b[i]; return false; };
+  try {
+    const res = await fetch("https://api.github.com/repos/Cjericho4/mssb-modding/releases/latest");
+    if (!res.ok) return;
+    const tag = (await res.json()).tag_name;
+    if (!newer(parse(tag), parse(await window.__TAURI__.app.getVersion()))) return;
+    const button = $("update");
+    button.textContent = `New version ${tag}`;
+    button.title = "Open the download page";
+    button.hidden = false;
+    button.addEventListener("click", () => invoke("open_releases"));
+  } catch {
+    // offline or rate-limited: try again next start
   }
 }
 
