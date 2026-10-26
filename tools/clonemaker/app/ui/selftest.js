@@ -138,12 +138,29 @@ export async function run(options, app) {
     regionBoxes()[0].click();
     regionBoxes()[1].click();
 
-    // another source keeps the rows, then back
+    // animations from another character: only skeletons that fit are offered
+    const animSelect = (i = 0) => rows()[i].querySelector("select.anims");
+    const animIds = [...animSelect().options].map((o) => Number(o.value));
+    check(animSelect().options[0].textContent === "Mario (own)" && animSelect().value === "0", "a row starts with Mario's own animations");
+    check(animIds.includes(1) && animIds.includes(13) && !animIds.includes(2) && !animIds.includes(29),
+      "Luigi's and the Toads' animations are offered (once), DK's (bones Mario lacks) are not: " + animIds.join());
+    choose(animSelect(1), 1);
+    await waitFor(() => caption().endsWith("; animations from Luigi"), "the caption names the animations");
+    check(rows()[1].querySelector("input").checked && animSelect(1).title.includes("Some bones differ"), "the row previews and explains: " + animSelect(1).title);
+    await shot("animations");
+    choose(animSelect(1), 0);
+    await waitFor(() => caption().endsWith(")") && rows()[1].querySelector("input").checked, "own animations again");
+    choose(animSelect(0), 1);
+
+    // another source keeps the rows (a choice equal to the new source becomes its own), then back
     choose($("source"), 1);
     await waitFor(() => caption().includes("of Luigi") && $("preview-chip").textContent === "Luigi", "Luigi's preview");
     check(rows().length === 4 && $("chk-stats").nextElementSibling.textContent === "Give clones Luigi's stats", "Luigi keeps the rows");
+    check(animSelect().value === "1" && animSelect().options[0].textContent === "Luigi (own)" && app.state.rows[0].anims === null,
+      "Luigi's own animations");
     choose($("source"), 0);
     await waitFor(() => caption().includes("of Mario"), "Mario's preview again");
+    choose(animSelect(), 1);
 
     // colours and preview pick
     choose(rows()[1].querySelectorAll("select")[1], "pink");
@@ -220,6 +237,8 @@ export async function run(options, app) {
     check($("dialog-text").textContent.startsWith("Saved to " + inDir("My Clones.iso") + ".\n\nOpen it in Dolphin"), "done text");
     check($("dialog-text").textContent.includes("In the game, put several Toads on one team"), "done hint");
     check(logHas("1 of 9 PNGs") && logHas("track 0: painted t01") && logHas("ARAM body: painted t01"), "the painted texture went in");
+    check(logHas("animations: Luigi's (tracks 2-18 and ARAM master[461]") && logHas("animation frame rows of BlueToad"),
+      "the first clone plays Luigi's animations");
     await shot("done");
     dialogButton("OK").click();
     check($("pill").textContent === "Game created" && !$("btn-go").disabled, "Game created");

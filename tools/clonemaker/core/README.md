@@ -189,3 +189,46 @@ cargo run --release --manifest-path tools/clonemaker/core/Cargo.toml --example \
 ```
 
 Not covered yet: menu art and HUD portraits (they stay the recoloured source's).
+
+## Animations from (#9)
+
+A clone always wears its source's body; `--anims SLOT:CHARACTER` (repeatable; `clones[].anims` in
+the window) makes it play another character's animations:
+
+```sh
+./tools/clonemaker/core/target/release/mssb-clone --disc orig/GYQE01 --source mario \
+  --slot 29:blue --anims 29:luigi --out .scratch/m --iso .scratch/m.iso
+```
+
+Only descriptors change: the slot's `lbl_800F1D78` tracks 2..18 and the ARAM copy of track 15
+(`master[432+slot]`) point at that character's retail banks; no shared file is rewritten. Retail
+banks fit the game's buffers: `fn_80018B74` sizes them from the largest bank of each kind over all
+54 characters. Without `--anims` (or with the source, or a character that shares every bank with
+it) the output is byte-identical to before.
+
+`src/anims.rs` checks the skeletons first, by bone ID, which is how the game binds a track to a bone
+(`ACTSetAnimation` → `ANIMGetTrackFromSequence`; mssb-dtk `.agent/animations.md` §3). For both body
+variants (tracks 0 and 1) and each bank it compares the bones the bank drives on its own character
+with the source's body. Bones the body lacks in a bank the game uses refuse the choice (before the
+game is copied); the same in tracks 7/8, which nothing is known to request, only warns. Bones the
+source's own animations move but the new ones don't ("they stay put") and driven bones with a
+different parent bone also warn, in the log (`animations: warning: ...`) and the dropdown's tooltip.
+Equal bone counts don't matter. `0xFFFF` is skipped (several unrelated bones share it).
+
+Timing that belongs to the clips follows the animations (`TIMING_ROWS` in `src/clone.rs`, with the
+evidence): the 15 DOL frame-event windows (`lbl_800FB798`), game.rel `0x7870` (runner clip frames)
+and bytes 0-1 of `0x7E34` (body-check clip frames). Hitboxes, charge frames `0x7690`, foot height
+`0x17000`, size, voice, attachment bones and model script stay the source's. `--no-gameplay` leaves
+all of them as the slot's own. The log says which were taken from where.
+
+Read-only roster matrix (exact / warned / refused for every body and animation set), the window's
+dropdown for one source, and the messages for one pair:
+
+```sh
+cargo run --release --manifest-path tools/clonemaker/core/Cargo.toml --example anim_matrix -- \
+  orig/GYQE01 --check --choices mario mario:luigi
+```
+
+`difftest.py --anims` runs each case with and without `--anims` and requires the outputs to differ
+only in those descriptors, windows and game.rel rows (plus the re-packed game.rel), and checks the
+refusals. `--help` stays the Python reference's, so the flag is documented here.

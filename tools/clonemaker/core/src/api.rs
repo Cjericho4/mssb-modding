@@ -1,4 +1,5 @@
 //! Window-facing commands and job events described by ../API.md.
+use crate::anims::{self, Rigs};
 use crate::binary::{Dol, fst_paths, u32_at};
 use crate::clone::{CloneArgs, CloneResult, absolute_path};
 use crate::colour::{Recolour, Region, hsv_to_rgb, rgb_to_hsv, source_regions};
@@ -145,6 +146,7 @@ pub fn default_rows(choices: &[SlotChoice]) -> Vec<CloneRow> {
             slot,
             colour: colour.into(),
             textures: None,
+            anims: None,
         })
         .collect()
 }
@@ -335,6 +337,7 @@ pub struct Game {
     /// Main DOL, cached for slot checks.
     pub dol: Dol,
     previews: HashMap<usize, SourcePreview>,
+    rigs: Rigs,
 }
 fn gui_disc(path: &Path) -> Result<Disc> {
     if path.is_dir() {
@@ -398,6 +401,7 @@ pub fn load_game(path: &Path) -> (Option<Game>, OpenGame) {
             disc,
             dol,
             previews: HashMap::new(),
+            rigs: Rigs::default(),
         })
     })();
     match result {
@@ -546,6 +550,9 @@ pub struct CloneRow {
     /// Folder of painted textures for this clone (`export_textures`), if any.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub textures: Option<PathBuf>,
+    /// "Animations from" (#9): the charID whose animations this clone plays; none = the source's.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub anims: Option<usize>,
 }
 /// Window job arguments from API.md.
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -590,6 +597,9 @@ pub fn validate_job(job: &Job, free_bytes: Option<u64>) -> Result<()> {
     check_id(job.source)?;
     for row in &job.clones {
         check_id(row.slot)?;
+        if let Some(a) = row.anims {
+            check_id(a)?;
+        }
     }
     for row in &job.clones {
         if job.clones.iter().filter(|r| r.slot == row.slot).count() > 1 {
@@ -812,6 +822,11 @@ pub fn run_job(job: &Job, emit: &dyn Fn(Event), cancel: &AtomicBool) -> Result<D
                 .iter()
                 .filter_map(|r| Some((r.slot, r.textures.clone()?)))
                 .collect(),
+            anims: job
+                .clones
+                .iter()
+                .filter_map(|r| Some((r.slot, r.anims?)))
+                .collect(),
             ..CloneArgs::default()
         };
         let mut log_error = None;
@@ -931,6 +946,9 @@ pub struct PreviewRequest {
     /// The row's painted texture folder; the after side then shows those instead of the colour.
     #[serde(default)]
     pub textures: Option<PathBuf>,
+    /// The row's "Animations from" character, named in the caption when it is not the source.
+    #[serde(default)]
+    pub anims: Option<usize>,
 }
 /// Before/after atlas images and the Python window's explanatory caption.
 #[derive(Serialize)]
@@ -941,6 +959,70 @@ pub struct Preview {
     pub after_png: String,
     /// Description of source, slot, colour and affected regions.
     pub caption: String,
+}
+/// One entry of a row's "Animations from" dropdown.
+#[derive(Debug, Serialize, PartialEq, Eq)]
+pub struct AnimChoice {
+    /// CharID to put in `clones[].anims` (for a family, its first member).
+    pub id: usize,
+    /// Displayed name; the source's own is first, marked "(own)".
+    pub label: String,
+    /// Whether every bone binds as on the animations' own character.
+    pub exact: bool,
+    /// What will look different, one line each (tooltip); empty when `exact`.
+    pub note: String,
+}
+/// "Animations from" choices for a source's clones: its own, then every other set of
+/// animation banks its body can wear (exact bone matches first, then those with warnings),
+/// refused sets left out.
+/// Characters that share every bank (colour families) are offered once, by family name.
+pub fn anim_choices(
+    disc: &crate::disc::Disc,
+    dol: &Dol,
+    rigs: &mut Rigs,
+    source: usize,
+) -> Result<Vec<AnimChoice>> {
+    check_id(source)?;
+    let body = rigs.get(disc, dol, source)?;
+    let mut seen = vec![body.vector.clone()];
+    let mut out = vec![AnimChoice {
+        id: source,
+        label: format!("{} (own)", pretty_name(source)),
+        exact: true,
+        note: String::new(),
+    }];
+    let mut warned = Vec::new();
+    for c in 0..54 {
+        let rig = rigs.get(disc, dol, c)?;
+        if seen.contains(&rig.vector) {
+            continue;
+        }
+        seen.push(rig.vector.clone());
+        let fit = anims::fit(&body, &rig);
+        if fit.refused() {
+            continue;
+        }
+        let fam = dol.family(c)?[0];
+        let name = if fam != 0 {
+            family_name(fam, false)
+        } else {
+            pretty_name(c)
+        };
+        let notes = anims::warnings(&fit, &pretty_name(source), &name);
+        let choice = AnimChoice {
+            id: c,
+            label: name,
+            exact: notes.is_empty(),
+            note: notes.join("\n"),
+        };
+        if choice.exact {
+            out.push(choice);
+        } else {
+            warned.push(choice);
+        }
+    }
+    out.extend(warned);
+    Ok(out)
 }
 /// Where `export_textures` wrote the PNGs, and how many.
 #[derive(Debug, Serialize)]
@@ -1018,6 +1100,13 @@ impl Core {
         let game = lock.as_mut().ok_or_else(|| ApiError {
             error: "Choose a game first.".into(),
         })?;
+        let moves = match request.anims {
+            Some(a) if a != request.source => {
+                check_id(a)?;
+                format!("; animations from {}", pretty_name(a))
+            }
+            _ => String::new(),
+        };
         let pv = game.preview(request.source)?;
         let before_png = base64::engine::general_purpose::STANDARD.encode(&pv.before_png);
         if let Some(folder) = &request.textures {
@@ -1029,7 +1118,7 @@ impl Core {
                 before_png,
                 after_png: base64::engine::general_purpose::STANDARD.encode(after),
                 caption: format!(
-                    "All {} textures of {}, before and as {} with your textures ({} painted)",
+                    "All {} textures of {}, before and as {} with your textures ({} painted){moves}",
                     pv.body.textures.len(),
                     pretty_name(request.source),
                     pretty_name(request.slot),
@@ -1046,7 +1135,7 @@ impl Core {
             before_png,
             after_png,
             caption: format!(
-                "All {} textures of {}, before and as {} in {} (changes: {})",
+                "All {} textures of {}, before and as {} in {} (changes: {}){moves}",
                 pv.body.textures.len(),
                 pretty_name(request.source),
                 pretty_name(request.slot),
@@ -1060,17 +1149,32 @@ impl Core {
         default_output(path)
     }
     /// Return null on success or the contract's friendly {error} object; painted texture
-    /// folders are checked against the source here, before the long job starts.
+    /// folders and "Animations from" skeletons are checked against the source here, before the
+    /// long job starts.
     pub fn validate_job(&self, job: &Job) -> Option<ApiError> {
         let folders = || -> Result<()> {
             validate_job(job, None)?;
-            if job.clones.iter().all(|r| r.textures.is_none()) {
+            let wanted: Vec<_> = job
+                .clones
+                .iter()
+                .filter_map(|r| Some((r.slot, r.anims?)))
+                .collect();
+            if job.clones.iter().all(|r| r.textures.is_none()) && wanted.is_empty() {
                 return Ok(());
             }
             let mut lock = self.game.lock().unwrap();
             let game = lock
                 .as_mut()
                 .ok_or_else(|| Error::new("Choose a game first.".into()))?;
+            let slots: Vec<_> = job.clones.iter().map(|r| r.slot).collect();
+            anims::plan(
+                &mut game.rigs,
+                &game.disc,
+                &game.dol,
+                job.source,
+                &slots,
+                &wanted,
+            )?;
             let body = &game.preview(job.source)?.body;
             for folder in job.clones.iter().filter_map(|r| r.textures.as_ref()) {
                 Painted::load(folder, body, &pretty_name(job.source))?;
@@ -1078,6 +1182,15 @@ impl Core {
             Ok(())
         };
         folders().err().map(Into::into)
+    }
+    /// "Animations from" choices for the source's clone rows (`anim_choices`); the first call
+    /// reads the bone tables of the whole roster (a fraction of a second).
+    pub fn anim_choices(&self, source: usize) -> std::result::Result<Vec<AnimChoice>, ApiError> {
+        let mut lock = self.game.lock().unwrap();
+        let game = lock.as_mut().ok_or_else(|| ApiError {
+            error: "Choose a game first.".into(),
+        })?;
+        Ok(anim_choices(&game.disc, &game.dol, &mut game.rigs, source)?)
     }
     /// Write the source's original body textures as PNGs into `<folder>/<Name> textures`.
     pub fn export_textures(
@@ -1200,7 +1313,9 @@ mod tests {
             serde_json::json!({"slot":29,"colour":"blue"})
         );
         let row: CloneRow =
-            serde_json::from_str(r#"{"slot":29,"colour":"blue","textures":"art"}"#).unwrap();
+            serde_json::from_str(r#"{"slot":29,"colour":"blue","textures":"art","anims":1}"#)
+                .unwrap();
         assert_eq!(row.textures, Some(PathBuf::from("art")));
+        assert_eq!(row.anims, Some(1));
     }
 }

@@ -97,6 +97,38 @@ pub fn decompress(data: &[u8], size: usize, lb: u32, rp: u32) -> Result<(Vec<u8>
     }
     Ok((out, reader.pos))
 }
+/// Expand only the first `size` bytes of a stream (a header or table at the start of a file);
+/// a copy that runs past them is cut short.
+pub fn decompress_prefix(data: &[u8], size: usize, lb: u32, rp: u32) -> Result<Vec<u8>> {
+    validate_bits(lb, rp)?;
+    let mut reader = BitReader {
+        data,
+        pos: 0,
+        buf: 0,
+        n: 0,
+    };
+    let mut out = Vec::with_capacity(size);
+    while out.len() < size {
+        if reader.read(1)? != 0 {
+            out.push(reader.read(8)? as u8);
+        } else {
+            let back = reader.read(lb)? + 1;
+            let count = reader.read(rp)? + 2;
+            if back > out.len() {
+                return Err(Error::new("bad back-reference".into()));
+            }
+            for _ in 0..count.min(size - out.len()) {
+                out.push(out[out.len() - back]);
+            }
+        }
+    }
+    Ok(out)
+}
+/// Compressed bytes that always hold the first `size` expanded bytes: a literal costs 9 bits,
+/// a copy at least 16 bits for 2 bytes; plus the word the bit reader fetches ahead.
+pub fn prefix_bound(size: usize) -> usize {
+    align((size * 9).div_ceil(8), 4) + 4
+}
 fn best(
     data: &[u8],
     pos: usize,
@@ -237,6 +269,21 @@ mod tests {
         assert_eq!(
             decompress(&[0; 4], 2, 11, 4).unwrap_err().message,
             "bad back-reference"
+        );
+    }
+    #[test]
+    fn prefix_of_a_stream() {
+        let data: Vec<u8> = (0..5000).map(|i| ((i * 7 + i / 13) % 251) as u8).collect();
+        let encoded = compress(&data, 11, 4, 48).unwrap();
+        for n in [0, 1, 2, 17, 300, 5000] {
+            let cut = &encoded[..prefix_bound(n).min(encoded.len())];
+            assert_eq!(decompress_prefix(cut, n, 11, 4).unwrap(), data[..n]);
+        }
+        let literals: Vec<u8> = (0..=255).collect();
+        let encoded = compress(&literals, 11, 4, 48).unwrap();
+        assert_eq!(
+            decompress_prefix(&encoded[..prefix_bound(100)], 100, 11, 4).unwrap(),
+            literals[..100]
         );
     }
     #[test]

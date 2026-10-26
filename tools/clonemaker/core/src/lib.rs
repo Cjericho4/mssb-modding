@@ -2,6 +2,7 @@
 #![forbid(unsafe_code)]
 #![deny(missing_docs)]
 
+pub mod anims;
 pub mod api;
 pub mod binary;
 pub mod cli;

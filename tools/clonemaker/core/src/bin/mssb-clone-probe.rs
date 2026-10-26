@@ -71,20 +71,21 @@ fn run(a: &[String]) -> Result<()> {
             let folder=Path::new(&a[2]);fs::create_dir_all(folder)?;
             let (game,_)=load_game(Path::new(&a[1]));let mut game=game.ok_or_else(||Error::new(status.message.clone()))?;
             let mut snapshot=serde_json::json!({"open":status,"sources":core.sources(),"output":default_output(Path::new(&a[1]))});
-            let mut source_info=Vec::new();let mut choices=Vec::new();let mut hints=Vec::new();
+            let mut source_info=Vec::new();let mut choices=Vec::new();let mut hints=Vec::new();let mut anims=Vec::new();
             for source in 0..54 {
                 source_info.push(core.source_info(source).map_err(|e|Error::new(e.error))?);
+                anims.push(core.anim_choices(source).map_err(|e|Error::new(e.error))?);
                 choices.push(donor_choices(&game.dol,source)?);
                 let rows=default_rows(choices.last().unwrap());let slots=rows.iter().map(|r|r.slot).collect::<Vec<_>>();hints.push(pick_hint(&game.dol,source,&slots,true)?);
                 let pv=game.preview(source)?;
                 fs::write(folder.join(format!("before-{source}.png")),&pv.before_png)?;
                 let selected=pv.regions.iter().enumerate().filter(|(_,r)|r.default).map(|(i,_)|i).collect::<Vec<_>>();
                 for (i,colour) in ["blue","green","#00ff00"].into_iter().enumerate() {
-                    let request=PreviewRequest{source,slot:slots[0],colour:colour.into(),keeplum:0.5,regions:selected.clone(),textures:None};let result=core.preview(&request).map_err(|e|Error::new(e.error))?;
+                    let request=PreviewRequest{source,slot:slots[0],colour:colour.into(),keeplum:0.5,regions:selected.clone(),textures:None,anims:None};let result=core.preview(&request).map_err(|e|Error::new(e.error))?;
                     fs::write(folder.join(format!("preview-{source}-{i}.json")),serde_json::to_vec(&result).unwrap())?;
                 }
             }
-            snapshot["source_info"]=serde_json::to_value(source_info).unwrap();snapshot["choices"]=serde_json::to_value(choices).unwrap();snapshot["hints"]=serde_json::to_value(hints).unwrap();
+            snapshot["source_info"]=serde_json::to_value(source_info).unwrap();snapshot["choices"]=serde_json::to_value(choices).unwrap();snapshot["hints"]=serde_json::to_value(hints).unwrap();snapshot["anim_choices"]=serde_json::to_value(anims).unwrap();
             fs::write(folder.join("snapshot.json"),serde_json::to_vec(&snapshot).unwrap())?;
         }
         Some("validate") if a.len()==3 => {

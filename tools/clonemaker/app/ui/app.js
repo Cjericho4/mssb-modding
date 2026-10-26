@@ -24,9 +24,10 @@ const state = {
   game: null,          // path of a game that passed its checks
   sources: [],         // [{ id, name }]
   info: null,          // source_info of the shown source: { regions, slots, default_rows }
+  animChoices: [],     // anim_choices of the shown source: [{ id, label, exact, note }], its own first
   infoSource: null,
   infoSeq: 0,
-  rows: [],            // { id, slot, colour, textures, el }
+  rows: [],            // { id, slot, colour, textures, anims (null: the source's own), el }
   rowSeq: 0,
   previewRow: null,
   previewSeq: 0,
@@ -175,15 +176,22 @@ async function startLoad(path) {
 async function loadSource(reset) {
   const src = sourceId(), seq = ++state.infoSeq;
   if (state.infoSource !== src) showRegions(null, `Finding ${sourceName(src)}'s colours…`);
-  let info;
+  let info, anims;
   try {
     info = await invoke("source_info", { source: src });
   } catch (e) {
     if (seq === state.infoSeq) showRegions(null, `No preview for ${sourceName(src)}: ${e.error}`);
     return;
   }
+  try {
+    anims = await invoke("anim_choices", { source: src });
+  } catch (e) {
+    anims = [{ id: src, label: `${sourceName(src)} (own)`, exact: true, note: "" }];
+    log(`animations: ${e.error ?? e}`);
+  }
   if (seq !== state.infoSeq || !state.game) return;
   state.info = info;
+  state.animChoices = anims;
   state.infoSource = src;
   showRegions(info.regions, `${sourceName(src)} has no colours that can be changed.`);
   await serial(() => rebuildRows(reset));
@@ -231,7 +239,7 @@ async function rebuildRows(reset) {
       const slot = valid.has(r.slot) && !used.includes(r.slot)
         ? r.slot : await invoke("next_free_slot", { source: sourceId(), used });
       if (slot !== null) {
-        wanted.push({ slot, colour: r.colour });
+        wanted.push({ slot, colour: r.colour, anims: r.anims });
         used.push(slot);
       }
     }
@@ -240,6 +248,7 @@ async function rebuildRows(reset) {
   state.rows.forEach((row, i) => {
     fillSlots(row);
     setRow(row, wanted[i].slot, wanted[i].colour);
+    setRowAnims(row, wanted[i].anims ?? null);
   });
   for (const w of wanted.slice(state.rows.length)) await addRow(w.slot, w.colour);
   if (state.rows.length && !state.rows.some((r) => r.id === state.previewRow)) selectPreviewRow(state.rows[0]);
@@ -248,6 +257,25 @@ async function rebuildRows(reset) {
 
 function fillSlots(row) {
   row.slotSelect.replaceChildren(...state.info.slots.map((s) => el("option", { value: s.id, textContent: s.label })));
+}
+
+/** The row's "Animations" dropdown: the source's own, exact bone matches, then a group of
+ *  characters whose animations fit with warnings (the core leaves out the ones that don't fit). */
+function setRowAnims(row, anims) {
+  const own = sourceId();
+  const choices = state.animChoices;
+  if (!choices.some((c) => c.id === anims) || anims === own) anims = null;
+  const option = (c) => el("option", { value: c.id, textContent: c.label, title: c.note });
+  const warned = choices.filter((c) => !c.exact);
+  const opts = choices.filter((c) => c.exact).map(option);
+  if (warned.length) opts.push(el("optgroup", { label: "Some bones differ" }, warned.map(option)));
+  row.animSelect.replaceChildren(...opts);
+  row.anims = anims;
+  row.animSelect.value = String(anims ?? own);
+  const chosen = choices.find((c) => c.id === (anims ?? own));
+  row.animSelect.title = chosen && chosen.note
+    ? `Animations from ${chosen.label}. Some bones differ:\n${chosen.note}`
+    : "Whose animations this clone plays (only characters whose bones fit are listed)";
 }
 
 function fillColours(row) {
@@ -284,22 +312,28 @@ async function addRow(slot = null, colour = null) {
   row.slotSelect = el("select");
   row.colourSelect = el("select");
   row.swatch = el("div", { className: "swatch" });
+  row.animSelect = el("select", { className: "anims" });
   row.texturesPick = el("button", { className: "pick" });
   row.texturesClear = el("button", { className: "icon clear", textContent: "×", title: "Stop using these textures" });
   row.texturesBox = el("div", { className: "textures" }, [row.texturesPick, row.texturesClear]);
   row.remove = el("button", { className: "icon remove", textContent: "×", title: "Remove this clone" });
-  row.el = el("div", { className: "clone-row" }, [row.radio, row.slotSelect, row.colourSelect, row.swatch, row.texturesBox, row.remove]);
+  row.el = el("div", { className: "clone-row" }, [row.radio, row.slotSelect, row.colourSelect, row.swatch, row.animSelect, row.texturesBox, row.remove]);
   row.radio.addEventListener("change", () => selectPreviewRow(row, true));
   row.slotSelect.addEventListener("change", () => {
     row.slot = Number(row.slotSelect.value);
     schedulePreview();
   });
   row.colourSelect.addEventListener("change", () => colourChanged(row));
+  row.animSelect.addEventListener("change", () => {
+    setRowAnims(row, Number(row.animSelect.value));
+    selectPreviewRow(row, true);
+  });
   row.remove.addEventListener("click", () => removeRow(row));
   row.texturesPick.addEventListener("click", () => pickRowTextures(row));
   row.texturesClear.addEventListener("click", () => setRowTextures(row, null));
   fillSlots(row);
   setRow(row, slot, colour);
+  setRowAnims(row, null);
   setRowTextures(row, null);
   state.rows.push(row);
   $("rows").append(row.el);
@@ -409,7 +443,7 @@ async function requestPreview() {
   if (!state.game || !row || state.infoSource !== sourceId()) return;
   const src = sourceId(), seq = ++state.previewSeq;
   if (!state.previewed.has(src)) $("preview-caption").textContent = `Loading ${sourceName(src)}'s textures…`;
-  const request = { source: src, slot: row.slot, colour: row.colour, keeplum: keeplum(), regions: tickedRegions(), textures: row.textures };
+  const request = { source: src, slot: row.slot, colour: row.colour, keeplum: keeplum(), regions: tickedRegions(), textures: row.textures, anims: row.anims };
   let res, failure;
   try {
     res = await invoke("preview", { request });
@@ -467,7 +501,12 @@ function makeJob() {
     game: $("game-path").value,
     output: $("out-path").value.trim(),
     source: sourceId(),
-    clones: state.rows.map((r) => (r.textures ? { slot: r.slot, colour: r.colour, textures: r.textures } : { slot: r.slot, colour: r.colour })),
+    clones: state.rows.map((r) => {
+      const clone = { slot: r.slot, colour: r.colour };
+      if (r.textures) clone.textures = r.textures;
+      if (r.anims !== null) clone.anims = r.anims;
+      return clone;
+    }),
     keeplum: keeplum(),
     regions: tickedRegions(),
     ui_source: $("chk-ui").checked,

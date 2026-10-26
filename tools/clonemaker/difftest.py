@@ -617,6 +617,101 @@ def gui_jobs(probe, work, disc):
         source_iso.unlink(missing_ok=True)
 
 
+# --- #9 "Animations from": no Python reference; each case is checked against the same Rust job
+# without --anims, which must differ only where animations.md / clone.rs TIMING_ROWS say.
+ANIMPARAMS = 0x800FB798     # main.dol: 15 x s16[54] frame-event windows
+ANIM_REL_ROWS = [(0x7870, 6, 6), (0x7E34, 4, 2)]  # game.rel .data: (table, row size, bytes from the animations)
+
+
+def anim_case(cli, work, disc, label, opts, anims, expect_error=None, same=False):
+    """Run the Rust CLI with and without the --anims options and compare the two extractions."""
+    import struct
+    import clone_character as cc
+    plain, moved = work / (label + "-plain"), work / (label + "-anims")
+    extra = sum((["--anims", "%s:%s" % pair] for pair in anims), [])
+    try:
+        proc = subprocess.run([str(x) for x in [cli, "--disc", disc, *opts, *extra, "--out", moved]],
+                              stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        if expect_error:
+            assert proc.returncode and expect_error in proc.stderr + proc.stdout, (label, proc.stderr)
+            assert not moved.exists(), label + ": refused before copying the game"
+            print("PASS anims %s refused: %s" % (label, (proc.stderr + proc.stdout).strip().splitlines()[-1]), flush=True)
+            return
+        assert proc.returncode == 0, (label, proc.stderr)
+        base = run([cli, "--disc", disc, *opts, "--out", plain])
+        anim_lines = [l for l in proc.stdout.splitlines() if l.startswith("  animations: ")]
+        if same:
+            compare_trees(plain, moved)
+            assert any("shares every bank" in l for l in anim_lines), (label, "log")
+            print("PASS anims %s: same banks as the source, byte-identical" % label, flush=True)
+            return
+        pa, pb = cc.Disc(plain), cc.Disc(moved)
+        da = cc.Dol((pa.sys / "main.dol").read_bytes())
+        db = cc.Dol((pb.sys / "main.dol").read_bytes())
+        od = cc.Dol((Path(disc) / "sys/main.dol").read_bytes())
+        no_gameplay = "--no-gameplay" in opts
+        allowed = [(da.off(cc.ADDR_REL_DESCS[1], 16), da.off(cc.ADDR_REL_DESCS[1], 16) + 16)]
+        rel_rows = []
+        for slot_name, char in anims:
+            s, a = cc.parse_char(slot_name), cc.parse_char(char)
+            for t in range(2, 19):
+                assert db.desc(cc.ADDR_SUBFILES, s * 19 + t) == od.desc(cc.ADDR_SUBFILES, a * 19 + t), (label, "track", t)
+                o = da.off(cc.ADDR_SUBFILES + (s * 19 + t) * 16, 16)
+                allowed.append((o, o + 16))
+            assert db.desc(cc.ADDR_MASTER, 432 + s) == od.desc(cc.ADDR_MASTER, 432 + a), (label, "master[432+slot]")
+            o = da.off(cc.ADDR_MASTER + (432 + s) * 16, 16)
+            allowed.append((o, o + 16))
+            for k in range(15):
+                o = da.off(ANIMPARAMS + (k * 54 + s) * 2, 2)
+                want = od.data[od.off(ANIMPARAMS + (k * 54 + (s if no_gameplay else a)) * 2, 2):][:2]
+                assert db.data[o:o + 2] == want, (label, "window", k)
+                allowed.append((o, o + 2))
+            rel_rows.append((s, a))
+        assert len(da.data) == len(db.data)
+        chunked_equal(pa.sys / "main.dol", pb.sys / "main.dol", allowed, label + " main.dol")
+        off = da.desc(cc.ADDR_REL_DESCS[1], 0)[2]
+        ends = sorted(da.desc(x, 0)[2] for x in cc.ADDR_REL_DESCS) + [(pa.files / "aaaa.dat").stat().st_size]
+        chunked_equal(pa.files / "aaaa.dat", pb.files / "aaaa.dat", [(off, min(e for e in ends if e > off))], label + " aaaa.dat")
+        ga, gb = bytearray(cc.load_rel(pa, da, 1)), cc.load_rel(pb, db, 1)
+        orig = cc.load_rel(cc.Disc(disc), od, 1)
+        base_off, _ = cc.rel_data_section(bytearray(orig))
+        for s, a in rel_rows:
+            for table, size, n in ANIM_REL_ROWS:
+                o = base_off + table + s * size
+                want = bytes(ga[o:o + size]) if no_gameplay else orig[base_off + table + a * size:][:n] + bytes(ga[o + n:o + size])
+                assert gb[o:o + size] == want, (label, "game.rel 0x%X" % table)
+                ga[o:o + size] = want
+        assert bytes(ga) == bytes(gb), label + ": game.rel differs outside the animation rows"
+        for name in ("files/ZZZZ.dat", "sys/fst.bin"):
+            compare_files(plain / name, moved / name)
+        names = {p.relative_to(plain) for p in plain.rglob("*") if p.is_file()}
+        assert names == {p.relative_to(moved) for p in moved.rglob("*") if p.is_file()}, label + ": file sets"
+        for p in sorted(names):
+            if str(p) not in ("sys/main.dol", "files/aaaa.dat"):
+                compare_files(plain / p, moved / p, plain)
+        # the log: the plain job's lines plus the animation lines (the game.rel line gains a part)
+        extra_lines = [l for l in proc.stdout.replace(str(moved), str(plain)).splitlines() if l not in base.splitlines()]
+        assert all(l.startswith("  animations: ") or l.startswith("game.rel: ") for l in extra_lines), (label, extra_lines)
+        assert len(anim_lines) >= 2 * len(anims), (label, anim_lines)
+        print("PASS anims %s: %d clone(s) moved, rest byte-identical (%d log lines)" % (label, len(anims), len(anim_lines)), flush=True)
+    finally:
+        for p in (plain, moved):
+            if p.exists():
+                shutil.rmtree(p)
+
+
+def anim_checks(cli, work, disc):
+    anim_case(cli, work, disc, "mario-luigi", ["--source", "mario", "--slot", "29:blue", "--slot", "30:green"], [("29", "luigi")])
+    anim_case(cli, work, disc, "toad-two", ["--source", "redtoad", "--slot", "30:blue", "--slot", "44:green", "--ui", "donor"],
+              [("30", "luigi"), ("44", "babymario")])
+    anim_case(cli, work, disc, "no-gameplay", ["--source", "mario", "--slot", "29", "--no-gameplay"], [("29", "wario")])
+    anim_case(cli, work, disc, "same-banks", ["--source", "bluetoad", "--slot", "30"], [("30", "redtoad")], same=True)
+    anim_case(cli, work, disc, "missing-bones", ["--source", "mario", "--slot", "29"], [("29", "dk")],
+              expect_error="Donkey Kong's animations move bones that Mario's body does not have")
+    anim_case(cli, work, disc, "not-a-clone", ["--source", "mario", "--slot", "29"], [("30", "luigi")],
+              expect_error="not one of the clone slots")
+
+
 def grid_cases(full):
     import test_matrix as tm
     yield "default", []
@@ -755,7 +850,7 @@ def clone_grid(cli, work, disc, full, jobs):
 def main():
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--disc", type=Path, default=ROOT / "orig/GYQE01")
-    for flag in ("synthetic", "codecs", "helpers", "iso", "grid", "full-grid", "voice-grid", "sound", "textures", "api", "gui", "cli"):
+    for flag in ("synthetic", "codecs", "helpers", "iso", "grid", "full-grid", "voice-grid", "sound", "textures", "api", "gui", "cli", "anims"):
         ap.add_argument("--" + flag, action="store_true")
     ap.add_argument("--jobs", type=int, default=3, help="independent clone comparisons in parallel")
     ap.add_argument("--ram-isos", action="store_true", help="Linux: store clone comparison ISOs in anonymous RAM files via scratch symlinks")
@@ -775,7 +870,7 @@ def main():
     scratch = ROOT / ".scratch"
     scratch.mkdir(exist_ok=True)
     os.environ["TMPDIR"] = str(scratch)
-    if not any((args.synthetic, args.codecs, args.helpers, args.iso, args.grid, args.full_grid, args.voice_grid, args.sound, args.textures, args.api, args.gui, args.cli)):
+    if not any((args.synthetic, args.codecs, args.helpers, args.iso, args.grid, args.full_grid, args.voice_grid, args.sound, args.textures, args.api, args.gui, args.cli, args.anims)):
         args.synthetic = args.codecs = args.helpers = args.iso = True
     with tempfile.TemporaryDirectory(prefix="core-difftest-", dir=scratch) as tmp:
         work = Path(tmp)
@@ -801,6 +896,8 @@ def main():
             clone_grid(CORE / "target/release/mssb-clone", work, args.disc, args.full_grid, args.jobs)
         if args.voice_grid:
             clone_grid(CORE / "target/release/mssb-clone", work, args.disc, "voice", args.jobs)
+        if args.anims:
+            anim_checks(CORE / "target/release/mssb-clone", work, args.disc)
     return 0
 
 

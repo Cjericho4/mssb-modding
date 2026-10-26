@@ -28,6 +28,7 @@ const OPTIONS: &[&str] = &[
     "--dry-run",
     "--textures",
     "--export-textures",
+    "--anims",
 ];
 /// One parsed CLI action, sharing CloneArgs with the library patcher.
 pub enum Command {
@@ -106,6 +107,7 @@ pub fn parse(argv: &[String]) -> Result<Command> {
             "--colour-word",
             "--textures",
             "--export-textures",
+            "--anims",
         ]
         .contains(&key)
         {
@@ -154,6 +156,14 @@ pub fn parse(argv: &[String]) -> Result<Command> {
                     })?;
                     args.textures
                         .push((parse_char(slot)?, crate::normalize_path(Path::new(dir))));
+                }
+                "--anims" => {
+                    let (slot, from) = value.split_once(':').ok_or_else(|| {
+                        Error::new(format!(
+                            "argument --anims: expected SLOT:CHARACTER, got '{value}'"
+                        ))
+                    })?;
+                    args.anims.push((parse_char(slot)?, parse_char(from)?));
                 }
                 "--export-textures" => {
                     export_textures = Some(crate::normalize_path(Path::new(&value)));
@@ -298,6 +308,21 @@ pub fn execute(command: Command, log: &mut dyn FnMut(&str)) -> Result<()> {
                     Painted::load(folder, &body, &source)?;
                 }
             }
+            if !args.anims.is_empty() {
+                // check the skeletons before the long copy of the game
+                let disc = read_only_disc(&args.disc)?;
+                let dol = Dol::new(disc.system("main.dol")?)?;
+                let slots = crate::clone::donor_slots(&args.slots)?;
+                let source = parse_char(&args.source)?;
+                crate::anims::plan(
+                    &mut Default::default(),
+                    &disc,
+                    &dol,
+                    source,
+                    &slots,
+                    &args.anims,
+                )?;
+            }
             crate::clone::clone(&args, log, None)?;
         }
         Command::ExportTextures { disc, source, dir } => {
@@ -328,13 +353,17 @@ pub fn execute(command: Command, log: &mut dyn FnMut(&str)) -> Result<()> {
 /// The source's original in-match body, read straight from a folder or ISO (nothing extracted).
 fn read_only_body(disc: &Path, source: &str) -> Result<(usize, Gpc)> {
     let c = parse_char(source)?;
-    let disc = if disc.is_file() {
-        Disc::iso(disc)?
-    } else {
-        Disc::folder(disc)?
-    };
+    let disc = read_only_disc(disc)?;
     let dol = Dol::new(disc.system("main.dol")?)?;
     Ok((c, Gpc::new(disc.effective_body(&dol, c)?)?))
+}
+/// A folder or ISO opened for reading only (an ISO is not extracted).
+fn read_only_disc(disc: &Path) -> Result<Disc> {
+    if disc.is_file() {
+        Disc::iso(disc)
+    } else {
+        Disc::folder(disc)
+    }
 }
 /// Render an argparse-style usage error for the CLI's stderr.
 pub fn usage_error(error: &Error) -> String {
@@ -374,6 +403,20 @@ mod tests {
             parse(&argv("--disc d --source luigi --export-textures out")).unwrap(),
             Command::ExportTextures { source, .. } if source == "luigi"
         ));
+        let Command::Clone(args) = parse(&argv(
+            "--disc d --out o --slot 29 --anims 29:luigi --anims=BlueToad:0",
+        ))
+        .unwrap() else {
+            panic!()
+        };
+        assert_eq!(args.anims, vec![(29, 1), (29, 0)]);
+        assert!(
+            parse(&argv("--disc d --out o --anims luigi"))
+                .err()
+                .unwrap()
+                .message
+                .contains("expected SLOT:CHARACTER")
+        );
         assert!(
             parse(&argv("--disc d --out o --textures 29"))
                 .err()

@@ -1,4 +1,5 @@
 //! Assemble a complete clone patch using the reference's resource ordering and log messages.
+use crate::anims;
 use crate::binary::*;
 use crate::colour::{Recolour, source_regions};
 use crate::constants::*;
@@ -44,6 +45,9 @@ pub struct CloneArgs {
     pub dry_run: bool,
     /// Painted texture folders by donor slot (`custom_textures`), empty for recolours only.
     pub textures: Vec<(usize, PathBuf)>,
+    /// "Animations from" by donor slot (#9, `anims`): the charID whose ANIM banks that clone
+    /// plays; slots not listed play the source's.
+    pub anims: Vec<(usize, usize)>,
 }
 impl Default for CloneArgs {
     fn default() -> Self {
@@ -62,6 +66,7 @@ impl Default for CloneArgs {
             force: false,
             dry_run: false,
             textures: Vec::new(),
+            anims: Vec::new(),
         }
     }
 }
@@ -117,6 +122,16 @@ fn parse_slot(s: &str) -> Result<(usize, Recolour)> {
         parse_char(slot)?,
         Recolour::new(if rc.is_empty() { "hue=blue" } else { rc })?,
     ))
+}
+/// The donor slots of `--slot` specifications (the four Toad defaults when there are none).
+pub fn donor_slots(slots: &[String]) -> Result<Vec<usize>> {
+    if slots.is_empty() {
+        return Ok(vec![29, 30, 31, 32]);
+    }
+    slots
+        .iter()
+        .map(|s| parse_char(s.split_once(':').map_or(s.as_str(), |p| p.0)))
+        .collect()
 }
 fn names(clones: &[(usize, Recolour)]) -> String {
     clones
@@ -372,6 +387,15 @@ pub fn clone(
         rc.resolve(&regions)?;
     }
     let painted = custom_textures::load_for_clones(&args.textures, &src_body, c, &slots, log)?;
+    // Before any descriptor changes: the check reads the clean tables.
+    let anim_plan = anims::plan(
+        &mut anims::Rigs::default(),
+        &disc,
+        &dol,
+        c,
+        &slots,
+        &args.anims,
+    )?;
     let start = align(disc.file_size("ZZZZ.dat")? as usize, 0x800);
     let mut appendix = Appendix {
         start,
@@ -486,15 +510,19 @@ pub fn clone(
     } else {
         log("ui: donor (menus, HUD and announcer keep the donor's name/portrait/call-out)");
     }
-    for (s, rc) in &mut clones {
+    for ((s, rc), plan) in clones.iter_mut().zip(&anim_plan) {
         log(&format!(
             "clone -> slot {s} {}  ({}; recolours {})",
             CHAR_NAMES[*s],
             rc.spec,
             rc.describe()
         ));
-        for t in 2..19 {
-            let d = dol.desc(ADDR_SUBFILES, c * 19 + t)?;
+        // "Animations from" (#9): the clone's ANIM banks, the ARAM copy of track 15 and the
+        // frame-event windows below come from `a`; everything else from the source.
+        let a = plan.anims;
+        log_animations(plan, c, args.no_gameplay, log);
+        for t in anims::ANIM_TRACKS {
+            let d = dol.desc(ADDR_SUBFILES, a * 19 + t)?;
             dol.set_desc(ADDR_SUBFILES, *s * 19 + t, d)?;
         }
         for (t, src_track) in src_tracks.iter().enumerate() {
@@ -532,7 +560,9 @@ pub fn clone(
             let d = dol.desc(ADDR_MASTER, 54 + c * 7 + k)?;
             dol.set_desc(ADDR_MASTER, 54 + *s * 7 + k, d)?;
         }
-        let d = dol.desc(ADDR_MASTER, 432 + c)?;
+        // track 15's ARAM copy: fn_80021BBC plays it instead of disc track 15 once the ARAM
+        // blob is loaded, so it must follow the disc banks (animations.md §1, §4 step 3)
+        let d = dol.desc(ADDR_MASTER, 432 + a)?;
         dol.set_desc(ADDR_MASTER, 432 + *s, d)?;
         let src_body_entry = dol.pair(c)?.0;
         if use_overlay {
@@ -594,9 +624,11 @@ pub fn clone(
             dol.write(ADDR_JUMPTABLE + *s as u32 * 4, &src_case.to_be_bytes())?;
         }
         if !args.no_gameplay {
+            // The 15 DOL windows are frame numbers inside the playing clip, so they follow the
+            // animations (see TIMING_ROWS).
             for k in 0..15 {
                 let b = dol
-                    .read(ADDR_ANIMPARAMS + ((k * 54 + c) * 2) as u32, 2)?
+                    .read(ADDR_ANIMPARAMS + ((k * 54 + a) * 2) as u32, 2)?
                     .to_vec();
                 dol.write(ADDR_ANIMPARAMS + ((k * 54 + *s) * 2) as u32, &b)?;
             }
@@ -718,6 +750,21 @@ pub fn clone(
             } else {
                 "copied voice/hitbox/timing tables".into()
             });
+            if !args.no_gameplay {
+                for plan in anim_plan.iter().filter(|p| p.anims != c) {
+                    let a = plan.anims;
+                    for &(off, rs, bytes) in TIMING_ROWS {
+                        rel.copy_within(
+                            base + off + a * rs..base + off + a * rs + bytes,
+                            base + off + plan.slot * rs,
+                        );
+                    }
+                    lines.push(format!(
+                        "animation frame rows of {} (0x7870, 0x7E34 bytes 0-1) from {}",
+                        CHAR_NAMES[plan.slot], CHAR_NAMES[a]
+                    ));
+                }
+            }
         }
         if i == 2 {
             for (row, old, new) in &sound_moves {
@@ -878,6 +925,58 @@ pub fn clone(
     ));
     drop(temp);
     Ok(output_result(args, c, &clones))
+}
+/// Per-character timing that belongs to the **animations** rather than the body (#9), as
+/// (game.rel .data offset, row size, bytes from the start of the row taken from the animations'
+/// character). Evidence, mssb-dtk `.agent/stats.md` §6.1 and §7, `animations.md` §5:
+/// * the 15 DOL windows at 0x800FB798 (copied in the slot loop) are inclusive frame intervals
+///   and one exact frame **inside** clips 0x10/0x1A/0x1B (track 4), 0x30/0x32..0x34 (track 3) and
+///   0x62 (track 2), compared with the clip's frame in `fn_8001C234` → `fn_8004B208`. Retail rows
+///   are equal within every bank-sharing family, except Red Toad's skid window and Red Shy Guy's
+///   fielder-dive window against their colour variants.
+/// * 0x7870 s16[3]: [1] is the frame lead-off clip 0x35 resumes at, [2] the entry frame of runner
+///   clip 0x2E (`fn_3_631AC`); [0] the turn-around state's cutoff in frames (`fn_3_63874`), taken
+///   with its row (25 for every retail character but Peach, whose whole row differs).
+/// * 0x7E34 u8[4]: [0] entry frame of body-check clip 0x21, [1] the countdown at which looped
+///   clip 0x23 starts (`fn_3_60E90`). Bytes 2-3 (knock-back countdown, collision event frame;
+///   `fn_3_A96FC`) are gameplay and stay the source's (120 and 5 for all 54 in retail).
+///
+/// Kept with the source (body/gameplay): hitbox 0x6EF8, charge frames 0x7690 (a batter constant
+/// with no traced link to a clip frame), foot height 0x17000 (foot bones 0x1E/0x22 against the
+/// actor: body proportions), fielder hitbox/height 0x79B4/0x7F10, voice 0x8168, model scale,
+/// attachment-bone list and model script (DOL).
+const TIMING_ROWS: &[(usize, usize, usize)] = &[(0x7870, 6, 6), (0x7e34, 4, 2)];
+
+/// Log one clone's "Animations from" (nothing when it plays the source's own).
+fn log_animations(plan: &anims::Choice, c: usize, no_gameplay: bool, log: &mut dyn FnMut(&str)) {
+    if let Some(same) = plan.same_as_source {
+        log(&format!(
+            "  animations: {} shares every bank with {}; nothing to change",
+            CHAR_NAMES[same], CHAR_NAMES[c]
+        ));
+    }
+    if plan.anims == c {
+        return;
+    }
+    let a = CHAR_NAMES[plan.anims];
+    log(&format!(
+        "  animations: {a}'s (tracks 2-18 and ARAM master[{}] point at {a}'s banks; no file rewritten)",
+        432 + plan.slot
+    ));
+    log(&if no_gameplay {
+        format!(
+            "  animations: --no-gameplay: frame-event windows and game.rel timing rows stay {}'s",
+            CHAR_NAMES[plan.slot]
+        )
+    } else {
+        format!(
+            "  animations: frame-event windows and clip frame rows from {a}; hitboxes, charge, foot height, size and voice from {}",
+            CHAR_NAMES[c]
+        )
+    });
+    for w in &plan.warnings {
+        log(&format!("  animations: warning: {w}"));
+    }
 }
 /// `--ui donor`: the game loads the donor family's voice bank (`sound.(5 + u_D)`, by the donor's
 /// unique index) but plays the source's SFX ids. Rebuild each such bank with the source's sounds

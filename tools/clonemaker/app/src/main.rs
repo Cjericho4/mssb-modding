@@ -7,8 +7,8 @@ mod selftest;
 use std::path::PathBuf;
 
 use mssb_clone_core::api::{
-    ApiError, Core, Event, ExportedTextures, Job, OpenGame, Preview, PreviewRequest, Source,
-    SourceInfo,
+    AnimChoice, ApiError, Core, Event, ExportedTextures, Job, OpenGame, Preview, PreviewRequest,
+    Source, SourceInfo,
 };
 use tauri::{AppHandle, Emitter, LogicalSize, Manager, State};
 
@@ -36,6 +36,11 @@ fn sources(core: State<Core>) -> Vec<Source> {
 #[tauri::command]
 async fn source_info(app: AppHandle, source: usize) -> Result<SourceInfo, ApiError> {
     blocking(move |core| core.source_info(source), app).await
+}
+
+#[tauri::command]
+async fn anim_choices(app: AppHandle, source: usize) -> Result<Vec<AnimChoice>, ApiError> {
+    blocking(move |core| core.anim_choices(source), app).await
 }
 
 #[tauri::command]
@@ -139,6 +144,7 @@ fn main() {
             open_game,
             sources,
             source_info,
+            anim_choices,
             next_free_slot,
             preview,
             default_output,

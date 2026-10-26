@@ -46,7 +46,7 @@
   /* layout */
   --edge: 17px;
   --radius: 7px;
-  --row-cols: 53px minmax(0, 1fr) 136px 28px 148px 31px;
+  --row-cols: 53px minmax(0, 1fr) 108px 26px 112px 112px 31px;
 }
 
 *, *::before, *::after { box-sizing: border-box; }
