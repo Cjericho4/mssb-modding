@@ -1,4 +1,4 @@
-// The Clone Maker page: the same window as tools/modding/clone_gui.py's App, talking to the core
+// The Clone Maker page: the window of the retired Tk app (see tools/modding/clone_gui.py for its logic), talking to the core
 // through the commands and events of tools/clonemaker/API.md.
 "use strict";
 
@@ -97,7 +97,7 @@ function updateSourceLabels() {
   $("chk-stats-text").textContent = `Give clones ${n}'s stats`;
 }
 
-// ---------------------------------------------------------------- dialogs (gui_theme.Dialogs)
+// ---------------------------------------------------------------- dialogs
 /** buttons: [[text, value, primary]]; resolves with the value of the button pressed (Escape: the first). */
 function showDialog(title, message, chip, tone, buttons) {
   return new Promise((resolve) => {
