@@ -551,7 +551,13 @@ pub fn clone(
             dol.set_pair(*s, b, o)?;
             log("  ARAM body = source's (no recolour in the ARAM path)");
         }
-        for (addr, rs) in [(ADDR_GLOVE, 2), (ADDR_MODELMAP, 2), (ADDR_ROWKIND, 1)] {
+        // The model scale belongs with the body, so it is copied in every mode (#38).
+        for (addr, rs) in [
+            (ADDR_GLOVE, 2),
+            (ADDR_MODELMAP, 2),
+            (ADDR_ROWKIND, 1),
+            (ADDR_CHARSIZE, 8),
+        ] {
             let b = dol.read(addr + c as u32 * rs, rs as usize)?.to_vec();
             dol.write(addr + *s as u32 * rs, &b)?;
         }
@@ -664,6 +670,9 @@ pub fn clone(
                     (0x7870, 6),
                     (0x7e34, 4),
                     (0x17000, 4),
+                    // fielder hitbox and height, scaled by charSizeMultipliers (#38)
+                    (0x79b4, 0x10),
+                    (0x7f10, 2),
                 ]
             };
             for &(off, rs) in tables {

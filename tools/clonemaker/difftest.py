@@ -106,6 +106,8 @@ def compare_trees(a, b):
 # --- #29 voice: the intended differences from the frozen Python reference --------------------
 SOUND_GROUPS = 0x800EF508   # lbl_800EF508: sound.N descriptors; voice bank of unique index u = row 5 + u
 VOICE_BASE = 0x8168         # game.rel .data: u16 SFX base per charID
+CHARSIZE = 0x800E8300       # main.dol charSizeMultipliers: 54 x 2 f32 model scale (#38)
+FIELDING = [(0x79B4, 0x10), (0x7F10, 2)]  # game.rel .data, scaled by CHARSIZE (#38)
 
 
 def voice_plan(disc, opts):
@@ -128,7 +130,8 @@ def voice_plan(disc, opts):
 
 
 def voice_changes(plan):
-    return bool(plan["rows"]) or plan["no_gameplay"]
+    # every clone now differs on purpose: the model scale row (#38) is always copied
+    return True
 
 
 def chunked_equal(a, b, allowed, label):
@@ -192,11 +195,17 @@ def check_voice_tree(a, b, disc, plan, label):
     da = cc.Dol((pa.sys / "main.dol").read_bytes())
     db = cc.Dol((pb.sys / "main.dol").read_bytes())
     rows = plan["rows"]
-    rel_changed = [plan["no_gameplay"], bool(rows)]  # game.rel, challenge.rel
+    rel_changed = [True, bool(rows)]  # game.rel (0x8168 and #38 fielding rows), challenge.rel
     # main.dol: only the merged rows' sound descriptors and the re-packed RELs' descriptors
     allowed = [(da.off(SOUND_GROUPS + r * 16, 16), da.off(SOUND_GROUPS + r * 16, 16) + 16) for r in rows]
     allowed += [(da.off(cc.ADDR_REL_DESCS[1 + i], 16), da.off(cc.ADDR_REL_DESCS[1 + i], 16) + 16)
                 for i in range(2) if rel_changed[i]]
+    # #38: the clone rows of charSizeMultipliers hold the source's scale
+    src_size = da.data[da.off(CHARSIZE + plan["source"] * 8, 8):][:8]
+    for s in plan["slots"]:
+        o = da.off(CHARSIZE + s * 8, 8)
+        assert db.data[o:o + 8] == src_size, (label, "charSizeMultipliers slot", s)
+        allowed.append((o, o + 8))
     assert len(da.data) == len(db.data), label + ": main.dol size"
     chunked_equal(pa.sys / "main.dol", pb.sys / "main.dol", allowed, label + " main.dol")
     # aaaa.dat: byte-identical outside the re-packed RELs; inside them, the expanded RELs differ
@@ -219,7 +228,14 @@ def check_voice_tree(a, b, disc, plan, label):
     ga = bytearray(ga)
     for s in plan["slots"]:
         ga[base + VOICE_BASE + s * 2:base + VOICE_BASE + s * 2 + 2] = gb[base + VOICE_BASE + s * 2:base + VOICE_BASE + s * 2 + 2]
-    assert bytes(ga) == bytes(gb), label + ": game.rel differs outside 0x8168"
+    if not plan["no_gameplay"]:
+        for off, rs in FIELDING:
+            src = ga[base + off + plan["source"] * rs:][:rs]
+            for s in plan["slots"]:
+                o = base + off + s * rs
+                assert gb[o:o + rs] == src, (label, "game.rel 0x%X slot" % off, s)
+                ga[o:o + rs] = src
+    assert bytes(ga) == bytes(gb), label + ": game.rel differs outside 0x8168 and the #38 rows"
     ca, cb = bytearray(cc.load_rel(pa, da, 2)), cc.load_rel(pb, db, 2)
     zz = []
     for r in rows:
@@ -260,9 +276,7 @@ def check_voice_tree(a, b, disc, plan, label):
 
 def voice_log(text, plan):
     """Drop the log lines the voice changes add or alter."""
-    drop = ["voice: "]
-    if plan["no_gameplay"]:
-        drop.append("game.rel: ")
+    drop = ["voice: ", "game.rel: "]
     if plan["rows"]:
         drop += ["challenge.rel: ", "ZZZZ.dat: ", "DRY RUN summary: ", "wrote "]
     return "".join(line for line in text.splitlines(True) if not any(line.startswith(d) for d in drop))

@@ -13,6 +13,8 @@ pub const ADDR_SUBITEM_FILES: u32 = 0x800F5D98;
 pub const ADDR_GLOVE: u32 = 0x800EEAAC;
 /// Runtime address of the game table used by the reference patcher.
 pub const ADDR_MODELMAP: u32 = 0x800EEB18;
+/// `charSizeMultipliers`: 54 × {in-game, menu scene} f32 model scale per charID (#38).
+pub const ADDR_CHARSIZE: u32 = 0x800E8300;
 /// Runtime address of the game table used by the reference patcher.
 pub const ADDR_JUMPTABLE: u32 = 0x800EEC40;
 /// Runtime address of the game table used by the reference patcher.
