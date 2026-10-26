@@ -8,9 +8,11 @@ pub mod cli;
 pub mod clone;
 pub mod colour;
 pub mod constants;
+pub mod custom_textures;
 pub mod disc;
 pub mod lzss;
 pub mod menu;
+pub mod sound;
 pub mod texture;
 pub mod texture_encode;
 

@@ -80,7 +80,7 @@ fn run(a: &[String]) -> Result<()> {
                 fs::write(folder.join(format!("before-{source}.png")),&pv.before_png)?;
                 let selected=pv.regions.iter().enumerate().filter(|(_,r)|r.default).map(|(i,_)|i).collect::<Vec<_>>();
                 for (i,colour) in ["blue","green","#00ff00"].into_iter().enumerate() {
-                    let request=PreviewRequest{source,slot:slots[0],colour:colour.into(),keeplum:0.5,regions:selected.clone()};let result=core.preview(&request).map_err(|e|Error::new(e.error))?;
+                    let request=PreviewRequest{source,slot:slots[0],colour:colour.into(),keeplum:0.5,regions:selected.clone(),textures:None};let result=core.preview(&request).map_err(|e|Error::new(e.error))?;
                     fs::write(folder.join(format!("preview-{source}-{i}.json")),serde_json::to_vec(&result).unwrap())?;
                 }
             }
@@ -129,7 +129,20 @@ fn run(a: &[String]) -> Result<()> {
             for c in 0..54 {let (b,o)=dol.pair(c)?;println!("char {c} {b} {o} {:?} {:?}",dol.private_entry(c)?,dol.family(c)?);}
             for i in 0..3 {let rel=d.load_rel(&dol,i)?;let hdr=rel_header(&rel)?;println!("rel {i} {} {:?} {:?}",hdr.module,hdr.sections,hdr.imports);for r in rel_self_relocs(&rel)? {println!("reloc {} {:?} {} {} {} {}",r.entry,r.section,r.offset,r.kind,r.target_section,r.addend);}}
         }
-        _=>return Err(Error::new("usage: mssb-clone-probe codec KIND IN OUT SIZE LB RP CHAIN | recolour DISC CHARID CASES.json OUTDIR | write-iso IN OUT | extract-iso IN OUT | inspect FOLDER".into()))
+        Some("sound") if a.len()==2 => {
+            // Every retail voice bank rebuilds byte-identically; every donor/source pair merges and verifies.
+            use mssb_clone_core::{constants::*,sound::*};
+            let d=Disc::folder(&a[1])?;let dol=Dol::new(d.system("main.dol")?)?;
+            let banks=(0..32).map(|u|d.load("ZZZZ.dat",dol.desc(ADDR_SOUND_GROUPS,VOICE_ROW0+u)?,0)).collect::<Result<Vec<_>>>()?;
+            for (u,file) in banks.iter().enumerate() {let g=Group::parse(file)?;if g.to_bytes()!=*file {return Err(Error::new(format!("sound.{} does not rebuild identically",VOICE_ROW0+u)));}}
+            let mut pairs=0;
+            for (ud,donor) in banks.iter().enumerate() {for (us,source) in banks.iter().enumerate() {if ud==us {continue;}
+                let src=Group::parse(source)?;let mut g=Group::parse(donor)?;g.merge(&src)?;let merged=g.to_bytes();
+                verify_merged(&merged,donor,&[(source,src.fx_ids()[0])])?;pairs+=1;
+                println!("merge {ud} {us} {} {} {}",merged.len(),g.aram_bytes(),src.aram_bytes());}}
+            println!("PASS 32 voice banks rebuild identically; {pairs} donor/source merges verified");
+        }
+        _=>return Err(Error::new("usage: mssb-clone-probe codec KIND IN OUT SIZE LB RP CHAIN | recolour DISC CHARID CASES.json OUTDIR | write-iso IN OUT | extract-iso IN OUT | inspect FOLDER | sound FOLDER".into()))
     }
     Ok(())
 }

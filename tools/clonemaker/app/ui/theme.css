@@ -46,7 +46,7 @@
   /* layout */
   --edge: 17px;
   --radius: 7px;
-  --row-cols: 53px minmax(0, 1fr) 136px 28px 31px;
+  --row-cols: 53px minmax(0, 1fr) 136px 28px 148px 31px;
 }
 
 *, *::before, *::after { box-sizing: border-box; }
@@ -353,6 +353,11 @@ input[type="range"]:disabled::-webkit-slider-thumb { background: var(--dim); }
 .clone-row input[type="radio"] { margin-left: 4px; }
 .swatch { width: 26px; height: 26px; margin-left: 2px; border: 3px solid var(--soft-line); border-radius: 6px; }
 #no-game-hint { margin: 4px 2px; }
+.textures { display: flex; min-width: 0; }
+.textures button.pick { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; padding: 0 10px; color: var(--muted); }
+.textures.set button.pick { border-color: var(--red-line); color: var(--text); border-radius: var(--radius) 0 0 var(--radius); }
+.textures button.clear { width: 26px; font-size: 14px; border-left: 0; border-radius: 0 var(--radius) var(--radius) 0; }
+.textures.set button.clear { border-color: var(--red-line); }
 
 #adv { display: flex; flex-direction: column; align-items: flex-start; }
 #adv .kicker { margin-bottom: 4px; }

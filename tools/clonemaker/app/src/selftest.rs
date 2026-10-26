@@ -94,6 +94,23 @@ fn screenshot_command(cmd: &str, name: &str) -> Command {
     command
 }
 
+/// Edits an exported texture the way a player would: `paint` draws white stripes over the top
+/// half, `junk` replaces the file with text (for the "not a PNG" error).
+#[tauri::command]
+pub fn selftest_edit_png(path: PathBuf, how: String) -> Result<(), String> {
+    use mssb_clone_core::custom_textures::{read_png, write_png};
+    if how == "junk" {
+        return fs::write(&path, b"not a picture").map_err(|e| e.to_string());
+    }
+    let (w, h, mut rgba) = read_png(&path).map_err(|e| e.to_string())?;
+    for (i, px) in rgba.as_chunks_mut::<4>().0.iter_mut().enumerate() {
+        if i / w < h / 2 && (i / w / 4) % 2 == 0 {
+            *px = [255; 4];
+        }
+    }
+    write_png(&path, w, h, &rgba).map_err(|e| e.to_string())
+}
+
 #[tauri::command]
 pub fn selftest_report(app: AppHandle, options: State<Options>, ok: bool, lines: Vec<String>) {
     let text: String = lines.iter().map(|l| format!("{l}\n")).collect();

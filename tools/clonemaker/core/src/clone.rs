@@ -2,9 +2,11 @@
 use crate::binary::*;
 use crate::colour::{Recolour, source_regions};
 use crate::constants::*;
+use crate::custom_textures;
 use crate::disc::{Disc, open_disc, preflight, write_iso};
 use crate::lzss;
 use crate::menu::*;
+use crate::sound::*;
 use crate::texture::Gpc;
 use crate::{Error, Result, align};
 use std::fs::{self, OpenOptions};
@@ -40,6 +42,8 @@ pub struct CloneArgs {
     pub force: bool,
     /// Compute and log edits without writing.
     pub dry_run: bool,
+    /// Painted texture folders by donor slot (`custom_textures`), empty for recolours only.
+    pub textures: Vec<(usize, PathBuf)>,
 }
 impl Default for CloneArgs {
     fn default() -> Self {
@@ -57,6 +61,7 @@ impl Default for CloneArgs {
             no_gameplay: false,
             force: false,
             dry_run: false,
+            textures: Vec::new(),
         }
     }
 }
@@ -366,6 +371,7 @@ pub fn clone(
     for (_, rc) in &mut clones {
         rc.resolve(&regions)?;
     }
+    let painted = custom_textures::load_for_clones(&args.textures, &src_body, c, &slots, log)?;
     let start = align(disc.file_size("ZZZZ.dat")? as usize, 0x800);
     let mut appendix = Appendix {
         start,
@@ -493,7 +499,16 @@ pub fn clone(
         }
         for (t, src_track) in src_tracks.iter().enumerate() {
             let mut g = src_track.clone();
-            rc.recolour_gpc(&mut g)?;
+            // A painted clone keeps the source's colours wherever it was not painted.
+            if !painted.contains_key(s) {
+                rc.recolour_gpc(&mut g)?;
+            }
+            if let Some(p) = painted.get(s) {
+                log(&format!(
+                    "  track {t}: {}",
+                    p.paint(&src_body, src_track, &mut g)?
+                ));
+            }
             g.check()?;
             let comp = compress_checked(&g.data, false, "")?;
             let packed = comp.len();
@@ -523,7 +538,15 @@ pub fn clone(
         if use_overlay {
             let o = dol.private_entry(*s)?.unwrap();
             let mut g = src_body.clone();
-            rc.recolour_gpc(&mut g)?;
+            if !painted.contains_key(s) {
+                rc.recolour_gpc(&mut g)?;
+            }
+            if let Some(p) = painted.get(s) {
+                log(&format!(
+                    "  ARAM body: {}",
+                    p.paint(&src_body, &src_body, &mut g)?
+                ));
+            }
             let archive = g.archive_bytes();
             let comp = compress_checked(archive, false, "")?;
             let packed = comp.len();
@@ -549,8 +572,17 @@ pub fn clone(
             let (b, o) = dol.pair(c)?;
             dol.set_pair(*s, b, o)?;
             log("  ARAM body = source's (no recolour in the ARAM path)");
+            if painted.contains_key(s) {
+                log("  (so batting and menus show the original textures, not yours)");
+            }
         }
-        for (addr, rs) in [(ADDR_GLOVE, 2), (ADDR_MODELMAP, 2), (ADDR_ROWKIND, 1)] {
+        // The model scale belongs with the body, so it is copied in every mode (#38).
+        for (addr, rs) in [
+            (ADDR_GLOVE, 2),
+            (ADDR_MODELMAP, 2),
+            (ADDR_ROWKIND, 1),
+            (ADDR_CHARSIZE, 8),
+        ] {
             let b = dol.read(addr + c as u32 * rs, rs as usize)?.to_vec();
             dol.write(addr + *s as u32 * rs, &b)?;
         }
@@ -593,6 +625,24 @@ pub fn clone(
             blob_desc.0[3]
         ));
     }
+    // Voice (#29): the clones always ask for the source's SFX ids (game.rel 0x8168, written
+    // below). With --ui donor the game loads the donor family's bank, so that bank gets the
+    // source's sounds too.
+    let mut game_rel = disc.load_rel(&dol, 1)?;
+    let voice_base = {
+        let (base, size) = rel_data_section(&game_rel)?;
+        if REL_VOICE_BASE + 54 * 2 > size {
+            return Err(Error::new(format!(
+                "game.rel table at 0x{REL_VOICE_BASE:X} is outside .data"
+            )));
+        }
+        u16_at(&game_rel, base + REL_VOICE_BASE + c * 2)?
+    };
+    let sound_moves = if args.ui_source {
+        Vec::new()
+    } else {
+        merge_voice_banks(&disc, &mut dol, c, voice_base, &slots, &mut appendix, log)?
+    };
     let rel_addrs = [0x800e8aa8, 0x800e8ab8, 0x800e8ac8];
     let rel_names = ["menus.rel", "game.rel", "challenge.rel"];
     let mut rel_ends = Vec::new();
@@ -604,11 +654,19 @@ pub fn clone(
     let mut rel_patches = Vec::new();
     for i in 0..3 {
         let edits: Vec<_> = moves.iter().filter(|m| m.counts[i] != 0).collect();
-        if !(i == 0 && colour_word || i == 1 && !args.no_gameplay || !edits.is_empty()) {
+        if !(i == 0 && colour_word
+            || i == 1
+            || i == 2 && !sound_moves.is_empty()
+            || !edits.is_empty())
+        {
             continue;
         }
         let old = dol.desc(rel_addrs[i], 0)?;
-        let mut rel = disc.load_rel(&dol, i)?;
+        let mut rel = if i == 1 {
+            std::mem::take(&mut game_rel)
+        } else {
+            disc.load_rel(&dol, i)?
+        };
         let mut lines = Vec::new();
         if i == 0 && colour_word {
             let offsets = patch_colour_word(&mut rel, &slots)?;
@@ -625,16 +683,24 @@ pub fn clone(
                 }
             ));
         }
-        if i == 1 && !args.no_gameplay {
+        if i == 1 {
             let (base, size) = rel_data_section(&rel)?;
-            for (off, rs) in [
-                (0x8168, 2),
-                (0x6ef8, 0x24),
-                (0x7690, 2),
-                (0x7870, 6),
-                (0x7e34, 4),
-                (0x17000, 4),
-            ] {
+            let tables: &[(usize, usize)] = if args.no_gameplay {
+                &[(REL_VOICE_BASE, 2)]
+            } else {
+                &[
+                    (REL_VOICE_BASE, 2),
+                    (0x6ef8, 0x24),
+                    (0x7690, 2),
+                    (0x7870, 6),
+                    (0x7e34, 4),
+                    (0x17000, 4),
+                    // fielder hitbox and height, scaled by charSizeMultipliers (#38)
+                    (0x79b4, 0x10),
+                    (0x7f10, 2),
+                ]
+            };
+            for &(off, rs) in tables {
                 if off + 54 * rs > size {
                     return Err(Error::new(format!(
                         "game.rel table at 0x{off:X} is outside .data"
@@ -647,7 +713,22 @@ pub fn clone(
                     );
                 }
             }
-            lines.push("copied voice/hitbox/timing tables".into());
+            lines.push(if args.no_gameplay {
+                "copied the voice table (SFX base; --no-gameplay keeps the other tables)".into()
+            } else {
+                "copied voice/hitbox/timing tables".into()
+            });
+        }
+        if i == 2 {
+            for (row, old, new) in &sound_moves {
+                let n = replace_desc(&mut rel, *old, *new);
+                if n == 0 {
+                    return Err(Error::new(format!(
+                        "challenge.rel: no copy of the sound.{row} descriptor found"
+                    )));
+                }
+                lines.push(format!("{n} sound.{row} descriptor copies updated"));
+            }
         }
         for m in edits {
             let n = replace_desc(&mut rel, m.old, m.new);
@@ -663,14 +744,15 @@ pub fn clone(
         let packed = comp.len();
         let room = rel_ends.iter().find(|end| **end > old.0[2] as u64).unwrap() - old.0[2] as u64;
         if packed as u64 > room {
+            let hint = match i {
+                1 if args.no_gameplay => "",
+                1 => "; rerun with --no-gameplay",
+                2 if !sound_moves.is_empty() => "; rerun with --ui source",
+                _ => "; rerun with --ui donor",
+            };
             return Err(Error::new(format!(
-                "patched {} packs to {packed} B but only {room} B fit in aaaa.dat; rerun with {}",
-                rel_names[i],
-                if i == 1 {
-                    "--no-gameplay"
-                } else {
-                    "--ui donor"
-                }
+                "patched {} packs to {packed} B but only {room} B fit in aaaa.dat{hint}",
+                rel_names[i]
             )));
         }
         comp.resize(packed.max(old.0[3] as usize), 0);
@@ -796,6 +878,125 @@ pub fn clone(
     ));
     drop(temp);
     Ok(output_result(args, c, &clones))
+}
+/// `--ui donor`: the game loads the donor family's voice bank (`sound.(5 + u_D)`, by the donor's
+/// unique index) but plays the source's SFX ids. Rebuild each such bank with the source's sounds
+/// added under their retail ids (same group id), append it to ZZZZ.dat and point the DOL
+/// descriptor at it; the returned (row, old, new) descriptors are also replaced in challenge.rel.
+/// A family that already shares the source's bank needs nothing.
+fn merge_voice_banks(
+    disc: &Disc,
+    dol: &mut Dol,
+    c: usize,
+    voice_base: u16,
+    slots: &[usize],
+    appendix: &mut Appendix,
+    log: &mut dyn FnMut(&str),
+) -> Result<Vec<(usize, Descriptor, Descriptor)>> {
+    let unique = |dol: &Dol, ch: usize| -> Result<usize> {
+        Ok(dol.u8(ADDR_FAMILY + ch as u32 * 6 + 2)? as usize)
+    };
+    let load = |dol: &Dol, row: usize| -> Result<(Vec<u8>, Descriptor)> {
+        let d = dol.desc(ADDR_SOUND_GROUPS, row)?;
+        if d.0[0] != 0 || d.0[1] != d.0[3] {
+            return Err(Error::new(format!(
+                "main.dol: sound.{row} descriptor is not a stored sound group"
+            )));
+        }
+        Ok((disc.load("ZZZZ.dat", d, 0)?, d))
+    };
+    let uc = unique(dol, c)?;
+    let mut banks: Vec<(usize, Vec<usize>)> = Vec::new();
+    for &s in slots {
+        let u = unique(dol, s)?;
+        if u == uc {
+            log(&format!(
+                "voice: {} already uses {}'s voice bank (sound.{})",
+                CHAR_NAMES[s],
+                CHAR_NAMES[c],
+                VOICE_ROW0 + u
+            ));
+        } else if let Some(bank) = banks.iter_mut().find(|b| b.0 == u) {
+            bank.1.push(s);
+        } else {
+            banks.push((u, vec![s]));
+        }
+    }
+    if banks.is_empty() {
+        return Ok(Vec::new());
+    }
+    let (source_file, _) = load(dol, VOICE_ROW0 + uc)?;
+    let source = Group::parse(&source_file)?;
+    let mut merged = Vec::new();
+    for (u, family) in banks {
+        let row = VOICE_ROW0 + u;
+        let (file, old) = load(dol, row)?;
+        let mut bank = Group::parse(&file)?;
+        let before = bank.aram_bytes();
+        let added = bank.merge(&source)?;
+        let bytes = bank.to_bytes();
+        verify_merged(&bytes, &file, &[(&source_file, voice_base)])?;
+        merged.push((row, family, old, file.len(), before, added, bank, bytes));
+    }
+    // ARAM: a merged bank also uploads the source's samples (once per match, whichever bank
+    // brings them first). Refuse a set of banks that could overflow MusyX's sample heap.
+    let mut fixed = std::collections::BTreeMap::new();
+    for row in MATCH_ROWS {
+        fixed.extend(pushed_samples(&load(dol, row)?.0)?);
+    }
+    let mut stadium = std::collections::BTreeMap::new();
+    for row in STADIUM_ROWS {
+        let s = pushed_samples(&load(dol, row)?.0)?;
+        if s.values().sum::<usize>() > stadium.values().sum::<usize>() {
+            stadium = s;
+        }
+    }
+    fixed.extend(stadium);
+    let mut voices = Vec::new();
+    for u in 0..32 {
+        let row = VOICE_ROW0 + u;
+        voices.push(match merged.iter().find(|m| m.0 == row) {
+            Some(m) => pushed_samples(&m.7)?,
+            None => pushed_samples(&load(dol, row)?.0)?,
+        });
+    }
+    let worst = worst_match_aram(&fixed, &voices);
+    if worst > SAMPLE_HEAP {
+        return Err(Error::new(format!(
+            "with {}'s voice added to the donors' voice banks, a match could need {worst} B of sound memory (ARAM) but only {SAMPLE_HEAP} B exist; use --ui source",
+            CHAR_NAMES[c]
+        )));
+    }
+    let mut moves = Vec::new();
+    for (row, family, old, old_len, before, added, bank, bytes) in merged {
+        let size = bytes.len() as u32;
+        let off = appendix.place(bytes, 0x800) as u32;
+        let new = Descriptor([0, size, off, size]);
+        let n = replace_desc(&mut dol.data, old, new);
+        if n != 1 {
+            return Err(Error::new(format!(
+                "main.dol: expected 1 copy of the sound.{row} descriptor, found {n}"
+            )));
+        }
+        log(&format!(
+            "voice: sound.{row} (voice bank of {}, group {}) + {}'s {added} SFX 0x{voice_base:X}..0x{:X} -> ZZZZ.dat+0x{off:08X} ({old_len} -> {size} B, ARAM {before} -> {} B); main.dol descriptor updated, challenge.rel copies below",
+            family
+                .iter()
+                .map(|s| CHAR_NAMES[*s])
+                .collect::<Vec<_>>()
+                .join(", "),
+            bank.gid,
+            CHAR_NAMES[c],
+            voice_base + VOICE_LINES - 1,
+            bank.aram_bytes()
+        ));
+        moves.push((row, old, new));
+    }
+    log(&format!(
+        "voice: worst-case match sound memory (ARAM) {worst} of {SAMPLE_HEAP} B ({} B to spare)",
+        SAMPLE_HEAP - worst
+    ));
+    Ok(moves)
 }
 /// Resolve an output path even if its final components do not yet exist.
 pub fn absolute_path(path: &Path) -> Result<PathBuf> {

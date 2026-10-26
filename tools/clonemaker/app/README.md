@@ -31,8 +31,10 @@ checks the window only: every widget, bundled fonts, the dialog API, inputs wait
 narrow (stacked) and wide (two-column) layouts, an unusable game's core message and a timed resize
 (fails if any median is 100 ms or more; the metric is set-size to next painted frame, so about 16 ms
 means the next frame, and it is not comparable with Tk's "busy time per step"). With `--game` it also
-loads previews, switches sources and colours, adds and removes rows, answers the Replace and error
-dialogs, and runs and cancels a real create in a temporary folder. With `MSSB_SHOT_CMD` set, the
+loads previews, switches sources and colours, adds and removes rows, exports Mario's textures,
+breaks one (the "not a PNG" error), paints another (`selftest_edit_png`) and sets it on the first
+row ("My textures…", the folder name and its clear button), answers the Replace and error dialogs,
+and runs and cancels a real create in a temporary folder (the log must show the painted texture). With `MSSB_SHOT_CMD` set, the
 page runs that program with a state name at each step (screenshots; scripts in `selftest/windows/`).
 
 On Linux, `selftest/linux/run.sh [OUT_DIR] [SCREEN]` builds and runs the self-test in Docker

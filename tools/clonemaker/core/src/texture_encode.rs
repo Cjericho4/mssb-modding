@@ -1,6 +1,7 @@
 //! Standalone RGBA8 encoding for the CMPR and indexed GX formats used by Clone Maker.
 //!
-//! Buffers use GX tile order and big-endian words. No archive or clone path calls this module.
+//! Buffers use GX tile order and big-endian words. Cloning uses it for painted textures
+//! (`custom_textures`).
 use crate::binary::{u16_at, u32_at};
 use crate::texture::{Texture, ci_indices, cmpr_palette, rgb565};
 use crate::{Error, Result};

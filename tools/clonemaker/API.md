@@ -5,6 +5,11 @@ and events. Each one ports a function of the Python reference (`tools/modding/cl
 layer, `clone_character.py`); behaviour, wording of messages and outputs must match it. Change this
 file in the same commit as any change to a command.
 
+Intended divergence (#29): the core always copies the source's voice SFX base (game.rel 0x8168) to
+the clone rows, and with `ui_source: false` merges the source's voice into each donor family's
+voice bank (`sound.(5+u)`, appended to ZZZZ.dat; DOL and challenge.rel descriptors updated), with
+`voice: ` log lines. The Python reference does neither; `difftest.py` allows exactly these bytes.
+
 Types: `colour` is a preset name (`red orange yellow green cyan blue purple pink`) or `"#rrggbb"`
 (custom). Paths are strings. Errors are `{ "error": "<friendly message>" }` (see `friendly_error`).
 `regions` (in `preview` and `job`) are the ticked region indices; the core drops them when they are
@@ -17,14 +22,21 @@ exactly the source's defaults (`region_selection`). `fraction` is 0..1 of the wh
 | `sources` | | `[{ id, name }]` | `SOURCES`, `pretty_name` |
 | `source_info` | `source` | `{ regions: [{ index, label, default, swatch }], slots: [{ id, label }], default_rows: [{ slot, colour }] }` | `source_regions`, `region_label`, `donor_choices`, `default_rows` |
 | `next_free_slot` | `source, used: [id]` | `id \| null` (in `source_info().slots` order) | `next_free_slot` |
-| `preview` | `request: { source, slot, colour, keeplum, regions: [index] }` | `{ before_png, after_png, caption }` (base64 PNG) | `SourcePreview`, `colour_spec`, `atlas_layout` |
+| `preview` | `request: { source, slot, colour, keeplum, regions: [index], textures? }` (with `textures`, the after side is the painted body, no recolour) | `{ before_png, after_png, caption }` (base64 PNG) | `SourcePreview`, `colour_spec`, `atlas_layout` |
 | `default_output` | `game_path` | `path` | `default_output` |
 | `validate_job` | `job` | `null \| { error }` | `validate_job` |
+| `export_textures` | `source, folder` | `{ folder, count }`: the PNGs and README.txt went into the new `<folder>/<Name> textures` | none (#37) |
 | `create` | `job` | starts the job; results come as events | `run_job` |
 | `cancel` | | stops the running job at its next progress step | `run_job(cancel=)` |
 
-`job` = `{ game, output, source, clones: [{ slot, colour }], keeplum, regions: [index], ui_source,
-copy_stats, keep_colour_word, keep_work }`.
+`job` = `{ game, output, source, clones: [{ slot, colour, textures? }], keeplum, regions: [index],
+ui_source, copy_stats, keep_colour_word, keep_work }`.
+
+`clones[].textures` (optional, #37; no Python reference) is a folder of painted PNGs made by
+`export_textures` for the job's source. Each edited PNG replaces that body texture in every copy
+the clone uses (tracks 0 and 1, the ARAM body), and that clone's body is not recoloured: unedited
+PNGs and missing files keep the source's original texture. `validate_job` checks the folders (names, sizes, PNG) against the
+source before the job starts, so it needs the opened game. Omitted or `null`: recolour only.
 
 ## Events (core → window, while `create` runs)
 | Event | Payload |

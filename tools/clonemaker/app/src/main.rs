@@ -7,7 +7,8 @@ mod selftest;
 use std::path::PathBuf;
 
 use mssb_clone_core::api::{
-    ApiError, Core, Event, Job, OpenGame, Preview, PreviewRequest, Source, SourceInfo,
+    ApiError, Core, Event, ExportedTextures, Job, OpenGame, Preview, PreviewRequest, Source,
+    SourceInfo,
 };
 use tauri::{AppHandle, Emitter, LogicalSize, Manager, State};
 
@@ -77,6 +78,16 @@ fn create(app: AppHandle, core: State<Core>, job: Job) -> Result<(), ApiError> {
     .map_err(ApiError::from)
 }
 
+/// Writes the source's body textures as PNGs into a new "<Name> textures" folder in `folder`.
+#[tauri::command]
+async fn export_textures(
+    app: AppHandle,
+    source: usize,
+    folder: PathBuf,
+) -> Result<ExportedTextures, ApiError> {
+    blocking(move |core| core.export_textures(source, &folder), app).await
+}
+
 #[tauri::command]
 fn cancel(core: State<Core>) {
     core.cancel();
@@ -121,10 +132,12 @@ fn main() {
             validate_job,
             create,
             cancel,
+            export_textures,
             path_exists,
             selftest::launch_options,
             selftest::selftest_mark,
             selftest::selftest_report,
+            selftest::selftest_edit_png,
         ])
         .run(tauri::generate_context!())
         .expect("error while running the Clone Maker window");

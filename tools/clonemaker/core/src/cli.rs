@@ -3,6 +3,7 @@ use crate::binary::Dol;
 use crate::clone::{CloneArgs, absolute_path, parse_char};
 use crate::colour::source_regions;
 use crate::constants::*;
+use crate::custom_textures::{self, Painted};
 use crate::disc::{Disc, open_disc};
 use crate::texture::Gpc;
 use crate::{Error, Result};
@@ -25,6 +26,8 @@ const OPTIONS: &[&str] = &[
     "--list-regions",
     "--force",
     "--dry-run",
+    "--textures",
+    "--export-textures",
 ];
 /// One parsed CLI action, sharing CloneArgs with the library patcher.
 pub enum Command {
@@ -39,6 +42,15 @@ pub enum Command {
         /// Whether to print slots rather than regions.
         slots: bool,
     },
+    /// Write the source's body textures as PNGs into a folder.
+    ExportTextures {
+        /// Disc folder or ISO.
+        disc: PathBuf,
+        /// Source name or charID.
+        source: String,
+        /// Destination folder.
+        dir: PathBuf,
+    },
     /// Execute a clone patch.
     Clone(CloneArgs),
 }
@@ -49,6 +61,7 @@ pub fn parse(argv: &[String]) -> Result<Command> {
     let mut out = false;
     let mut list_slots = false;
     let mut list_regions = false;
+    let mut export_textures = None;
     let mut unknown = Vec::new();
     let mut i = 0;
     while i < argv.len() {
@@ -91,6 +104,8 @@ pub fn parse(argv: &[String]) -> Result<Command> {
             "--iso",
             "--ui",
             "--colour-word",
+            "--textures",
+            "--export-textures",
         ]
         .contains(&key)
         {
@@ -131,6 +146,18 @@ pub fn parse(argv: &[String]) -> Result<Command> {
                     }
                     args.keep_colour_word = value == "donor";
                 }
+                "--textures" => {
+                    let (slot, dir) = value.split_once(':').ok_or_else(|| {
+                        Error::new(format!(
+                            "argument --textures: expected SLOT:FOLDER, got '{value}'"
+                        ))
+                    })?;
+                    args.textures
+                        .push((parse_char(slot)?, crate::normalize_path(Path::new(dir))));
+                }
+                "--export-textures" => {
+                    export_textures = Some(crate::normalize_path(Path::new(&value)));
+                }
                 _ => unreachable!(),
             }
         } else {
@@ -163,6 +190,13 @@ pub fn parse(argv: &[String]) -> Result<Command> {
             "unrecognized arguments: {}",
             unknown.join(" ")
         )));
+    }
+    if let Some(dir) = export_textures {
+        return Ok(Command::ExportTextures {
+            disc: args.disc,
+            source: args.source,
+            dir,
+        });
     }
     if list_slots || list_regions {
         return Ok(Command::List {
@@ -256,7 +290,24 @@ pub fn execute(command: Command, log: &mut dyn FnMut(&str)) -> Result<()> {
     match command {
         Command::Help => log(include_str!("help.txt")),
         Command::Clone(args) => {
+            if !args.textures.is_empty() {
+                // check the painted folders before the long copy of the game
+                let (_, body) = read_only_body(&args.disc, &args.source)?;
+                let source = crate::api::pretty_name(parse_char(&args.source)?);
+                for (_, folder) in &args.textures {
+                    Painted::load(folder, &body, &source)?;
+                }
+            }
             crate::clone::clone(&args, log, None)?;
+        }
+        Command::ExportTextures { disc, source, dir } => {
+            let (c, body) = read_only_body(&disc, &source)?;
+            let n = custom_textures::export(&body, &crate::api::pretty_name(c), &dir)?;
+            log(&format!(
+                "exported {n} textures of {} to {}",
+                CHAR_NAMES[c],
+                dir.display()
+            ));
         }
         Command::List {
             disc,
@@ -273,6 +324,17 @@ pub fn execute(command: Command, log: &mut dyn FnMut(&str)) -> Result<()> {
         }
     }
     Ok(())
+}
+/// The source's original in-match body, read straight from a folder or ISO (nothing extracted).
+fn read_only_body(disc: &Path, source: &str) -> Result<(usize, Gpc)> {
+    let c = parse_char(source)?;
+    let disc = if disc.is_file() {
+        Disc::iso(disc)?
+    } else {
+        Disc::folder(disc)?
+    };
+    let dol = Dol::new(disc.system("main.dol")?)?;
+    Ok((c, Gpc::new(disc.effective_body(&dol, c)?)?))
 }
 /// Render an argparse-style usage error for the CLI's stderr.
 pub fn usage_error(error: &Error) -> String {
@@ -294,5 +356,30 @@ mod tests {
         );
         assert_eq!(parse_char(" Baby Mario ").unwrap(), 7);
         assert_eq!(parse_char("53").unwrap(), 53);
+    }
+    #[test]
+    fn texture_flags() {
+        let argv = |s: &str| s.split(' ').map(String::from).collect::<Vec<_>>();
+        let Command::Clone(args) = parse(&argv(
+            "--disc d --out o --slot 29 --textures 29:C:\\art --textures BlueToad:x",
+        ))
+        .unwrap() else {
+            panic!()
+        };
+        assert_eq!(
+            args.textures,
+            vec![(29, PathBuf::from("C:\\art")), (29, PathBuf::from("x"))]
+        );
+        assert!(matches!(
+            parse(&argv("--disc d --source luigi --export-textures out")).unwrap(),
+            Command::ExportTextures { source, .. } if source == "luigi"
+        ));
+        assert!(
+            parse(&argv("--disc d --out o --textures 29"))
+                .err()
+                .unwrap()
+                .message
+                .contains("expected SLOT:FOLDER")
+        );
     }
 }
