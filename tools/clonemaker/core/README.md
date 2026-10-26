@@ -91,3 +91,27 @@ original-disc boundary even when `--force` is used.
 Parity covers outputs and the expected validation messages. Where the Python
 reference would die with an interpreter traceback (malformed numeric recolour
 input, badly corrupt binary data), the core returns its own error instead.
+
+## Standalone texture encoding
+
+`texture_encode::encode_texture(rgba, &target)` accepts row-major RGBA8 and a
+`texture::Texture`, returning tiled pixel bytes and an optional separate TLUT.
+It checks dimensions, byte count, palette capacity and the exact pixel slot size.
+It supports the retail sources' CMPR, CI4 and CI8 formats with IA8, RGB565 or
+RGB5A3 palettes. `decode_texture_rgba` reads pixels followed by the TLUT and
+preserves alpha; the older `decode_texture` remains the checkerboard RGB preview.
+The encoder is not connected to cloning, PNG import or the window.
+
+The read-only local inventory/quality probe scans all 54 sources, both disc
+tracks, effective ARAM bodies, menu art and HUD portraits. It writes no assets:
+
+```sh
+cargo run --release --manifest-path tools/clonemaker/core/Cargo.toml \
+  --example texture_quality -- orig/GYQE01
+# Add --inventory-only to skip round-trip measurements.
+```
+
+It reports texture counts, exact RGBA matches and per-texture mean/worst PSNR
+(infinite for exact results). The probe also cross-checks RGBA compositing
+against the established preview decoder, except IA8 menu names, which the
+legacy preview decoder does not support.
