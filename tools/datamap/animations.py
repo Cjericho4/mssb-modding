@@ -44,8 +44,8 @@ class Reader:
         if kind not in QUANT_FORMATS:
             raise ValueError("unsupported quantization 0x%02X" % quantization)
         values = self.unpack(str(count) + QUANT_FORMATS[kind], offset)
-        # GetData multiplies every format, including f32, by 2**-shift.
-        return [x / (1 << shift) for x in values]
+        # GetData (0x800B5CF0) copies f32 as stored; integer formats are multiplied by 2**-shift.
+        return [float(x) if kind == 4 else x / (1 << shift) for x in values]
 
 
 def _settings(reader, offset, quantization, anim_type):

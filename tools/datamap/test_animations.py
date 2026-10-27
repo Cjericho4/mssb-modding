@@ -48,7 +48,7 @@ class AnimationTests(unittest.TestCase):
     def test_numeric_formats(self):
         for quant, fmt, value, expected in [(0x01, "B", 8, 4), (0x11, "b", -8, -4),
                                             (0x21, "H", 512, 256), (0x31, "h", -512, -256),
-                                            (0x4F, "f", 1.5, 1.5 / 32768)]:
+                                            (0x4F, "f", 1.5, 1.5)]:  # f32 is copied as stored (GetData 0x800B5CF0)
             self.assertEqual(anim.Reader(struct.pack(">" + fmt, value)).numbers(0, 1, quant), [expected])
 
     def test_track_quantized_scale_quaternion(self):
