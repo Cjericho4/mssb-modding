@@ -3,7 +3,7 @@
 Exports a Mario Superstar Baseball character from **your own copy of the game** to a `.gltf` file
 that Blender opens: the textured body, its skeleton and its animations.
 
-**Using the Clone Maker app (0.3.0-beta or newer)?** Its **Export 3D model…** button does the
+**Using the Clone Maker app (0.3.0-beta or newer)?** Its **Export 3D model** button does the
 same without Python ([guide](https://github.com/Cjericho4/mssb-modding/blob/main/tools/clonemaker/README.md#open-a-character-in-blender)).
 This script is for Linux, and for the extra options (one clip, other animation banks, the
 skeleton only).

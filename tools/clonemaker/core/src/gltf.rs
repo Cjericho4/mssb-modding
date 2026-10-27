@@ -1870,7 +1870,7 @@ pub struct Export {
 
 /// Export charID `c` from a clean game: textured body, skeleton and either the normal swing or
 /// every non-empty sequence of `DEFAULT_ANIMATION_BANKS`. `painted` is a folder of
-/// `tNN_WxH.png` pictures (Clone Maker's "Export textures…") used instead of those textures.
+/// `tNN_WxH.png` pictures (Clone Maker's "Export textures") used instead of those textures.
 pub fn export(
     disc: &Disc,
     dol: &Dol,

@@ -129,7 +129,7 @@ and have names such as `t2_s02_id77_BatterSwingBat`. Gameplay IDs and labels are
 reverse-engineered annotations, not strings stored in the ANIM bank; unnamed IDs retain
 their numeric `tN_sNN_idN` label. `--skeleton-only` omits the clip;
 `--no-mesh` shows only bone markers. `--textures` reads matching `tNN_WxH.png` files from
-Clone Maker's **Export textures…** folder, embedding painted PNGs where present and keeping
+Clone Maker's **Export textures** folder, embedding painted PNGs where present and keeping
 the other retail textures. The exporter uses the game's right-handed, +Y-up
 coordinates directly; Blender's glTF importer handles Blender's coordinate convention.
 Scale-axis quaternion nodes preserve the game's T·R·Qs·S·Qs⁻¹ order. Extra TEV texture stages
