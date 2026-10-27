@@ -11,6 +11,7 @@ on:
     tags: ['v*']   # a v1.2.3 tag also attaches the build to that GitHub release
     paths:
       - tools/clonemaker/**
+      - tools/datamap/**
       - .github/workflows/build-clonemaker.yml
   workflow_dispatch:
 
@@ -80,11 +81,25 @@ jobs:
         $notes = "$env:GITHUB_WORKSPACE/release-notes/${{ github.ref_name }}.md"
         if (-not (Test-Path $notes) -or (Get-Item $notes).Length -eq 0) { throw "write release-notes/${{ github.ref_name }}.md first (copy release-notes/TEMPLATE.md)" }
 
+    # The Blender exporter (Python scripts, keeping their tools/ layout) rides along with the release
+    - name: Zip the Blender exporter
+      if: startsWith(github.ref, 'refs/tags/v')
+      working-directory: .
+      run: |
+        $d = "MSSB-Blender-Exporter"
+        New-Item -ItemType Directory "$d/tools/datamap", "$d/tools/modding" | Out-Null
+        Copy-Item tools/datamap/animations.py, tools/datamap/catalog.py, tools/datamap/disc.py, tools/datamap/export_gltf.py, tools/datamap/formats.py, tools/datamap/mssb_files.py, tools/datamap/sound.py, tools/datamap/stats.py "$d/tools/datamap/"
+        Copy-Item tools/modding/clone_character.py "$d/tools/modding/"
+        Copy-Item tools/datamap/BLENDER_EXPORT.md "$d/README.md"
+        Compress-Archive $d "$d.zip"
+
     - name: Attach to the release
       if: startsWith(github.ref, 'refs/tags/v')
       uses: softprops/action-gh-release@v2
       with:
-        files: tools/clonemaker/app/target/release/MSSB-Clone-Maker.exe
+        files: |
+          tools/clonemaker/app/target/release/MSSB-Clone-Maker.exe
+          MSSB-Blender-Exporter.zip
         body_path: release-notes/${{ github.ref_name }}.md   # written by hand from release-notes/TEMPLATE.md
         generate_release_notes: false
 
