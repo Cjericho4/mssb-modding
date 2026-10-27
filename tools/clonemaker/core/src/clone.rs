@@ -31,8 +31,8 @@ pub struct CloneArgs {
     pub no_aram_overlay: bool,
     /// Copy source menu art, HUD and announcer identity.
     pub ui_source: bool,
-    /// Retain the donor's roster colour word.
-    pub keep_colour_word: bool,
+    /// Name-box colour ("colour word") of the donors on the roster screen.
+    pub colour_word: ColourWord,
     /// Force the appendix path for menu resources (differential test option).
     pub relocate_menu_art: bool,
     /// Preserve donor stats.
@@ -49,6 +49,16 @@ pub struct CloneArgs {
     /// plays; slots not listed play the source's.
     pub anims: Vec<(usize, usize)>,
 }
+/// `--colour-word`: what the roster screen's coloured name box shows for a donor slot.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ColourWord {
+    /// The colour nearest the clone's recolour hue (the donor's own without a hue).
+    Clone,
+    /// The donor's retail colour.
+    Donor,
+    /// The plain box (the frozen Python reference's default).
+    None,
+}
 impl Default for CloneArgs {
     fn default() -> Self {
         Self {
@@ -59,7 +69,7 @@ impl Default for CloneArgs {
             iso: None,
             no_aram_overlay: false,
             ui_source: true,
-            keep_colour_word: false,
+            colour_word: ColourWord::Clone,
             relocate_menu_art: false,
             no_stats: false,
             no_gameplay: false,
@@ -412,7 +422,7 @@ pub fn clone(
     };
     let mut inplace = Vec::new();
     let mut moves = Vec::new();
-    let mut colour_word = false;
+    let mut colour_word: Vec<(usize, usize)> = Vec::new();
     if args.ui_source {
         let unique = dol.u8(ADDR_FAMILY + c as u32 * 6 + 2)?;
         for (s, _) in &clones {
@@ -504,10 +514,36 @@ pub fn clone(
                 ));
             }
         }
-        if !args.keep_colour_word {
-            colour_word = true;
-        } else {
-            log("ui: colour word: the donors keep theirs (--colour-word donor)");
+        match args.colour_word {
+            ColourWord::Donor => {
+                log("ui: colour word: the donors keep theirs (--colour-word donor)")
+            }
+            ColourWord::None => {
+                colour_word = clones.iter().map(|(s, _)| (*s, 0)).collect();
+            }
+            ColourWord::Clone => {
+                let mut kept = Vec::new();
+                for (s, rc) in &clones {
+                    // fn_2_74F40 draws the box only for colour-variant charIDs (family != 0).
+                    if dol.u8(ADDR_FAMILY + *s as u32 * 6)? == 0 {
+                        continue;
+                    }
+                    let retail = colour_label(*s);
+                    let label = label_for_hue(rc.hue()).unwrap_or(retail);
+                    if label == retail {
+                        kept.push(CHAR_NAMES[*s]);
+                    } else {
+                        colour_word.push((*s, label));
+                    }
+                }
+                if !kept.is_empty() {
+                    log(&format!(
+                        "ui: colour word: {} keep{} the donor's name-box colour",
+                        kept.join(", "),
+                        if kept.len() == 1 { "s" } else { "" }
+                    ));
+                }
+            }
         }
     } else {
         log("ui: donor (menus, HUD and announcer keep the donor's name/portrait/call-out)");
@@ -688,7 +724,7 @@ pub fn clone(
     let mut rel_patches = Vec::new();
     for i in 0..3 {
         let edits: Vec<_> = moves.iter().filter(|m| m.counts[i] != 0).collect();
-        if !(i == 0 && colour_word
+        if !(i == 0 && !colour_word.is_empty()
             || i == 1
             || i == 2 && !sound_moves.is_empty()
             || !edits.is_empty())
@@ -702,8 +738,8 @@ pub fn clone(
             disc.load_rel(&dol, i)?
         };
         let mut lines = Vec::new();
-        if i == 0 && colour_word {
-            let offsets = patch_colour_word(&mut rel, &slots)?;
+        if i == 0 && args.colour_word == ColourWord::None && !colour_word.is_empty() {
+            let offsets = patch_colour_word(&mut rel, &colour_word)?;
             lines.push(format!(
                 "colour word: label 0 for charIDs {slots:?} (relocation addends at {})",
                 if offsets.is_empty() {
@@ -715,6 +751,25 @@ pub fn clone(
                         .collect::<Vec<_>>()
                         .join(", ")
                 }
+            ));
+        } else if i == 0 && !colour_word.is_empty() {
+            let offsets = patch_colour_word(&mut rel, &colour_word)?;
+            lines.push(format!(
+                "colour word: {} (relocation addends at {})",
+                colour_word
+                    .iter()
+                    .map(|(s, l)| format!(
+                        "{} name box {} (label {l})",
+                        CHAR_NAMES[*s],
+                        label_name(*l)
+                    ))
+                    .collect::<Vec<_>>()
+                    .join(", "),
+                offsets
+                    .iter()
+                    .map(|o| format!("0x{o:X}"))
+                    .collect::<Vec<_>>()
+                    .join(", ")
             ));
         }
         if i == 1 {
@@ -915,7 +970,7 @@ pub fn clone(
         log(&format!(
             "Menus (preview name, mini picture, grid portrait), HUD and the announcer show/say {} for these slots{}.",
             CHAR_NAMES[c],
-            if args.keep_colour_word {
+            if args.colour_word == ColourWord::Donor {
                 "; the donors keep their colour word"
             } else {
                 ""

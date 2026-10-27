@@ -95,6 +95,15 @@ re-packed RELs) and reads each merged bank back with `tools/datamap/sound.py`.
 `--sound` rebuilds all 32 retail voice banks byte-identically and verifies all
 992 donor/source merges.
 
+Name box (#19): on the roster screen a colour-variant charID's name sits on a
+coloured box (menus `fn_2_74F40`, labels 1..6 red, blue, yellow, green, purple,
+black; 0 plain). The core's default `--colour-word clone` gives each such donor
+the box of the preset nearest its clone's hue (`menu::label_for_hue`) and leaves
+entries that already match, so a clone coloured like its donor changes nothing in
+menus.rel. `--colour-word none` (the reference's default, plain boxes) and
+`donor` stay byte-identical to the reference; difftest accepts exactly the
+changed jump-table addends in the decompressed menus.rel (API.md).
+
 `--grid` runs the sampled matrix and option switches. `--full-grid` additionally
 compares every source with every preset, grouping the eight presets into eight
 clone rows per source. Bowser uses two four-clone groups because eight HUD

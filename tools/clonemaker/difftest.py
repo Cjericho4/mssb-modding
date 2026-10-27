@@ -126,7 +126,101 @@ def voice_plan(disc, opts):
         for s in slots:
             if unique(s) != unique(source):
                 rows.setdefault(5 + unique(s), []).append(s)
-    return {"source": source, "slots": slots, "rows": rows, "no_gameplay": "--no-gameplay" in opts}
+    return {"source": source, "slots": slots, "rows": rows, "no_gameplay": "--no-gameplay" in opts,
+            **dict(zip(("colour_word", "box_entries"), colour_word_plan(disc, dol, opts, value)))}
+
+
+# --- #19 name box: the intended difference in menus.rel ------------------------------------------
+# The reference's default (--colour-word none) points every donor's fn_2_74F40 jump-table entry at
+# the plain-box case; the core's default (clone) gives each colour-variant donor the box of the
+# preset nearest its recolour hue (the donor's own without a hue) and only writes entries that
+# change. --colour-word none/donor and --ui donor are byte-identical to the reference.
+BOX_LABEL = {"red": 1, "orange": 1, "yellow": 3, "green": 4, "cyan": 2, "blue": 2, "purple": 5, "pink": 5}
+BOX_NAME = ["plain", "red", "blue", "yellow", "green", "purple", "black"]
+
+
+def colour_word_plan(disc, dol, opts, value):
+    """None (reference behaviour), or {colour-variant donor charID: name-box label} for the core's
+    default, in --slot order, plus the retail jump-table entry offsets."""
+    import clone_character as cc
+    if value("--ui", "source") != "source" or value("--colour-word", "clone") != "clone":
+        return None, {}
+    specs = [opts[i + 1] for i, x in enumerate(opts) if x == "--slot"]
+    clones = [cc.parse_slot_spec(x) for x in specs] or [
+        (29, cc.Recolour("hue=blue")), (30, cc.Recolour("hue=green")),
+        (31, cc.Recolour("hue=purple")), (32, cc.Recolour("hue=yellow"))]
+    labels = {}
+    for s, rc in clones:
+        if dol.u8(cc.ADDR_FAMILY + s * 6) == 0:
+            continue
+        labels[s] = cc.MENUS_COLOUR_LABEL.get(s, 0)
+        if rc.hue is not None:
+            dist = lambda h: abs((rc.hue - h + 0.5) % 1.0 - 0.5)
+            labels[s] = BOX_LABEL[min(cc.COLOUR_PRESETS, key=lambda k: dist(cc.COLOUR_PRESETS[k]))]
+    od = cc.Disc(disc)
+    entries = cc.colour_word_entries(bytearray(cc.load_rel(od, cc.Dol((od.sys / "main.dol").read_bytes()), 0)))
+    return labels, entries
+
+
+def colour_word_log(text, plan):
+    """The reference's log turned into the core's: the 'colour word: label 0' part of its menus.rel
+    line replaced by the core's (or dropped, with the line when nothing else is in it), and the
+    core's '<donors> keep(s) the donor's name-box colour' line before the first clone line."""
+    import re
+    import clone_character as cc
+    labels = plan["colour_word"]
+    if labels is None:
+        return text
+    changed = {s: l for s, l in labels.items() if l != cc.MENUS_COLOUR_LABEL.get(s, 0)}
+    kept = [cc.CHAR_NAMES[s] for s in labels if s not in changed]
+    out = []
+    for line in text.splitlines(True):
+        if line.startswith("clone -> slot ") and kept:
+            out.append("ui: colour word: %s keep%s the donor's name-box colour\n" % (", ".join(kept), "s" if len(kept) == 1 else ""))
+            kept = []
+        m = re.match(r"menus\.rel: colour word: label 0 for charIDs \[[0-9, ]*\] \(relocation addends at [^)]*\); (.*)", line, re.S)
+        if m:
+            if changed:
+                line = "menus.rel: colour word: %s (relocation addends at %s); %s" % (
+                    ", ".join("%s name box %s (label %d)" % (cc.CHAR_NAMES[s], BOX_NAME[l], l) for s, l in changed.items()),
+                    ", ".join("0x%X" % (plan["box_entries"][s] + 4) for s in changed), m.group(1))
+            elif m.group(1).startswith("re-packed"):
+                continue
+            else:
+                line = "menus.rel: " + m.group(1)
+        out.append(line)
+    return "".join(out)
+
+
+OLD_COLOUR_HELP = """  --colour-word {none,donor}
+                        with --ui source: the colour word shown before a
+                        clone's name on the roster screen; none (default: the
+                        clone is the source, e.g. no 'Purple') or donor (keep
+                        e.g. 'Purple')
+"""
+NEW_COLOUR_HELP = """  --colour-word {clone,donor,none}
+                        with --ui source: the coloured box behind a clone's
+                        name on the roster screen (colour variants only);
+                        clone (default: the colour nearest the clone's
+                        recolour, e.g. purple for hue=purple), donor (keep the
+                        donor's, e.g. Purple Toad's) or none (the plain box)
+"""
+
+
+def colour_word_help(text):
+    """The reference's usage/help with the core's --colour-word choices and help."""
+    return text.replace("[--colour-word {none,donor}]", "[--colour-word {clone,donor,none}]").replace(OLD_COLOUR_HELP, NEW_COLOUR_HELP)
+
+
+def check_colour_word(ma, mb, plan, label):
+    """Decompressed menus.rel: the core's equals the reference's with each colour-variant donor's
+    entry pointed at its planned label's case."""
+    import struct
+    import clone_character as cc
+    expected = bytearray(ma)
+    for s, l in (plan["colour_word"] or {}).items():
+        struct.pack_into(">I", expected, plan["box_entries"][s] + 4, cc.MENUS_COLOUR_CASE[l])
+    assert bytes(expected) == bytes(mb), label + ": menus.rel differs outside the planned name-box entries"
 
 
 def voice_changes(plan):
@@ -200,6 +294,8 @@ def check_voice_tree(a, b, disc, plan, label):
     allowed = [(da.off(SOUND_GROUPS + r * 16, 16), da.off(SOUND_GROUPS + r * 16, 16) + 16) for r in rows]
     allowed += [(da.off(cc.ADDR_REL_DESCS[1 + i], 16), da.off(cc.ADDR_REL_DESCS[1 + i], 16) + 16)
                 for i in range(2) if rel_changed[i]]
+    if plan["colour_word"] is not None:  # #19: menus.rel re-packed by one side only
+        allowed.append((da.off(cc.ADDR_REL_DESCS[0], 16), da.off(cc.ADDR_REL_DESCS[0], 16) + 16))
     # #38: the clone rows of charSizeMultipliers hold the source's scale
     src_size = da.data[da.off(CHARSIZE + plan["source"] * 8, 8):][:8]
     for s in plan["slots"]:
@@ -217,7 +313,12 @@ def check_voice_tree(a, b, disc, plan, label):
             off = da.desc(cc.ADDR_REL_DESCS[1 + i], 0)[2]
             allowed.append((off, min(e for e in ends if e > off)))
             assert db.desc(cc.ADDR_REL_DESCS[1 + i], 0)[2] == off, label + ": REL moved"
+    if plan["colour_word"] is not None:
+        off = da.desc(cc.ADDR_REL_DESCS[0], 0)[2]
+        allowed.append((off, min(e for e in ends if e > off)))
+        assert db.desc(cc.ADDR_REL_DESCS[0], 0)[2] == off, label + ": menus.rel moved"
     chunked_equal(pa.files / "aaaa.dat", pb.files / "aaaa.dat", allowed, label + " aaaa.dat")
+    check_colour_word(cc.load_rel(pa, da, 0), cc.load_rel(pb, db, 0), plan, label)
     ga, gb = cc.load_rel(pa, da, 1), cc.load_rel(pb, db, 1)
     # .data located on the clean game.rel (its signature rows may be clone rows now)
     od = cc.Disc(disc)
@@ -478,6 +579,9 @@ def cli_checks(cli, probe, work, disc):
             p=subprocess.run([str(x) for x in cmd],stdout=subprocess.PIPE,stderr=subprocess.PIPE,text=True)
             return p.returncode,p.stdout,p.stderr
         expected=command([sys.executable,MOD/"clone_character.py",*args])
+        expected=tuple(colour_word_help(x) if isinstance(x,str) else x for x in expected)
+        if "--dry-run" in args and expected[0]==0:
+            expected=(expected[0],colour_word_log(expected[1],voice_plan(disc,args)),expected[2])
         actual=command([cli,*args])
         assert expected==actual,(i,args,expected,actual)
     print("PASS CLI: %d help/usage/error/dry-run/listing comparisons" % len(cases),flush=True)
@@ -566,7 +670,7 @@ def gui_jobs(probe, work, disc):
                 events=[json.loads(line) for line in run([probe,"job",jobfile]).splitlines()]
                 assert events[-1]["event"] == "done"
                 done=events[-1]["payload"]
-                plan=voice_plan(disc,["--source",str(source),"--ui","source" if ui else "donor"]+sum((["--slot",str(s)] for s,_ in specs),[]))
+                plan=voice_plan(disc,["--source",str(source),"--ui","source" if ui else "donor"]+sum((["--slot","%d:%s" % (s,spec)] for s,spec in specs),[]))
                 if voice_changes(plan):
                     trees=[folder/"py-tree",folder/"rs-tree"]
                     try:
@@ -599,7 +703,7 @@ def gui_jobs(probe, work, disc):
                 normalized_rs=log.replace(rs_work,"WORK").replace(str(rs_out),"ISO").replace("rust.partial.iso","PARTIAL")
                 if keep:
                     if voice_changes(plan):
-                        normalized_py,normalized_rs=voice_log(normalized_py,plan),voice_log(normalized_rs,plan)
+                        normalized_py,normalized_rs=voice_log(colour_word_log(normalized_py,plan),plan),voice_log(normalized_rs,plan)
                     assert normalized_py==normalized_rs, "GUI log mismatch"
                 assert not list(folder.glob("*.partial.iso"))
                 print("PASS GUI job %s: ISO bytes, kept/removed work, log, progress, hint" % label,flush=True)
@@ -800,7 +904,7 @@ def clone_case_in(cli, work, disc, label, opts):
         py_out, rs_out = normalize(py.stdout,a,ai), normalize(rs.stdout,b,bi)
         # The reference never logs "voice: " lines (a family that already shares the source's
         # bank logs one without any other change).
-        py_out, rs_out = voice_log(py_out, plan), voice_log(rs_out, plan)
+        py_out, rs_out = voice_log(colour_word_log(py_out, plan), plan), voice_log(rs_out, plan)
         if py.returncode == 0:
             assert sum(line.startswith("voice: ") and "-> ZZZZ.dat+" in line for line in rs.stdout.splitlines()) == len(plan["rows"]), (label, "voice log")
         assert py_out==rs_out,(label,"stdout",py.stdout,rs.stdout)

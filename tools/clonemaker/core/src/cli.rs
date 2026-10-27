@@ -1,6 +1,6 @@
 //! The reference patcher's command-line flags and listing output.
 use crate::binary::Dol;
-use crate::clone::{CloneArgs, absolute_path, parse_char};
+use crate::clone::{CloneArgs, ColourWord, absolute_path, parse_char};
 use crate::colour::source_regions;
 use crate::constants::*;
 use crate::custom_textures::{self, Painted};
@@ -141,12 +141,16 @@ pub fn parse(argv: &[String]) -> Result<Command> {
                     args.ui_source = value == "source";
                 }
                 "--colour-word" => {
-                    if !["none", "donor"].contains(&value.as_str()) {
-                        return Err(Error::new(format!(
-                            "argument --colour-word: invalid choice: '{value}' (choose from 'none', 'donor')"
-                        )));
-                    }
-                    args.keep_colour_word = value == "donor";
+                    args.colour_word = match value.as_str() {
+                        "clone" => ColourWord::Clone,
+                        "donor" => ColourWord::Donor,
+                        "none" => ColourWord::None,
+                        _ => {
+                            return Err(Error::new(format!(
+                                "argument --colour-word: invalid choice: '{value}' (choose from 'clone', 'donor', 'none')"
+                            )));
+                        }
+                    };
                 }
                 "--textures" => {
                     let (slot, dir) = value.split_once(':').ok_or_else(|| {
@@ -410,6 +414,29 @@ mod tests {
             panic!()
         };
         assert_eq!(args.anims, vec![(29, 1), (29, 0)]);
+        for (value, mode) in [
+            ("clone", ColourWord::Clone),
+            ("donor", ColourWord::Donor),
+            ("none", ColourWord::None),
+        ] {
+            let Command::Clone(args) =
+                parse(&argv(&format!("--disc d --out o --colour-word {value}"))).unwrap()
+            else {
+                panic!()
+            };
+            assert_eq!(args.colour_word, mode);
+        }
+        let Command::Clone(args) = parse(&argv("--disc d --out o")).unwrap() else {
+            panic!()
+        };
+        assert_eq!(args.colour_word, ColourWord::Clone);
+        assert!(
+            parse(&argv("--disc d --out o --colour-word word"))
+                .err()
+                .unwrap()
+                .message
+                .contains("choose from 'clone', 'donor', 'none'")
+        );
         assert!(
             parse(&argv("--disc d --out o --anims luigi"))
                 .err()
