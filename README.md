@@ -1,33 +1,73 @@
-# MSSB Modding
+# MSSB Clone Maker
 
-Tools for modding Mario Superstar Baseball (GameCube, USA, GYQE01), built on what the
+**Put extra copies of your favourite characters into Mario Superstar Baseball.** Four Marios in
+four colours, a team of King Boos, a Peach in your own painted outfit, a Mario who moves like
+Luigi: the Clone Maker builds a new copy of your game where other characters' slots hold the
+clones you design. Play it in Project Rio or Dolphin.
+
+<p align="center">
+  <a href="https://github.com/Cjericho4/mssb-modding/releases/latest"><b>⬇ Download the latest release</b></a>
+  &nbsp;·&nbsp; Windows and Mac &nbsp;·&nbsp;
+  <a href="tools/clonemaker/README.md">User guide</a>
+  &nbsp;·&nbsp;
+  <a href="https://github.com/Cjericho4/mssb-modding/issues/new/choose">Report a problem</a>
+</p>
+
+<p align="center">
+  <img src="docs/clone-maker.png" alt="The Clone Maker window: clones of Mario on the four Toad colours and a Luigi clone, each with its own colour and animations" width="640">
+</p>
+
+> **Beta.** Clones of Mario, Peach, King Boo and Donkey Kong, and games mixing several of them, have
+> been played in Project Rio. See the [known issues](tools/clonemaker/README.md#known-issues).
+
+## What you can do
+
+- **Clones in any colour.** Pick a character, pick which slots it takes over, and give each copy its
+  own colour. A preview shows every texture before and after.
+- **Several characters in one game.** Mario recolours on the Toad colours and King Boos on the Shy
+  Guy colours, all at once.
+- **Your own textures.** Export a character's textures as pictures, paint them in any paint
+  program, and give a clone your version.
+- **The real thing, not just a skin.** Each clone gets its character's voice, size, stats and
+  chemistry, and its name and picture in the menus.
+- **Animations from another character.** Make a clone move like someone else (characters whose
+  skeleton fits are offered).
+- **Safe.** Your original game is never changed; the Clone Maker saves a new `.iso` next to it.
+
+## Quick start
+
+1. **Download** `MSSB-Clone-Maker.exe` (Windows) or `MSSB-Clone-Maker-Mac.zip` (Mac) from the
+   [latest release](https://github.com/Cjericho4/mssb-modding/releases/latest). Nothing to install.
+2. **Choose your game**: your own Mario Superstar Baseball (USA) `.iso`.
+3. **Set up your clones**: the character to clone, the slots it takes, a colour for each.
+4. **Create patched game**, then open the new `.iso` in Project Rio or Dolphin and put the clones on
+   your team.
+
+The [user guide](tools/clonemaker/README.md) walks through every option, with troubleshooting.
+The app shows a **New version** button when an update is out, and a **Feedback** button to report
+problems or ideas.
+
+You need your own copy of the game. Nothing here contains game files, and the Clone Maker never
+uploads or shares yours. Play the patched game offline: Rio's online and ranked modes expect the
+original game.
+
+---
+
+## For developers
+
+This repository also holds the tools the Clone Maker is built on. They rely on what the
 [mssb-dtk](https://github.com/Cjericho4/mssb-dtk) decompilation found out about the game.
-
-You need your own copy of the game. Nothing here contains game files, and the tools never upload
-or share yours.
-
-## MSSB Clone Maker
-
-Put copies of a character on other characters' slots: recoloured, or wearing textures you painted,
-with the character's voice, size and stats, and optionally another character's animations.
-Windows and Mac.
-
-**[Download the latest release](https://github.com/Cjericho4/mssb-modding/releases/latest)** ·
-**[How to use it](tools/clonemaker/README.md)** ·
-**[Report a problem](https://github.com/Cjericho4/mssb-modding/issues/new/choose)**
-
-## What's in this repository
 
 | Folder | What it is |
 |---|---|
-| `tools/clonemaker` | **MSSB Clone Maker**: puts a recoloured copy of a character (or your own painted textures) on another character's slot, with the right voice, size and stats. Rust core + Tauri window for Windows, Mac and Linux. User guide: [tools/clonemaker/README.md](tools/clonemaker/README.md). |
+| `tools/clonemaker` | The Clone Maker: Rust core (`core/`) and Tauri window (`app/`) for Windows, Mac and Linux. Contract between them: [API.md](tools/clonemaker/API.md); design notes: [core/README.md](tools/clonemaker/core/README.md). |
 | `tools/datamap` | List, extract and replace the game's files; stats, sounds and animations ([README](tools/datamap/README.md)). |
 | `tools/modding` | The original Python clone patcher (the reference the Rust core is tested against), the recolour audit and small inspectors. |
 
 Test builds of every change are under [Actions](https://github.com/Cjericho4/mssb-modding/actions)
 (artifacts, GitHub login needed).
 
-## Making a release
+### Making a release
 
 1. Set the same new version in `tools/clonemaker/app/tauri.conf.json` and `tools/clonemaker/app/Cargo.toml`
    (and the `mssb-clone-maker` entry in its `Cargo.lock`).
@@ -38,7 +78,7 @@ Test builds of every change are under [Actions](https://github.com/Cjericho4/mss
    tag matches the version and that the notes file exists, run the tests, and publish the release
    `v0.2.0` with those notes, the Windows exe and the Mac zip.
 
-## How it relates to mssb-dtk
+### How it relates to mssb-dtk
 
 The game knowledge (addresses, table layouts, formats, the evidence behind them) lives in the
 decompilation repository's `.agent/` docs; a comment here that says `.agent/stats.md` means
@@ -52,4 +92,5 @@ Put the extracted game at `orig/GYQE01/` (ignored by git) for the tests that nee
 ## License
 
 MIT (see [LICENSE](LICENSE)). The bundled fonts are under the SIL Open Font License (their
-`OFL-*.txt` files).
+`OFL-*.txt` files). Mario Superstar Baseball and its characters belong to Nintendo; this project is
+not affiliated with Nintendo.

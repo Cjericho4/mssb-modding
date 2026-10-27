@@ -167,9 +167,8 @@ with several characters, each clone follows the character it copies.
 - **Some recolours have rough spots**, especially on Donkey Kong and Peach (small areas that keep
   the old colour or change when they shouldn't).
 - **The slot list cuts off long names** in narrow windows. Widen the window to read them.
-- **On the select screen, a clone's name box has no colour and the big character picture shows
-  the replaced character** ([#19](https://github.com/Cjericho4/mssb-modding/issues/19)); a fix is
-  being tested.
+- **On the select screen, the big 3D character behind the team shows the cloned character in
+  its own colours**, not the clone's colour (those menu models can't be recoloured yet).
 - **Not every character has been played as a clone in Rio yet.** Mario, Peach, King Boo and DK have.
 - **Rio's online and ranked modes** expect the original game. Play the clones game offline.
 
