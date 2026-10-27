@@ -118,14 +118,24 @@ fn fit_to_screen(window: &tauri::WebviewWindow) -> tauri::Result<()> {
 /// Opens the releases page in the browser (fixed URL: the page cannot open anything else).
 #[tauri::command]
 fn open_releases() {
-    const URL: &str = "https://github.com/Cjericho4/mssb-modding/releases/latest";
+    open_url("https://github.com/Cjericho4/mssb-modding/releases/latest");
+}
+
+/// Opens the GitHub page for a bug report or an idea.
+#[tauri::command]
+fn open_feedback() {
+    open_url("https://github.com/Cjericho4/mssb-modding/issues/new/choose");
+}
+
+/// Fixed URLs only: the window never asks Rust to open a link it chose itself.
+fn open_url(url: &str) {
     #[cfg(windows)]
     let mut cmd = std::process::Command::new("explorer");
     #[cfg(target_os = "macos")]
     let mut cmd = std::process::Command::new("open");
     #[cfg(all(unix, not(target_os = "macos")))]
     let mut cmd = std::process::Command::new("xdg-open");
-    let _ = cmd.arg(URL).spawn();
+    let _ = cmd.arg(url).spawn();
 }
 
 fn main() {
@@ -154,6 +164,7 @@ fn main() {
             export_textures,
             path_exists,
             open_releases,
+            open_feedback,
             selftest::launch_options,
             selftest::selftest_mark,
             selftest::selftest_report,

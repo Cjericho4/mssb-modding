@@ -117,8 +117,10 @@ button, input, select { font: inherit; color: inherit; }
   font-weight: 500;
   white-space: nowrap;
 }
-.update { margin-left: auto; height: 30px; padding: 0 14px; border-radius: 15px; border-color: var(--red-line); color: var(--text); }
-.update + .pill { margin-left: 10px; }
+.headbtn { margin-left: 10px; height: 30px; padding: 0 14px; border-radius: 15px; color: var(--text); }
+#feedback { margin-left: auto; }
+.update { border-color: var(--red-line); }
+.headbtn + .pill, .headbtn + .headbtn[hidden] + .pill { margin-left: 10px; }
 .pill i { width: 8px; height: 8px; border-radius: 50%; background: var(--muted); }
 @media (max-width: 800px) { .blurb { display: none; } }
 

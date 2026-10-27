@@ -618,6 +618,7 @@ async function main() {
   });
 
   const options = await invoke("launch_options");
+  $("feedback").addEventListener("click", () => invoke("open_feedback"));
   if (!options.selftest) checkForUpdate();
   if (options.selftest) {
     await import("./selftest.js").then((m) => m.run(options, { state, startLoad, exportTextures, setRowTextures }));
