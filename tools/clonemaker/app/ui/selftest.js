@@ -9,7 +9,7 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const painted = () => new Promise((r) => requestAnimationFrame(() => setTimeout(r, 0)));
 
 const WIDGETS = ["pill", "btn-iso", "btn-dir", "game-path", "status", "source", "regions-box", "rows", "btn-add",
-  "btn-export", "btn-adv", "adv", "chk-ui", "chk-colour", "chk-stats", "keeplum", "chk-keep", "out-path", "btn-out", "btn-go",
+  "btn-export", "btn-blender", "blender", "blender-source", "blender-all", "blender-go", "blender-cancel", "btn-adv", "adv", "chk-ui", "chk-colour", "chk-stats", "keeplum", "chk-keep", "out-path", "btn-out", "btn-go",
   "run-box", "progress-bar", "btn-cancel", "preview-chip", "preview-caption", "img-before", "img-after", "log"];
 
 export async function run(options, app) {
@@ -57,7 +57,7 @@ export async function run(options, app) {
     const { dialog } = window.__TAURI__;
     check(typeof dialog?.open === "function" && typeof dialog?.save === "function", "the file dialogs are available");
     say(`window ${innerWidth}x${innerHeight}, device pixel ratio ${devicePixelRatio}, screen ${screen.availWidth}x${screen.availHeight}`);
-    check($("btn-go").disabled && $("source").disabled && $("btn-export").disabled && !$("btn-iso").disabled, "inputs wait for a game");
+    check($("btn-go").disabled && $("source").disabled && $("btn-export").disabled && $("btn-blender").disabled && !$("btn-iso").disabled, "inputs wait for a game");
     await shot("empty");
 
     // narrow window: the preview goes under the form; wide again: two columns
@@ -228,6 +228,42 @@ export async function run(options, app) {
     textures().querySelector(".clear").click();
     check(!textures().classList.contains("set") && textures().querySelector(".pick").textContent === "My textures…", "clear");
     app.setRowTextures(app.state.groups[0].rows[0], exported.folder);
+
+    // Export to Blender: the button opens the choice (the shown character, all animations); Cancel
+    // closes it. Then an export to a known path (no save dialog) that must parse as glTF.
+    $("btn-blender").click();
+    await waitFor(() => !$("blender").hidden, "the Blender export window");
+    check($("blender-source").value === "0" && $("blender-all").checked && !$("blender-go").disabled,
+      "Export to Blender starts with Mario and all animations");
+    await shot("blender");
+    await resizeTo(640, 560);
+    const blenderBox = document.querySelector("#blender .dialog").getBoundingClientRect();
+    check(blenderBox.left >= 0 && blenderBox.right <= document.documentElement.clientWidth,
+      "the Blender window fits at 640 px: " + JSON.stringify(blenderBox));
+    await shot("blender_narrow");
+    await resizeTo(1320, 780);
+    $("blender-cancel").click();
+    await waitFor(() => $("blender").hidden, "Cancel closes the Blender window");
+    const blenderPath = inDir("Mario.gltf");
+    const exportingBlender = app.exportBlender(app.state.groups[0], blenderPath);
+    await waitFor(() => !$("blender").hidden, "the Blender export window again");
+    $("blender-go").click();
+    await waitFor(() => dialogOpen("Open in Blender: File > Import > glTF 2.0"), "the Blender done dialog", 60000);
+    check($("dialog-text").textContent.startsWith(`Saved Mario to\n${blenderPath}\n\n37 bones, 115 animations.`),
+      "Blender done text: " + $("dialog-text").textContent);
+    check($("dialog-text").querySelector("a")?.textContent === "How to play another animation (user guide)", "the guide link");
+    await shot("blender_done");
+    dialogButton("OK").click();
+    const blenderResult = await exportingBlender;
+    check(blenderResult?.animations === 115 && blenderResult.path === blenderPath, "export result: " + JSON.stringify(blenderResult));
+    check(logHas(`exported Mario for Blender (115 animations) to ${blenderPath}`), "the Blender log line");
+    let parsed = "";
+    try {
+      parsed = await invoke("selftest_check_gltf", { path: blenderPath });
+    } catch (e) {
+      parsed = String(e);
+    }
+    check(parsed.startsWith("150 nodes, 115 animations, 9 images, "), "the .gltf file parses: " + parsed);
 
     // clones of a second character: its own block with its own character, colours and first clone
     const before = rows().map((r) => r.querySelector("select").value).join();

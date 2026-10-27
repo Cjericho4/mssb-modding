@@ -11,6 +11,7 @@ pub mod colour;
 pub mod constants;
 pub mod custom_textures;
 pub mod disc;
+pub mod gltf;
 pub mod lzss;
 pub mod menu;
 pub mod sound;

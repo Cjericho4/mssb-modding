@@ -111,6 +111,25 @@ pub fn selftest_edit_png(path: PathBuf, how: String) -> Result<(), String> {
     write_png(&path, w, h, &rgba).map_err(|e| e.to_string())
 }
 
+/// Reads back an exported .gltf the way an importer would start: it must parse as glTF 2.0.
+/// Returns "<nodes> nodes, <animations> animations, <images> images, <bytes> bytes".
+#[tauri::command]
+pub fn selftest_check_gltf(path: PathBuf) -> Result<String, String> {
+    let text = fs::read_to_string(&path).map_err(|e| e.to_string())?;
+    let doc: serde_json::Value = serde_json::from_str(&text).map_err(|e| e.to_string())?;
+    if doc["asset"]["version"] != "2.0" {
+        return Err("not glTF 2.0".into());
+    }
+    let count = |key: &str| doc[key].as_array().map_or(0, Vec::len);
+    Ok(format!(
+        "{} nodes, {} animations, {} images, {} bytes",
+        count("nodes"),
+        count("animations"),
+        count("images"),
+        text.len()
+    ))
+}
+
 #[tauri::command]
 pub fn selftest_report(app: AppHandle, options: State<Options>, ok: bool, lines: Vec<String>) {
     let text: String = lines.iter().map(|l| format!("{l}\n")).collect();

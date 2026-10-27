@@ -7,8 +7,8 @@ mod selftest;
 use std::path::PathBuf;
 
 use mssb_clone_core::api::{
-    AnimChoice, ApiError, Core, Event, ExportedTextures, Job, OpenGame, Preview, PreviewRequest,
-    Source, SourceInfo,
+    AnimChoice, ApiError, Core, Event, ExportedGltf, ExportedTextures, Job, OpenGame, Preview,
+    PreviewRequest, Source, SourceInfo,
 };
 use tauri::{AppHandle, Emitter, LogicalSize, Manager, State};
 
@@ -93,6 +93,22 @@ async fn export_textures(
     blocking(move |core| core.export_textures(source, &folder), app).await
 }
 
+/// Writes a character as a .gltf file for Blender (off the main thread: about a second).
+#[tauri::command]
+async fn export_gltf(
+    app: AppHandle,
+    source: usize,
+    all_animations: bool,
+    path: PathBuf,
+    textures: Option<PathBuf>,
+) -> Result<ExportedGltf, ApiError> {
+    blocking(
+        move |core| core.export_gltf(source, all_animations, &path, textures.as_deref()),
+        app,
+    )
+    .await
+}
+
 #[tauri::command]
 fn cancel(core: State<Core>) {
     core.cancel();
@@ -119,6 +135,14 @@ fn fit_to_screen(window: &tauri::WebviewWindow) -> tauri::Result<()> {
 #[tauri::command]
 fn open_releases() {
     open_url("https://github.com/Cjericho4/mssb-modding/releases/latest");
+}
+
+/// Opens the user guide's "Open a character in Blender" section.
+#[tauri::command]
+fn open_blender_guide() {
+    open_url(
+        "https://github.com/Cjericho4/mssb-modding/blob/main/tools/clonemaker/README.md#open-a-character-in-blender",
+    );
 }
 
 /// Opens the GitHub page for a bug report or an idea.
@@ -162,13 +186,16 @@ fn main() {
             create,
             cancel,
             export_textures,
+            export_gltf,
             path_exists,
             open_releases,
+            open_blender_guide,
             open_feedback,
             selftest::launch_options,
             selftest::selftest_mark,
             selftest::selftest_report,
             selftest::selftest_edit_png,
+            selftest::selftest_check_gltf,
         ])
         .run(tauri::generate_context!())
         .expect("error while running the Clone Maker window");

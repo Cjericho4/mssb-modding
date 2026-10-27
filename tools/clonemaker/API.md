@@ -45,11 +45,17 @@ exactly the source's defaults (`region_selection`). `fraction` is 0..1 of the wh
 | `default_output` | `game_path` | `path` | `default_output` |
 | `validate_job` | `job` | `null \| { error }` | `validate_job` |
 | `export_textures` | `source, folder` | `{ folder, count }`: the PNGs and README.txt went into the new `<folder>/<Name> textures` | none (#37) |
+| `export_gltf` | `source, all_animations, path, textures?` | `{ path, name, bones, animations }`: `source` written to the `.gltf` file `path` for Blender (textured body, skeleton, and the normal swing or, with `all_animations`, every animation of tracks 2, 3, 4, 5 and 15); `textures` is a folder of painted `tNN_WxH.png` (from `export_textures`) used instead of those textures | `tools/datamap/export_gltf.py` (`--all-animations`, `--textures`) |
 | `create` | `job` | starts the job; results come as events | `run_job` |
 | `cancel` | | stops the running job at its next progress step | `run_job(cancel=)` |
 
 `job` = `{ game, output, source, clones: [{ slot, colour, textures?, anims?, source?, regions? }], keeplum, regions: [index],
 ui_source, copy_stats, keep_colour_word, keep_work }` (`keep_colour_word`: keep the donors' retail name-box colour, #19).
+
+`export_gltf` writes the same file as the Python reference given the same character and options
+(the body of disc track 0, every accessor byte-identical; embedded PNGs have the same pixels but
+are compressed differently); `difftest_gltf.py` checks it. The window calls it with
+`allAnimations` (Tauri's camelCase for `all_animations`) and never passes `textures`.
 
 `clones[].source` and `clones[].regions` (optional, #18; no Python reference) let one game hold clones
 of several characters: the charID that clone copies and its ticked colour regions (`source_info`

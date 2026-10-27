@@ -110,6 +110,19 @@
   </div>
 </div>
 
+<div id="blender" class="modal" hidden>
+  <div class="dialog" role="dialog" aria-modal="true" aria-labelledby="blender-title">
+    <header><span class="chip neutral">3D</span><h2 id="blender-title">Export to Blender</h2></header>
+    <div class="form">
+      <label class="label" for="blender-source">Character</label>
+      <select id="blender-source"></select>
+      <label class="check"><input type="checkbox" id="blender-all" checked><span>All animations (batting, running, fielding, pitching)</span></label>
+      <p id="blender-note" class="muted"></p>
+    </div>
+    <div class="line end"><button id="blender-cancel">Cancel</button><button id="blender-go" class="primary">Save as…</button></div>
+  </div>
+</div>
+
 <input type="color" id="picker" class="offscreen" tabindex="-1">
 <script src="app.js"></script>
 <template id="group-tpl">
@@ -119,6 +132,7 @@
       <select class="source"></select>
       <span class="grow"></span>
       <button class="export" title="Save the character's textures as PNG pictures to paint your own">Export textures…</button>
+      <button class="blender" title="Save the character as a 3D model with its skeleton and animations, for Blender">Export to Blender…</button>
       <button class="icon remove drop" title="Remove this character and its clones">×</button>
     </div>
     <div class="regions">

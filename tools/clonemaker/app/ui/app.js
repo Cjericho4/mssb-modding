@@ -91,6 +91,7 @@ function updateSourceLabels() {
   const many = state.groups.length > 1, n = sourceName(state.groups[0]?.source ?? 0);
   for (const g of state.groups) {
     g.ui.export.title = `Save ${sourceName(g.source)}'s textures as PNG pictures to paint your own`;
+    g.ui.blender.title = `Save ${sourceName(g.source)} as a 3D model with its skeleton and animations, for Blender`;
     g.ui.drop.hidden = !many;
   }
   // With several characters, say "each clone ... it copies" and name them, so nobody reads it as one character.
@@ -183,13 +184,14 @@ function newGroup(source) {
   const g = {
     source, rows: [], ticks: null, info: null, animChoices: [], infoSource: null, infoSeq: 0,
     ui: { root, source: q("source"), regionsBox: q("regions-box"), regionsHint: q("regions-hint"),
-      noGame: q("no-game-hint"), rows: q("rows"), add: q("add"), export: q("export"), drop: q("drop") },
+      noGame: q("no-game-hint"), rows: q("rows"), add: q("add"), export: q("export"), blender: q("blender"), drop: q("drop") },
   };
   g.ui.source.replaceChildren(...state.sources.map((s) => el("option", { value: s.id, textContent: s.name })));
   g.ui.source.value = String(source);
   g.ui.source.addEventListener("change", () => sourceChanged(g));
   g.ui.add.addEventListener("click", () => serial(() => addRow(g)));
   g.ui.export.addEventListener("click", () => exportTextures(g));
+  g.ui.blender.addEventListener("click", () => exportBlender(g));
   g.ui.drop.addEventListener("click", () => removeGroup(g));
   state.groups.push(g);
   $("groups").append(root);
@@ -200,7 +202,7 @@ function newGroup(source) {
 
 function setGroupIds() {
   const ids = { source: "source", regionsBox: "regions-box", regionsHint: "regions-hint", noGame: "no-game-hint",
-    rows: "rows", add: "btn-add", export: "btn-export" };
+    rows: "rows", add: "btn-add", export: "btn-export", blender: "btn-blender" };
   state.groups.forEach((g, i) => {
     for (const [part, id] of Object.entries(ids)) g.ui[part].id = i === 0 ? id : "";
   });
@@ -501,6 +503,81 @@ async function exportTextures(g = state.groups[0], folder = null) {
   return res;
 }
 
+// ---------------------------------------------------------------- Blender
+/** Choose a character (default: the block's) and whether to include every animation, then save it
+ *  as a .gltf for Blender. `path` skips the save dialog (the self-test). */
+async function exportBlender(g = state.groups[0], path = null) {
+  if (!state.game || state.busy) return null;
+  const box = $("blender"), select = $("blender-source"), all = $("blender-all");
+  const go = $("blender-go"), cancelButton = $("blender-cancel"), note = $("blender-note");
+  const controls = [select, all, go, cancelButton];
+  const reset = () => {
+    box.hidden = true;
+    for (const c of controls) c.disabled = false;
+    go.textContent = "Save as…";
+  };
+  select.replaceChildren(...state.sources.map((s) => el("option", { value: s.id, textContent: s.name })));
+  select.value = String(g.source);
+  all.checked = true;
+  note.textContent = "A .gltf file with the textured body, the skeleton and the animations.";
+  box.hidden = false;
+  go.focus();
+  const confirmed = await new Promise((resolve) => {
+    const close = (v) => {
+      document.removeEventListener("keydown", keys, true);
+      resolve(v);
+    };
+    const keys = (e) => {
+      if (e.key === "Escape") close(false);
+      else if (e.key === "Enter") close(true);
+      else return;
+      e.preventDefault();
+      e.stopPropagation();
+    };
+    document.addEventListener("keydown", keys, true);
+    go.onclick = () => close(true);
+    cancelButton.onclick = () => close(false);
+  });
+  const source = Number(select.value), name = sourceName(source);
+  if (confirmed && path === null) {
+    path = await dialog.save({
+      title: `Save ${name} for Blender as`,
+      defaultPath: name.replace(/[.\s]+$/, "") + ".gltf",
+      filters: [{ name: "glTF 2.0 (Blender: File > Import > glTF 2.0)", extensions: ["gltf"] }],
+    });
+    if (path && !/\.gltf$/i.test(path)) path += ".gltf";
+  }
+  if (!confirmed || !path) {
+    reset();
+    return null;
+  }
+  for (const c of controls) c.disabled = true;
+  go.textContent = "Exporting…";
+  note.textContent = `Exporting ${name}…`;
+  let res;
+  try {
+    res = await invoke("export_gltf", { source, allAnimations: all.checked, path });
+  } catch (e) {
+    reset();
+    await showError(APP_TITLE, e.error ?? String(e));
+    return null;
+  }
+  reset();
+  log(`exported ${name} for Blender (${res.animations} animation${res.animations === 1 ? "" : "s"}) to ${res.path}`);
+  const closed = showInfo("Exported for Blender", `Saved ${name} to\n${res.path}\n\n`
+    + `${res.bones} bones, ${res.animations} animation${res.animations === 1 ? "" : "s"}.\n\n`
+    + "Open in Blender: File > Import > glTF 2.0\n\n"
+    + "The file contains the game's models and textures: keep it to yourself.\n\n");
+  const guide = el("a", { textContent: "How to play another animation (user guide)", href: "#" });
+  guide.addEventListener("click", (e) => {
+    e.preventDefault();
+    invoke("open_blender_guide");
+  });
+  $("dialog-text").append(guide);
+  await closed;
+  return res;
+}
+
 async function pickRowTextures(row) {
   const folder = await dialog.open({
     title: "Choose the folder with your painted textures",
@@ -725,7 +802,7 @@ async function main() {
   $("feedback").addEventListener("click", () => invoke("open_feedback"));
   if (!options.selftest) checkForUpdate();
   if (options.selftest) {
-    await import("./selftest.js").then((m) => m.run(options, { state, startLoad, exportTextures, setRowTextures, showInfo }));
+    await import("./selftest.js").then((m) => m.run(options, { state, startLoad, exportTextures, exportBlender, setRowTextures, showInfo }));
   }
 }
 

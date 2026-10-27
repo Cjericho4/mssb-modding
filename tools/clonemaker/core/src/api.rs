@@ -1083,6 +1083,18 @@ pub struct ExportedTextures {
     /// Number of PNGs written.
     pub count: usize,
 }
+/// Where `export_gltf` wrote the character, and what the file holds.
+#[derive(Debug, Serialize)]
+pub struct ExportedGltf {
+    /// The .gltf file written.
+    pub path: PathBuf,
+    /// The character's display name.
+    pub name: String,
+    /// Bones in its skeleton.
+    pub bones: usize,
+    /// Animations (Blender Actions) in the file.
+    pub animations: usize,
+}
 /// Stateful command facade for the Tauri window; create runs on its own worker thread.
 #[derive(Default)]
 pub struct Core {
@@ -1262,6 +1274,32 @@ impl Core {
         let folder = folder.join(format!("{name} textures"));
         let count = custom_textures::export(&game.preview(source)?.body, &name, &folder)?;
         Ok(ExportedTextures { folder, count })
+    }
+    /// Write `source` as a glTF file for Blender (`gltf::export`): its textured body, skeleton and
+    /// the normal swing, or with `all_animations` every batting, running, fielding, pitching and
+    /// extra animation. `textures` is an optional folder of painted `tNN_WxH.png` pictures.
+    pub fn export_gltf(
+        &self,
+        source: usize,
+        all_animations: bool,
+        path: &Path,
+        textures: Option<&Path>,
+    ) -> std::result::Result<ExportedGltf, ApiError> {
+        check_id(source)?;
+        let export = {
+            let lock = self.game.lock().unwrap();
+            let game = lock.as_ref().ok_or_else(|| ApiError {
+                error: "Choose a game first.".into(),
+            })?;
+            crate::gltf::export(&game.disc, &game.dol, source, all_animations, textures)?
+        };
+        std::fs::write(path, &export.json).map_err(|e| Error::from(e).at_path(path))?;
+        Ok(ExportedGltf {
+            path: path.to_path_buf(),
+            name: pretty_name(source),
+            bones: export.bones,
+            animations: export.animations,
+        })
     }
     /// Start the job, sending progress/log/done/error events through a thread-safe callback.
     pub fn create(

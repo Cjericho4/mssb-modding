@@ -35,6 +35,8 @@ const OPTIONS: &[&str] = &[
 pub enum Command {
     /// Display the reference's help text.
     Help,
+    /// Display the `export-gltf` help text.
+    GltfHelp,
     /// Print the donor slot table or source region list.
     List {
         /// Disc folder or ISO.
@@ -55,9 +57,104 @@ pub enum Command {
     },
     /// Execute a clone patch.
     Clone(CloneArgs),
+    /// `export-gltf`: write one character as a glTF file for Blender.
+    ExportGltf {
+        /// Disc folder or ISO.
+        disc: PathBuf,
+        /// Character name or charID.
+        character: String,
+        /// Every animation of the normal-match banks instead of the swing only.
+        all_animations: bool,
+        /// Folder of painted `tNN_WxH.png` textures.
+        textures: Option<PathBuf>,
+        /// The .gltf file to write.
+        out: PathBuf,
+    },
+}
+/// Usage of the `export-gltf` command.
+pub const GLTF_USAGE: &str =
+    "usage: mssb-clone export-gltf --game GAME --character NAME [--all-animations]
+                              [--textures FOLDER] --out FILE.gltf
+
+Export a character's textured body, skeleton and animations to a .gltf file that
+Blender opens (File > Import > glTF 2.0).
+
+  --game GAME         the game: a .iso file or an extracted disc folder (or --disc)
+  --character NAME    name or id, e.g. mario, dk, babymario, kingboo, 0
+  --all-animations    every batting, running, fielding, pitching and extra
+                      animation (default: only the normal swing)
+  --textures FOLDER   use your painted tNN_WxH.png pictures from Export textures
+  --out FILE.gltf     the file to write
+";
+const GLTF_PREFIX: &str = "export-gltf: ";
+/// Parse `export-gltf` flags (argv after the command word).
+fn parse_gltf(argv: &[String]) -> Result<Command> {
+    let usage = |m: String| Error::new(format!("{GLTF_PREFIX}{m}"));
+    let (mut disc, mut character, mut textures, mut out) = (None, None, None, None);
+    let mut all_animations = false;
+    let mut i = 0;
+    while i < argv.len() {
+        let (key, explicit) = argv[i]
+            .split_once('=')
+            .map_or((argv[i].as_str(), None), |(k, v)| (k, Some(v.to_owned())));
+        match key {
+            "-h" | "--help" => return Ok(Command::GltfHelp),
+            "--all-animations" => all_animations = true,
+            "--game" | "--disc" | "--character" | "--textures" | "--out" => {
+                let value = match explicit {
+                    Some(v) => v,
+                    None => {
+                        i += 1;
+                        match argv.get(i) {
+                            Some(v) if !v.starts_with("--") => v.clone(),
+                            _ => {
+                                return Err(usage(format!(
+                                    "argument {key}: expected one argument"
+                                )));
+                            }
+                        }
+                    }
+                };
+                let path = || Some(crate::normalize_path(Path::new(&value)));
+                match key {
+                    "--character" => character = Some(value.clone()),
+                    "--textures" => textures = path(),
+                    "--out" => out = path(),
+                    _ => disc = path(),
+                }
+            }
+            _ => return Err(usage(format!("unrecognized arguments: {}", argv[i]))),
+        }
+        i += 1;
+    }
+    let missing: Vec<_> = [
+        ("--game", disc.is_none()),
+        ("--character", character.is_none()),
+        ("--out", out.is_none()),
+    ]
+    .iter()
+    .filter(|(_, m)| *m)
+    .map(|(k, _)| *k)
+    .collect();
+    if !missing.is_empty() {
+        return Err(usage(format!(
+            "the following arguments are required: {}",
+            missing.join(", ")
+        )));
+    }
+    Ok(Command::ExportGltf {
+        disc: disc.unwrap(),
+        character: character.unwrap(),
+        all_animations,
+        textures,
+        out: out.unwrap(),
+    })
 }
 /// Parse CLI arguments using the Python reference's defaults, choices and required flags.
 pub fn parse(argv: &[String]) -> Result<Command> {
+    if argv.first().is_some_and(|a| a == "export-gltf") {
+        return parse_gltf(&argv[1..]);
+    }
     let mut args = CloneArgs::default();
     let mut disc = false;
     let mut out = false;
@@ -313,6 +410,36 @@ pub fn list_regions(disc: &Disc, c: usize, log: &mut dyn FnMut(&str)) -> Result<
 pub fn execute(command: Command, log: &mut dyn FnMut(&str)) -> Result<()> {
     match command {
         Command::Help => log(include_str!("help.txt")),
+        Command::GltfHelp => log(GLTF_USAGE),
+        Command::ExportGltf {
+            disc,
+            character,
+            all_animations,
+            textures,
+            out,
+        } => {
+            let c = parse_char(&character)?;
+            if let Some(dir) = &textures
+                && !dir.is_dir()
+            {
+                return Err(Error::new(format!(
+                    "--textures must name an existing folder: {}",
+                    dir.display()
+                )));
+            }
+            let disc = read_only_disc(&disc)?;
+            let dol = Dol::new(disc.system("main.dol")?)?;
+            let e = crate::gltf::export(&disc, &dol, c, all_animations, textures.as_deref())?;
+            std::fs::write(&out, &e.json).map_err(|err| Error::from(err).at_path(&out))?;
+            log(&format!(
+                "exported {}: {} bones, {} animation{} -> {}",
+                crate::api::pretty_name(c),
+                e.bones,
+                e.animations,
+                if e.animations == 1 { "" } else { "s" },
+                out.display()
+            ));
+        }
         Command::Clone(args) => {
             // ponytail: with --from the early checks would need every source; clone() still checks.
             if !args.textures.is_empty() && args.from.is_empty() {
@@ -382,6 +509,9 @@ fn read_only_disc(disc: &Path) -> Result<Disc> {
 }
 /// Render an argparse-style usage error for the CLI's stderr.
 pub fn usage_error(error: &Error) -> String {
+    if let Some(message) = error.message.strip_prefix(GLTF_PREFIX) {
+        return format!("{GLTF_USAGE}\nmssb-clone export-gltf: error: {message}");
+    }
     format!(
         "{}clone_character.py: error: {}",
         include_str!("usage.txt"),
@@ -400,6 +530,45 @@ mod tests {
         );
         assert_eq!(parse_char(" Baby Mario ").unwrap(), 7);
         assert_eq!(parse_char("53").unwrap(), 53);
+    }
+    #[test]
+    fn export_gltf_flags() {
+        let argv = |s: &str| s.split(' ').map(String::from).collect::<Vec<_>>();
+        let Command::ExportGltf {
+            disc,
+            character,
+            all_animations,
+            textures,
+            out,
+        } = parse(&argv(
+            "export-gltf --game g.iso --character dk --all-animations --out=dk.gltf",
+        ))
+        .unwrap()
+        else {
+            panic!()
+        };
+        assert_eq!(
+            (disc, character.as_str(), all_animations, textures, out),
+            (
+                PathBuf::from("g.iso"),
+                "dk",
+                true,
+                None,
+                PathBuf::from("dk.gltf")
+            )
+        );
+        assert!(matches!(
+            parse(&argv("export-gltf --help")).unwrap(),
+            Command::GltfHelp
+        ));
+        let error = parse(&argv("export-gltf --disc g")).err().unwrap();
+        assert!(
+            usage_error(&error).ends_with(
+                "export-gltf: error: the following arguments are required: --character, --out"
+            ),
+            "{}",
+            usage_error(&error)
+        );
     }
     #[test]
     fn texture_flags() {
