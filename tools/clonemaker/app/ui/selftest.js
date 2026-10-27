@@ -108,13 +108,25 @@ export async function run(options, app) {
     await waitFor(() => $("pill").textContent === "GYQE01 ready", "the game check");
     check($("status").textContent === "✔ Mario Superstar Baseball (USA) — OK", "status line: " + $("status").textContent);
     await waitFor(() => rows().length === 4, "the four default clone rows");
-    check(rows()[0].querySelector("select").selectedOptions[0].textContent === "Blue Toad — recommended (an extra Toad colour)",
-      "first row is Blue Toad");
+    const firstSlot = rows()[0].querySelector("select");
+    check(firstSlot.selectedOptions[0].textContent === "★ Blue Toad" &&
+      firstSlot.title === "Blue Toad — recommended (an extra Toad colour)",
+      "Blue Toad is visibly recommended and keeps its full explanation");
+    check(document.querySelector(".slot-legend")?.textContent === "★ recommended · × in use",
+      "slot markers have a visible legend");
     check(rows().map((r) => r.querySelectorAll("select")[1].value).join() === "blue,green,purple,yellow", "default colours");
     check($("out-path").value.endsWith(" - Clones.iso"), "default output: " + $("out-path").value);
     await waitFor(() => !$("img-after").hidden && caption().startsWith("All 9 textures of Mario"), "the first preview");
     check(document.querySelectorAll("#regions-box input").length === 2, "Mario's two colour regions");
     await shot("idle");
+    await resizeTo(640, 560);
+    const slotFont = getComputedStyle(firstSlot);
+    const measure = document.createElement("canvas").getContext("2d");
+    measure.font = slotFont.font;
+    check(measure.measureText(firstSlot.selectedOptions[0].textContent).width + 42 < firstSlot.clientWidth,
+      "the selected slot name and marker fit at 640 px");
+    await shot("slots_narrow");
+    await resizeTo(1320, 780);
     await shot("hover");
 
     // Advanced
@@ -227,7 +239,10 @@ export async function run(options, app) {
     check(blocks()[1].querySelector(".source").value === "1" && !["0", "1", ...before.split(",")].includes(luigiSlot),
       "Luigi's clone takes a free slot: " + luigiSlot);
     check(rows().map((r) => r.querySelector("select").value).join() === before, "Mario's clones keep their slots");
-    check([...rows()[0].querySelector("select").options].find((o) => o.value === luigiSlot)?.disabled, "Luigi's slot is greyed out for Mario");
+    const usedOption = [...rows()[0].querySelector("select").options].find((o) => o.value === luigiSlot);
+    check(usedOption?.disabled && usedOption.textContent.startsWith("× ") &&
+      usedOption.title.endsWith("(used by another character)"),
+      "Luigi's slot is greyed out and marked as used for Mario");
     check(blocks()[1].querySelectorAll(".regions-box input").length > 0, "Luigi's own colours to change");
     check($("chk-stats").nextElementSibling.textContent === "Give each clone the stats of the character it copies (Mario, Luigi)",
       "labels for several characters: " + $("chk-stats").nextElementSibling.textContent);

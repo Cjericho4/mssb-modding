@@ -364,6 +364,8 @@ button.add-group:disabled { border-color: var(--line); color: var(--dim); backgr
   margin: 3px 0;
 }
 .clone-row.head { margin: 0 0 6px; }
+.slot-legend { display: block; margin-top: 3px; font: 500 10px var(--sans);
+  letter-spacing: 0; text-transform: none; color: var(--dim); }
 .clone-row input[type="radio"] { margin-left: 4px; }
 .swatch { width: 26px; height: 26px; margin-left: 2px; border: 3px solid var(--soft-line); border-radius: 6px; }
 .no-game-hint { margin: 4px 2px; }
