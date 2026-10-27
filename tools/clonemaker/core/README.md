@@ -232,3 +232,25 @@ cargo run --release --manifest-path tools/clonemaker/core/Cargo.toml --example a
 `difftest.py --anims` runs each case with and without `--anims` and requires the outputs to differ
 only in those descriptors, windows and game.rel rows (plus the re-packed game.rel), and checks the
 refusals. `--help` stays the Python reference's, so the flag is documented here.
+
+## Clones of several characters (#18)
+
+`--from SLOT:CHARACTER` (repeatable; the window's `clones[].source`) makes that clone copy another
+character than `--source`, e.g. `--source mario --slot 29:blue --slot 44:green --from 44:luigi`.
+`clone()` loads every cloned character's tracks, body, colour regions, painted textures and
+animation plan before it writes anything, then gives each slot its own character's rows. The
+rules that keep that safe:
+
+* No cloned character may also be a donor slot of the same job (refused before the copy): every
+  source row read from main.dol, game.rel and the stat block is still the retail one.
+* Stats: rows are copied first, then chemistry columns, so a Mario clone's chemistry with a Luigi
+  clone is Mario's chemistry with Luigi.
+* Voice with `--ui donor`: a family bank that clones of several characters use gets each
+  character's voice merged in turn (`merge_voice_banks`), checked together by `verify_merged` and
+  one worst-case ARAM check.
+* With one character the log and the output are unchanged (difftest's frozen cases).
+
+`python tools/clonemaker/difftest.py --multi` checks mixed jobs against one-character jobs of each
+character: every slot's tracks, ARAM body, DOL rows, game.rel rows, stats row and its chemistry
+with non-clones must be the same, plus a shared voice bank and the source-is-a-slot refusal.
+

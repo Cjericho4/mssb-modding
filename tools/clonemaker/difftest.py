@@ -714,6 +714,94 @@ def anim_checks(cli, work, disc):
               expect_error="not one of the clone slots")
 
 
+# --- #18 clones of several characters: no Python reference; each clone of a mixed job must get
+# exactly the rows and files a one-character job of its own character gives it.
+CHARSIZE = 0x800E8300       # main.dol: u8[54][8] model scale rows
+REL_ROWS = [(0x8168, 2), (0x6EF8, 0x24), (0x7690, 2), (0x7870, 6), (0x7E34, 4), (0x17000, 4), (0x79B4, 0x10), (0x7F10, 2)]
+
+
+def multi_case(cli, work, disc, label, opts, groups, expect_error=None, voice_line=None):
+    """groups: [(source, [SLOT:COLOUR, ...])]; the first source is --source, the rest use --from."""
+    import clone_character as cc
+    first = groups[0][0]
+    argv = ["--source", first]
+    for c, slots in groups:
+        for spec in slots:
+            argv += ["--slot", spec]
+            if c != first:
+                argv += ["--from", "%s:%s" % (spec.split(":")[0], c)]
+    mixed = work / (label + "-mixed")
+    singles = [work / ("%s-%d" % (label, i)) for i in range(len(groups))]
+    try:
+        proc = subprocess.run([str(x) for x in [cli, "--disc", disc, *opts, *argv, "--out", mixed]],
+                              stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        if expect_error:
+            assert proc.returncode and expect_error in proc.stderr + proc.stdout, (label, proc.stderr)
+            print("PASS multi %s refused: %s" % (label, (proc.stderr + proc.stdout).strip().splitlines()[-1]), flush=True)
+            return
+        assert proc.returncode == 0, (label, proc.stderr)
+        if voice_line:
+            assert any(l.startswith("voice: ") and all(v in l for v in voice_line) for l in proc.stdout.splitlines()), (label, "voice merge")
+        pm = cc.Disc(mixed)
+        dm = cc.Dol((pm.sys / "main.dol").read_bytes())
+        gm = cc.load_rel(pm, dm, 1)
+        bm, _ = cc.rel_data_section(bytearray(gm))
+        stats_m = pm.read_zzzz(cc.ZZZZ_STATS_OFFSET, 54 * 0xA0)
+        mine = []
+        for (c, slots), single in zip(groups, singles):
+            run([cli, "--disc", disc, *opts, "--source", c, *sum((["--slot", x] for x in slots), []), "--out", single])
+            ps = cc.Disc(single)
+            ds = cc.Dol((ps.sys / "main.dol").read_bytes())
+            gs = cc.load_rel(ps, ds, 1)
+            bs, _ = cc.rel_data_section(bytearray(gs))
+            stats_s = ps.read_zzzz(cc.ZZZZ_STATS_OFFSET, 54 * 0xA0)
+            for spec in slots:
+                s = cc.parse_char(spec.split(":")[0])
+                mine.append(s)
+                for t in range(19):
+                    assert cc.load_subfile(pm, dm, s * 19 + t) == cc.load_subfile(ps, ds, s * 19 + t), (label, s, "track", t)
+                assert cc.effective_body(pm, dm, s) == cc.effective_body(ps, ds, s), (label, s, "ARAM body")
+                for table, size in [(cc.ADDR_FAMILY, 6), (cc.ADDR_GLOVE, 2), (cc.ADDR_MODELMAP, 2), (cc.ADDR_ROWKIND, 1), (CHARSIZE, 8)] \
+                        + ([(cc.ADDR_JUMPTABLE, 4)] if s < 48 else []):
+                    assert dm.read(table + s * size, size) == ds.read(table + s * size, size), (label, s, hex(table))
+                for k in range(15):
+                    assert dm.read(ANIMPARAMS + (k * 54 + s) * 2, 2) == ds.read(ANIMPARAMS + (k * 54 + s) * 2, 2), (label, s, "window", k)
+                for k in range(7):
+                    assert dm.desc(cc.ADDR_MASTER, 54 + s * 7 + k) == ds.desc(cc.ADDR_MASTER, 54 + s * 7 + k), (label, s, "master", k)
+                assert dm.desc(cc.ADDR_MASTER, 432 + s) == ds.desc(cc.ADDR_MASTER, 432 + s), (label, s, "master[432+s]")
+                for k in range(6):
+                    assert dm.desc(cc.ADDR_SUBITEM_FILES, s * 6 + k) == ds.desc(cc.ADDR_SUBITEM_FILES, s * 6 + k), (label, s, "sub-item", k)
+                for table, size in REL_ROWS:
+                    assert gm[bm + table + s * size:][:size] == gs[bs + table + s * size:][:size], (label, s, "game.rel 0x%X" % table)
+            clones = [cc.parse_char(x.split(":")[0]) for _, sl in groups for x in sl]
+            for spec in slots if "--no-stats" not in opts else []:
+                s = cc.parse_char(spec.split(":")[0])
+                # the row except chemistry with other clones, and every non-clone's chemistry with s
+                row_m, row_s = bytearray(stats_m[s * 0xA0:(s + 1) * 0xA0]), bytearray(stats_s[s * 0xA0:(s + 1) * 0xA0])
+                for o in clones:
+                    row_m[0x3B + o] = row_s[0x3B + o] = 0
+                assert row_m == row_s, (label, s, "stats row")
+                for j in range(54):
+                    if j not in clones:
+                        assert stats_m[j * 0xA0 + 0x3B + s] == stats_s[j * 0xA0 + 0x3B + s], (label, s, "chemistry", j)
+            shutil.rmtree(single)
+        print("PASS multi %s: %d clones of %d characters match their one-character jobs" % (label, len(mine), len(groups)), flush=True)
+    finally:
+        for p in [mixed, *singles]:
+            if p.exists():
+                shutil.rmtree(p)
+
+
+def multi_checks(cli, work, disc):
+    multi_case(cli, work, disc, "mario-luigi", [], [("mario", ["29:blue", "30:green"]), ("luigi", ["44:purple"])])
+    # two characters' voices into one family bank (both clones on Toad colours, donor menus)
+    multi_case(cli, work, disc, "shared-bank", ["--ui", "donor"], [("mario", ["29:blue"]), ("luigi", ["30:green"])],
+               voice_line=("Mario's", "Luigi's"))
+    multi_case(cli, work, disc, "three", ["--no-stats"], [("peach", ["29:blue"]), ("dk", ["44:green"]), ("bowser", ["45:red"])])
+    multi_case(cli, work, disc, "source-is-slot", [], [("mario", ["29:blue", "luigi:green"]), ("luigi", ["30:green"])],
+               expect_error="is cloned, so it cannot also be a donor slot")
+
+
 def grid_cases(full):
     import test_matrix as tm
     yield "default", []
@@ -852,7 +940,7 @@ def clone_grid(cli, work, disc, full, jobs):
 def main():
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--disc", type=Path, default=ROOT / "orig/GYQE01")
-    for flag in ("synthetic", "codecs", "helpers", "iso", "grid", "full-grid", "voice-grid", "sound", "textures", "api", "gui", "cli", "anims"):
+    for flag in ("synthetic", "codecs", "helpers", "iso", "grid", "full-grid", "voice-grid", "sound", "textures", "api", "gui", "cli", "anims", "multi"):
         ap.add_argument("--" + flag, action="store_true")
     ap.add_argument("--jobs", type=int, default=3, help="independent clone comparisons in parallel")
     ap.add_argument("--ram-isos", action="store_true", help="Linux: store clone comparison ISOs in anonymous RAM files via scratch symlinks")
@@ -872,7 +960,7 @@ def main():
     scratch = ROOT / ".scratch"
     scratch.mkdir(exist_ok=True)
     os.environ["TMPDIR"] = str(scratch)
-    if not any((args.synthetic, args.codecs, args.helpers, args.iso, args.grid, args.full_grid, args.voice_grid, args.sound, args.textures, args.api, args.gui, args.cli, args.anims)):
+    if not any((args.synthetic, args.codecs, args.helpers, args.iso, args.grid, args.full_grid, args.voice_grid, args.sound, args.textures, args.api, args.gui, args.cli, args.anims, args.multi)):
         args.synthetic = args.codecs = args.helpers = args.iso = True
     with tempfile.TemporaryDirectory(prefix="core-difftest-", dir=scratch) as tmp:
         work = Path(tmp)
@@ -900,6 +988,8 @@ def main():
             clone_grid(CORE / "target/release/mssb-clone", work, args.disc, "voice", args.jobs)
         if args.anims:
             anim_checks(CORE / "target/release/mssb-clone", work, args.disc)
+        if args.multi:
+            multi_checks(CORE / "target/release/mssb-clone", work, args.disc)
     return 0
 
 

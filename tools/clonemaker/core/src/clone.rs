@@ -48,6 +48,9 @@ pub struct CloneArgs {
     /// "Animations from" by donor slot (#9, `anims`): the charID whose ANIM banks that clone
     /// plays; slots not listed play the source's.
     pub anims: Vec<(usize, usize)>,
+    /// Clones of several characters (#18) by donor slot: the charID that clone copies; slots not
+    /// listed copy `source`.
+    pub from: Vec<(usize, usize)>,
 }
 impl Default for CloneArgs {
     fn default() -> Self {
@@ -67,6 +70,7 @@ impl Default for CloneArgs {
             dry_run: false,
             textures: Vec::new(),
             anims: Vec::new(),
+            from: Vec::new(),
         }
     }
 }
@@ -133,12 +137,28 @@ pub fn donor_slots(slots: &[String]) -> Result<Vec<usize>> {
         .map(|s| parse_char(s.split_once(':').map_or(s.as_str(), |p| p.0)))
         .collect()
 }
-fn names(clones: &[(usize, Recolour)]) -> String {
-    clones
+/// "A, B := Mario's; C := Luigi's": the clones grouped by the character they copy.
+fn assign(clones: &[(usize, Recolour)], srcs: &[usize], sources: &[usize]) -> String {
+    sources
         .iter()
-        .map(|(s, _)| CHAR_NAMES[*s])
+        .map(|c| {
+            let group: Vec<_> = clones
+                .iter()
+                .zip(srcs)
+                .filter(|(_, s)| *s == c)
+                .map(|((s, _), _)| CHAR_NAMES[*s])
+                .collect();
+            format!("{} := {}'s", group.join(", "), CHAR_NAMES[*c])
+        })
         .collect::<Vec<_>>()
-        .join(", ")
+        .join("; ")
+}
+/// One cloned character's files, read before any table is changed.
+struct Source {
+    c: usize,
+    case: u32,
+    tracks: [Gpc; 2],
+    body: Gpc,
 }
 fn ids(clones: &[(usize, Recolour)]) -> Vec<usize> {
     clones.iter().map(|p| p.0).collect()
@@ -325,79 +345,166 @@ pub fn clone(
     if slots.iter().collect::<std::collections::HashSet<_>>().len() != slots.len() {
         return Err(Error::new("duplicate donor slot".into()));
     }
-    if slots.contains(&c) {
-        return Err(Error::new(
-            "the source cannot be one of its own donors".into(),
-        ));
+    for (i, (slot, _)) in args.from.iter().enumerate() {
+        if !slots.contains(slot) {
+            return Err(Error::new(format!(
+                "--from {slot}: slot {slot} ({}) is not one of the clones",
+                CHAR_NAMES[*slot]
+            )));
+        }
+        if args.from[..i].iter().any(|(s, _)| s == slot) {
+            return Err(Error::new(format!("--from {slot} was given twice")));
+        }
+    }
+    // The character each clone copies, and the cloned characters in order of first use.
+    let srcs: Vec<usize> = slots
+        .iter()
+        .map(|s| args.from.iter().find(|(f, _)| f == s).map_or(c, |p| p.1))
+        .collect();
+    let mut sources: Vec<usize> = Vec::new();
+    for s in &srcs {
+        if !sources.contains(s) {
+            sources.push(*s);
+        }
+    }
+    // Load-bearing: every source row read below (DOL, game.rel, stats) is still the clean one.
+    if let Some(s) = slots.iter().find(|s| sources.contains(s)) {
+        return Err(Error::new(if sources.len() == 1 {
+            "the source cannot be one of its own donors".into()
+        } else {
+            format!(
+                "{} is cloned, so it cannot also be a donor slot",
+                CHAR_NAMES[*s]
+            )
+        }));
     }
     let use_overlay = !args.no_aram_overlay;
     let default_case = dol.u32(ADDR_JUMPTABLE)?;
-    let src_case = if c < 48 {
-        dol.u32(ADDR_JUMPTABLE + c as u32 * 4)?
-    } else {
-        default_case
+    let case_of = |c: usize| -> Result<u32> {
+        if c < 48 {
+            dol.u32(ADDR_JUMPTABLE + c as u32 * 4)
+        } else {
+            Ok(default_case)
+        }
     };
-    for (s, _) in &clones {
+    for ((s, _), &c) in clones.iter().zip(&srcs) {
         if use_overlay && dol.private_entry(*s)?.is_none() {
             return Err(Error::new(format!(
                 "slot {s} ({}) shares its ARAM body with other slots; pick a colour variant (Toads 29-32, Shy Guys 44-47, ...) or a stand-alone character, or use --no-aram-overlay",
                 CHAR_NAMES[*s]
             )));
         }
-        if *s >= 48 && src_case != default_case {
+        if *s >= 48 && case_of(c)? != default_case {
             return Err(Error::new(format!(
                 "slot {s} is outside the per-character setup switch (0..47) but {} needs its own case",
                 CHAR_NAMES[c]
             )));
         }
     }
+    for (slot, _) in &args.textures {
+        if !slots.contains(slot) {
+            return Err(Error::new(format!(
+                "--textures {slot}: slot {slot} ({}) is not one of the clones",
+                CHAR_NAMES[*slot]
+            )));
+        }
+    }
+    for (slot, _) in &args.anims {
+        if !slots.contains(slot) {
+            return Err(Error::new(format!(
+                "animations for {} were given, but it is not one of the clone slots",
+                crate::api::pretty_name(*slot)
+            )));
+        }
+    }
     stage(&mut progress, 0.45, "Patching")?;
-    log(&format!("source: {c} {}", CHAR_NAMES[c]));
-    let src_tracks = [
-        Gpc::new(disc.load_subfile(&dol, c * 19)?)?,
-        Gpc::new(disc.load_subfile(&dol, c * 19 + 1)?)?,
-    ];
-    let src_body = Gpc::new(disc.effective_body(&dol, c)?)?;
-    for g in [&src_tracks[0], &src_tracks[1], &src_body] {
-        g.check()?;
+    let mut loaded: std::collections::HashMap<usize, Source> = std::collections::HashMap::new();
+    for &c in &sources {
+        log(&format!("source: {c} {}", CHAR_NAMES[c]));
+        let src_tracks = [
+            Gpc::new(disc.load_subfile(&dol, c * 19)?)?,
+            Gpc::new(disc.load_subfile(&dol, c * 19 + 1)?)?,
+        ];
+        let src_body = Gpc::new(disc.effective_body(&dol, c)?)?;
+        for g in [&src_tracks[0], &src_tracks[1], &src_body] {
+            g.check()?;
+        }
+        log(&format!(
+            "  track0 {} B, track1 {} B, ARAM body {} B, texture archive {} B ({} textures)",
+            src_tracks[0].data.len(),
+            src_tracks[1].data.len(),
+            src_body.data.len(),
+            src_body.archive_bytes().len(),
+            src_body.textures.len()
+        ));
+        let regions = source_regions(&disc, &dol, c, &src_body)?;
+        log(&format!(
+            "  colour regions: {}",
+            regions
+                .iter()
+                .enumerate()
+                .map(|(i, r)| format!(
+                    "{i} {}{}",
+                    r.name,
+                    if r.default { " (default)" } else { "" }
+                ))
+                .collect::<Vec<_>>()
+                .join("; ")
+        ));
+        for ((_, rc), _) in clones.iter_mut().zip(&srcs).filter(|(_, s)| **s == c) {
+            rc.resolve(&regions)?;
+        }
+        loaded.insert(
+            c,
+            Source {
+                c,
+                case: case_of(c)?,
+                tracks: src_tracks,
+                body: src_body,
+            },
+        );
     }
-    log(&format!(
-        "  track0 {} B, track1 {} B, ARAM body {} B, texture archive {} B ({} textures)",
-        src_tracks[0].data.len(),
-        src_tracks[1].data.len(),
-        src_body.data.len(),
-        src_body.archive_bytes().len(),
-        src_body.textures.len()
-    ));
-    let regions = source_regions(&disc, &dol, c, &src_body)?;
-    log(&format!(
-        "  colour regions: {}",
-        regions
+    let group = |c: usize| -> Vec<usize> {
+        slots
             .iter()
-            .enumerate()
-            .map(|(i, r)| format!(
-                "{i} {}{}",
-                r.name,
-                if r.default { " (default)" } else { "" }
-            ))
-            .collect::<Vec<_>>()
-            .join("; ")
-    ));
-    for (_, rc) in &mut clones {
-        rc.resolve(&regions)?;
+            .zip(&srcs)
+            .filter(|(_, s)| **s == c)
+            .map(|(s, _)| *s)
+            .collect()
+    };
+    let mut painted = std::collections::HashMap::new();
+    for &c in &sources {
+        let mine = group(c);
+        let folders: Vec<_> = args
+            .textures
+            .iter()
+            .filter(|(s, _)| mine.contains(s))
+            .cloned()
+            .collect();
+        painted.extend(custom_textures::load_for_clones(
+            &folders,
+            &loaded[&c].body,
+            c,
+            &mine,
+            log,
+        )?);
     }
-    let painted = custom_textures::load_for_clones(&args.textures, &src_body, c, &slots, log)?;
     // Before any descriptor changes: the check, and the copies below, read the clean tables (an
     // "Animations from" character can itself be a clone slot whose rows get replaced).
     let clean = dol.clone();
-    let anim_plan = anims::plan(
-        &mut anims::Rigs::default(),
-        &disc,
-        &dol,
-        c,
-        &slots,
-        &args.anims,
-    )?;
+    let mut rigs = anims::Rigs::default();
+    let mut anim_plan = Vec::new();
+    for &c in &sources {
+        let mine = group(c);
+        let wanted: Vec<_> = args
+            .anims
+            .iter()
+            .filter(|(s, _)| mine.contains(s))
+            .copied()
+            .collect();
+        anim_plan.extend(anims::plan(&mut rigs, &disc, &dol, c, &mine, &wanted)?);
+    }
+    let plan_of = |s: usize| anim_plan.iter().find(|p| p.slot == s).unwrap();
     let start = align(disc.file_size("ZZZZ.dat")? as usize, 0x800);
     let mut appendix = Appendix {
         start,
@@ -414,19 +521,30 @@ pub fn clone(
     let mut moves = Vec::new();
     let mut colour_word = false;
     if args.ui_source {
-        let unique = dol.u8(ADDR_FAMILY + c as u32 * 6 + 2)?;
-        for (s, _) in &clones {
-            dol.write(ADDR_FAMILY + *s as u32 * 6 + 2, &[unique])?;
+        let mut uniques = Vec::new();
+        for &c in &sources {
+            let unique = dol.u8(ADDR_FAMILY + c as u32 * 6 + 2)?;
+            let mine = group(c);
+            for s in &mine {
+                dol.write(ADDR_FAMILY + *s as u32 * 6 + 2, &[unique])?;
+            }
+            uniques.push(format!(
+                "{} -> {unique} ({}'s)",
+                mine.iter()
+                    .map(|s| CHAR_NAMES[*s])
+                    .collect::<Vec<_>>()
+                    .join(", "),
+                CHAR_NAMES[c]
+            ));
         }
         dol.write(ADDR_FINDCHAR, FINDCHAR_PATCH)?;
         log(&format!(
-            "ui: unique index of {} -> {unique} ({}'s); fn_800698F8 rewritten to read lbl_800E8558[charID].uniqueIdx",
-            names(&clones),
-            CHAR_NAMES[c]
+            "ui: unique index of {}; fn_800698F8 rewritten to read lbl_800E8558[charID].uniqueIdx",
+            uniques.join("; ")
         ));
         let pdesc = portrait_desc(&dol)?;
         let mut pf = TextureFile::new(disc.load("ZZZZ.dat", pdesc, 0)?)?;
-        for (s, rc) in &clones {
+        for ((s, rc), &c) in clones.iter().zip(&srcs) {
             pf.copy_portrait(*s, c, rc)?;
         }
         let mut comp = compress_checked(&pf.data, true, " (portraits)")?;
@@ -440,19 +558,17 @@ pub fn clone(
         comp.resize(pdesc.0[3] as usize, 0);
         inplace.push((pdesc.0[2] as usize, comp));
         log(&format!(
-            "ui: HUD portraits {} := {}'s (palette recoloured); file re-packed in place at ZZZZ.dat+0x{:08X} ({packed} of {} B)",
-            names(&clones),
-            CHAR_NAMES[c],
+            "ui: HUD portraits {} (palette recoloured); file re-packed in place at ZZZZ.dat+0x{:08X} ({packed} of {} B)",
+            assign(&clones, &srcs, &sources),
             pdesc.0[2],
             pdesc.0[3]
         ));
         let (common, cd) = load_menu(&disc, &dol, ADDR_MENU_COMMON_DESC)?;
         let (grid, gd) = load_menu(&disc, &dol, ADDR_MENU_GRID_DESC)?;
-        let (ce, ge) = patch_menu_art(common, grid, c, &clones)?;
+        let (ce, ge) = patch_menu_art(common, grid, &srcs, &clones)?;
         log(&format!(
-            "ui: menus: preview name, mini picture and grid portrait of {} := {}'s (pictures recoloured)",
-            names(&clones),
-            CHAR_NAMES[c]
+            "ui: menus: preview name, mini picture and grid portrait of {} (pictures recoloured)",
+            assign(&clones, &srcs, &sources)
         ));
         for (label, desc, ed, counts) in [
             ("common menu file", cd, ce, [0, 5, 1]),
@@ -512,7 +628,15 @@ pub fn clone(
     } else {
         log("ui: donor (menus, HUD and announcer keep the donor's name/portrait/call-out)");
     }
-    for ((s, rc), plan) in clones.iter_mut().zip(&anim_plan) {
+    for ((s, rc), src) in clones.iter_mut().zip(&srcs) {
+        let Source {
+            c,
+            case: src_case,
+            tracks: src_tracks,
+            body: src_body,
+        } = &loaded[src];
+        let (c, src_case) = (*c, *src_case);
+        let plan = plan_of(*s);
         log(&format!(
             "clone -> slot {s} {}  ({}; recolours {})",
             CHAR_NAMES[*s],
@@ -536,7 +660,7 @@ pub fn clone(
             if let Some(p) = painted.get(s) {
                 log(&format!(
                     "  track {t}: {}",
-                    p.paint(&src_body, src_track, &mut g)?
+                    p.paint(src_body, src_track, &mut g)?
                 ));
             }
             g.check()?;
@@ -576,7 +700,7 @@ pub fn clone(
             if let Some(p) = painted.get(s) {
                 log(&format!(
                     "  ARAM body: {}",
-                    p.paint(&src_body, &src_body, &mut g)?
+                    p.paint(src_body, src_body, &mut g)?
                 ));
             }
             let archive = g.archive_bytes();
@@ -663,19 +787,23 @@ pub fn clone(
     // below). With --ui donor the game loads the donor family's bank, so that bank gets the
     // source's sounds too.
     let mut game_rel = disc.load_rel(&dol, 1)?;
-    let voice_base = {
+    let mut voice_bases = std::collections::HashMap::new();
+    {
         let (base, size) = rel_data_section(&game_rel)?;
         if REL_VOICE_BASE + 54 * 2 > size {
             return Err(Error::new(format!(
                 "game.rel table at 0x{REL_VOICE_BASE:X} is outside .data"
             )));
         }
-        u16_at(&game_rel, base + REL_VOICE_BASE + c * 2)?
-    };
+        for &c in &sources {
+            voice_bases.insert(c, u16_at(&game_rel, base + REL_VOICE_BASE + c * 2)?);
+        }
+    }
     let sound_moves = if args.ui_source {
         Vec::new()
     } else {
-        merge_voice_banks(&disc, &mut dol, c, voice_base, &slots, &mut appendix, log)?
+        let pairs: Vec<_> = slots.iter().copied().zip(srcs.iter().copied()).collect();
+        merge_voice_banks(&disc, &mut dol, &pairs, &voice_bases, &mut appendix, log)?
     };
     let rel_addrs = [0x800e8aa8, 0x800e8ab8, 0x800e8ac8];
     let rel_names = ["menus.rel", "game.rel", "challenge.rel"];
@@ -741,7 +869,7 @@ pub fn clone(
                         "game.rel table at 0x{off:X} is outside .data"
                     )));
                 }
-                for s in &slots {
+                for (s, c) in slots.iter().zip(&srcs) {
                     rel.copy_within(
                         base + off + c * rs..base + off + (c + 1) * rs,
                         base + off + s * rs,
@@ -754,7 +882,11 @@ pub fn clone(
                 "copied voice/hitbox/timing tables".into()
             });
             if !args.no_gameplay {
-                for plan in anim_plan.iter().filter(|p| p.anims != c) {
+                for (plan, _) in anim_plan
+                    .iter()
+                    .map(|p| (p, srcs[slots.iter().position(|s| *s == p.slot).unwrap()]))
+                    .filter(|(p, c)| p.anims != *c)
+                {
                     let a = plan.anims;
                     for &(off, rs, bytes) in TIMING_ROWS {
                         let row = base + off + plan.slot * rs;
@@ -859,23 +991,31 @@ pub fn clone(
                 &stat_ids[..5]
             )));
         }
-        let src = stats[c * 0xa0..(c + 1) * 0xa0].to_vec();
-        for s in &slots {
+        // Rows first, then chemistry columns, so a clone's chemistry with another character's
+        // clone reads that character's (sources are never slots, so their rows stay clean).
+        for (s, c) in slots.iter().zip(&srcs) {
+            let src = stats[c * 0xa0..(c + 1) * 0xa0].to_vec();
             stats[*s * 0xa0..(*s + 1) * 0xa0].copy_from_slice(&src);
             stats[*s * 0xa0 + 0x24..*s * 0xa0 + 0x26].copy_from_slice(&(*s as u16).to_be_bytes());
         }
-        for s in &slots {
+        for (s, c) in slots.iter().zip(&srcs) {
             for j in 0..54 {
                 stats[j * 0xa0 + 0x3b + *s] = stats[j * 0xa0 + 0x3b + c];
             }
         }
         zz.seek(SeekFrom::Start(0x6cf8800))?;
         zz.write_all(&stats)?;
-        log(&format!(
-            "stats: copied {}'s row and chemistry to {}",
-            CHAR_NAMES[c],
-            names(&clones)
-        ));
+        for &c in &sources {
+            log(&format!(
+                "stats: copied {}'s row and chemistry to {}",
+                CHAR_NAMES[c],
+                group(c)
+                    .iter()
+                    .map(|s| CHAR_NAMES[*s])
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            ));
+        }
     }
     if !rel_patches.is_empty() {
         let mut aa = OpenOptions::new()
@@ -914,7 +1054,11 @@ pub fn clone(
     if args.ui_source {
         log(&format!(
             "Menus (preview name, mini picture, grid portrait), HUD and the announcer show/say {} for these slots{}.",
-            CHAR_NAMES[c],
+            if sources.len() == 1 {
+                CHAR_NAMES[sources[0]]
+            } else {
+                "the character each clone copies"
+            },
             if args.keep_colour_word {
                 "; the donors keep their colour word"
             } else {
@@ -989,9 +1133,8 @@ fn log_animations(plan: &anims::Choice, c: usize, no_gameplay: bool, log: &mut d
 fn merge_voice_banks(
     disc: &Disc,
     dol: &mut Dol,
-    c: usize,
-    voice_base: u16,
-    slots: &[usize],
+    clones: &[(usize, usize)],
+    voice_bases: &std::collections::HashMap<usize, u16>,
     appendix: &mut Appendix,
     log: &mut dyn FnMut(&str),
 ) -> Result<Vec<(usize, Descriptor, Descriptor)>> {
@@ -1007,10 +1150,12 @@ fn merge_voice_banks(
         }
         Ok((disc.load("ZZZZ.dat", d, 0)?, d))
     };
-    let uc = unique(dol, c)?;
-    let mut banks: Vec<(usize, Vec<usize>)> = Vec::new();
-    for &s in slots {
+    // Donor family banks with the slots that use them and the characters whose voices they need
+    // (two clones of different characters on one family's colours both go into its bank).
+    let mut banks: Vec<(usize, Vec<usize>, Vec<usize>)> = Vec::new();
+    for &(s, c) in clones {
         let u = unique(dol, s)?;
+        let uc = unique(dol, c)?;
         if u == uc {
             log(&format!(
                 "voice: {} already uses {}'s voice bank (sound.{})",
@@ -1020,24 +1165,36 @@ fn merge_voice_banks(
             ));
         } else if let Some(bank) = banks.iter_mut().find(|b| b.0 == u) {
             bank.1.push(s);
+            if !bank.2.contains(&c) {
+                bank.2.push(c);
+            }
         } else {
-            banks.push((u, vec![s]));
+            banks.push((u, vec![s], vec![c]));
         }
     }
     if banks.is_empty() {
         return Ok(Vec::new());
     }
-    let (source_file, _) = load(dol, VOICE_ROW0 + uc)?;
-    let source = Group::parse(&source_file)?;
+    let mut voiced: Vec<usize> = Vec::new();
     let mut merged = Vec::new();
-    for (u, family) in banks {
+    for (u, family, sources) in banks {
         let row = VOICE_ROW0 + u;
         let (file, old) = load(dol, row)?;
         let mut bank = Group::parse(&file)?;
         let before = bank.aram_bytes();
-        let added = bank.merge(&source)?;
+        let mut originals = Vec::new();
+        let mut added = Vec::new();
+        for c in sources {
+            let (source_file, _) = load(dol, VOICE_ROW0 + unique(dol, c)?)?;
+            added.push((c, bank.merge(&Group::parse(&source_file)?)?));
+            originals.push((source_file, voice_bases[&c]));
+            if !voiced.contains(&c) {
+                voiced.push(c);
+            }
+        }
         let bytes = bank.to_bytes();
-        verify_merged(&bytes, &file, &[(&source_file, voice_base)])?;
+        let refs: Vec<_> = originals.iter().map(|(f, b)| (f.as_slice(), *b)).collect();
+        verify_merged(&bytes, &file, &refs)?;
         merged.push((row, family, old, file.len(), before, added, bank, bytes));
     }
     // ARAM: a merged bank also uploads the source's samples (once per match, whichever bank
@@ -1066,7 +1223,11 @@ fn merge_voice_banks(
     if worst > SAMPLE_HEAP {
         return Err(Error::new(format!(
             "with {}'s voice added to the donors' voice banks, a match could need {worst} B of sound memory (ARAM) but only {SAMPLE_HEAP} B exist; use --ui source",
-            CHAR_NAMES[c]
+            voiced
+                .iter()
+                .map(|c| CHAR_NAMES[*c])
+                .collect::<Vec<_>>()
+                .join(" and ")
         )));
     }
     let mut moves = Vec::new();
@@ -1080,16 +1241,26 @@ fn merge_voice_banks(
                 "main.dol: expected 1 copy of the sound.{row} descriptor, found {n}"
             )));
         }
+        let what = added
+            .iter()
+            .map(|(c, n)| {
+                let b = voice_bases[c];
+                format!(
+                    "{}'s {n} SFX 0x{b:X}..0x{:X}",
+                    CHAR_NAMES[*c],
+                    b + VOICE_LINES - 1
+                )
+            })
+            .collect::<Vec<_>>()
+            .join(" + ");
         log(&format!(
-            "voice: sound.{row} (voice bank of {}, group {}) + {}'s {added} SFX 0x{voice_base:X}..0x{:X} -> ZZZZ.dat+0x{off:08X} ({old_len} -> {size} B, ARAM {before} -> {} B); main.dol descriptor updated, challenge.rel copies below",
+            "voice: sound.{row} (voice bank of {}, group {}) + {what} -> ZZZZ.dat+0x{off:08X} ({old_len} -> {size} B, ARAM {before} -> {} B); main.dol descriptor updated, challenge.rel copies below",
             family
                 .iter()
                 .map(|s| CHAR_NAMES[*s])
                 .collect::<Vec<_>>()
                 .join(", "),
             bank.gid,
-            CHAR_NAMES[c],
-            voice_base + VOICE_LINES - 1,
             bank.aram_bytes()
         ));
         moves.push((row, old, new));

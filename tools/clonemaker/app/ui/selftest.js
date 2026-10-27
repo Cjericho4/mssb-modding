@@ -156,7 +156,7 @@ export async function run(options, app) {
     choose($("source"), 1);
     await waitFor(() => caption().includes("of Luigi") && $("preview-chip").textContent === "Luigi", "Luigi's preview");
     check(rows().length === 4 && $("chk-stats").nextElementSibling.textContent === "Give clones Luigi's stats", "Luigi keeps the rows");
-    check(animSelect().value === "1" && animSelect().options[0].textContent === "Luigi (own)" && app.state.rows[0].anims === null,
+    check(animSelect().value === "1" && animSelect().options[0].textContent === "Luigi (own)" && app.state.groups[0].rows[0].anims === null,
       "Luigi's own animations");
     choose($("source"), 0);
     await waitFor(() => caption().includes("of Mario"), "Mario's preview again");
@@ -184,19 +184,19 @@ export async function run(options, app) {
     const textures = () => rows()[0].querySelector(".textures");
     check(textures().querySelector(".pick").textContent === "My textures…" && textures().querySelector(".clear").hidden,
       "a new row has no textures");
-    const exporting = app.exportTextures(options.dir);
+    const exporting = app.exportTextures(app.state.groups[0], options.dir);
     await waitFor(() => dialogOpen("Saved 9 pictures of Mario to"), "the export dialog");
     await shot("textures_exported");
     dialogButton("OK").click();
     const exported = await exporting;
     check(exported?.count === 9 && exported.folder === inDir("Mario textures"), "export result: " + JSON.stringify(exported));
     check(logHas(`exported 9 textures of Mario to ${inDir("Mario textures")}`), "the export log line");
-    const exportingBroken = app.exportTextures(inDir("broken"));
+    const exportingBroken = app.exportTextures(app.state.groups[0], inDir("broken"));
     await waitFor(() => dialogOpen(inDir("broken")), "the second export dialog");
     dialogButton("OK").click();
     await exportingBroken;
     await invoke("selftest_edit_png", { path: [inDir("broken"), "Mario textures", "t04_64x64.png"].join(sep), how: "junk" });
-    app.setRowTextures(app.state.rows[0], [inDir("broken"), "Mario textures"].join(sep));
+    app.setRowTextures(app.state.groups[0].rows[0], [inDir("broken"), "Mario textures"].join(sep));
     $("out-path").value = inDir("Broken.iso");
     $("btn-go").click();
     await waitFor(() => dialogOpen("t04_64x64.png is not a PNG picture"), "the broken-texture error");
@@ -204,13 +204,28 @@ export async function run(options, app) {
     await shot("textures_error");
     dialogButton("OK").click();
     await invoke("selftest_edit_png", { path: [exported.folder, "t01_256x256.png"].join(sep), how: "paint" });
-    app.setRowTextures(app.state.rows[0], exported.folder);
+    app.setRowTextures(app.state.groups[0].rows[0], exported.folder);
     check(textures().classList.contains("set") && textures().querySelector(".pick").textContent === "Mario textures"
       && !textures().querySelector(".clear").hidden, "the row shows the folder");
     await shot("textures_row");
     textures().querySelector(".clear").click();
     check(!textures().classList.contains("set") && textures().querySelector(".pick").textContent === "My textures…", "clear");
-    app.setRowTextures(app.state.rows[0], exported.folder);
+    app.setRowTextures(app.state.groups[0].rows[0], exported.folder);
+
+    // clones of a second character: its own block with its own character, colours and first clone
+    const before = rows().map((r) => r.querySelector("select").value).join();
+    $("btn-group").click();
+    const blocks = () => [...document.querySelectorAll("#groups .group")];
+    const second = () => [...blocks()[1].querySelectorAll(".rows .clone-row")];
+    await waitFor(() => blocks().length === 2 && second().length === 1 && caption().includes("of Luigi"), "Luigi's block");
+    const luigiSlot = second()[0].querySelector("select").value;
+    check(blocks()[1].querySelector(".source").value === "1" && !["0", "1", ...before.split(",")].includes(luigiSlot),
+      "Luigi's clone takes a free slot: " + luigiSlot);
+    check(rows().map((r) => r.querySelector("select").value).join() === before, "Mario's clones keep their slots");
+    check([...rows()[0].querySelector("select").options].find((o) => o.value === luigiSlot)?.disabled, "Luigi's slot is greyed out for Mario");
+    check(blocks()[1].querySelectorAll(".regions-box input").length > 0, "Luigi's own colours to change");
+    check($("chk-stats").nextElementSibling.textContent === "Give clones the stats of the character they copy", "labels for several characters");
+    await shot("two_characters");
 
     // a wrong output name, an existing file
     $("out-path").value = inDir("x.gcm");
@@ -239,6 +254,7 @@ export async function run(options, app) {
     check(logHas("1 of 9 PNGs") && logHas("track 0: painted t01") && logHas("ARAM body: painted t01"), "the painted texture went in");
     check(logHas("animations: Luigi's (tracks 2-18 and ARAM master[461]") && logHas("animation frame rows of BlueToad"),
       "the first clone plays Luigi's animations");
+    check(logHas("source: 1 Luigi") && logHas("stats: copied Luigi's row and chemistry to "), "Luigi's clone went in too");
     await shot("done");
     dialogButton("OK").click();
     check($("pill").textContent === "Game created" && !$("btn-go").disabled, "Game created");
