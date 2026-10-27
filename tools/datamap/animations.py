@@ -44,7 +44,7 @@ class Reader:
         if kind not in QUANT_FORMATS:
             raise ValueError("unsupported quantization 0x%02X" % quantization)
         values = self.unpack(str(count) + QUANT_FORMATS[kind], offset)
-        # GetData copies floats directly; integer cases multiply by 2**-shift.
+        # GetData (0x800B5CF0) copies f32 as stored; integer formats are multiplied by 2**-shift.
         return [float(x) if kind == 4 else x / (1 << shift) for x in values]
 
 
@@ -64,8 +64,8 @@ def _settings(reader, offset, quantization, anim_type):
         result["scale"] = reader.numbers(offset, 3, quantization)
         offset += 3 * width
         if anim_type & 0x20:
-            result["scale_quaternion"] = reader.numbers(offset, 4, 0x3E)
-            offset += 8
+            result["scale_quaternion"] = reader.numbers(offset, 4, quantization)
+            offset += 4 * width
     if anim_type & 8:
         # Retail DoQuatAnimation uses fixed s16 / 16384, not quantizeInfo.
         result["quaternion"] = reader.numbers(offset, 4, 0x3E)
@@ -76,6 +76,54 @@ def _settings(reader, offset, quantization, anim_type):
     if anim_type & 1:
         result["translation"] = reader.numbers(offset, 3, quantization)
     return result
+
+
+def _auxiliary(reader, offset, quantization, anim_type, interpolation):
+    """Decode key +8 in scale, rotation, translation order.
+
+    in/out are Bezier offsets, Hermite tangents or Squad control quaternions.
+    A segment reads the current key's ease[1] and the next key's ease[0].
+    """
+    result = {}
+    width = struct.calcsize(QUANT_FORMATS[quantization >> 4])
+
+    def vectors(name, count, quant, element_width, eased=False):
+        nonlocal offset
+        if offset == 0:
+            raise ValueError("missing interpolation payload for %s" % name)
+        result[name] = {"in": reader.numbers(offset, count, quant),
+                        "out": reader.numbers(offset + count * element_width, count, quant)}
+        offset += 2 * count * element_width
+        if eased:
+            result[name]["ease"] = reader.numbers(offset, 2, 0x3E)
+            offset += 4
+
+    if anim_type & 0x10:
+        return result
+    scale_mode = (interpolation >> 2) & 3
+    if anim_type & 2 and scale_mode in (2, 3):
+        vectors("scale", 3, quantization, width, scale_mode == 3)
+    rotation_mode = (interpolation >> 4) & 7
+    if anim_type & 8 and rotation_mode in (4, 5):
+        # Quaternion controls are always s16/16384.
+        vectors("quaternion", 4, 0x3E, 2, rotation_mode == 5)
+    elif anim_type & 4 and rotation_mode in (2, 3):
+        if rotation_mode == 3:
+            # Reserved by offset arithmetic; DoEulerAnimation panics instead.
+            reader.check(offset, 6 * width + 4)
+            offset += 6 * width + 4
+        else:
+            vectors("euler", 3, quantization, width)
+    translation_mode = interpolation & 3
+    if anim_type & 1 and translation_mode in (2, 3):
+        vectors("translation", 3, quantization, width, translation_mode == 3)
+    return result
+
+
+def segment_ease(current, following, channel):
+    """Return the game's (ease-in, ease-out) pair for one key segment."""
+    return (current["auxiliary"][channel]["ease"][1],
+            following["auxiliary"][channel]["ease"][0])
 
 
 def parse_bank(data, keyframes=False):
@@ -124,7 +172,8 @@ def parse_bank(data, keyframes=False):
                 if keyframes:
                     frames.append({"time": time, "setting_offset": setting,
                                    "interpolation_offset": auxiliary,
-                                   "channels": _settings(reader, setting, quant, kind)})
+                                   "channels": _settings(reader, setting, quant, kind),
+                                   "auxiliary": _auxiliary(reader, auxiliary, quant, kind, interp)})
             if keyframes:
                 track["keyframes"] = frames
             sequence["tracks"].append(track)
