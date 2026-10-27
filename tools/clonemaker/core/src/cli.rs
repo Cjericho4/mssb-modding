@@ -29,6 +29,7 @@ const OPTIONS: &[&str] = &[
     "--textures",
     "--export-textures",
     "--anims",
+    "--from",
 ];
 /// One parsed CLI action, sharing CloneArgs with the library patcher.
 pub enum Command {
@@ -108,6 +109,7 @@ pub fn parse(argv: &[String]) -> Result<Command> {
             "--textures",
             "--export-textures",
             "--anims",
+            "--from",
         ]
         .contains(&key)
         {
@@ -164,6 +166,14 @@ pub fn parse(argv: &[String]) -> Result<Command> {
                         ))
                     })?;
                     args.anims.push((parse_char(slot)?, parse_char(from)?));
+                }
+                "--from" => {
+                    let (slot, from) = value.split_once(':').ok_or_else(|| {
+                        Error::new(format!(
+                            "argument --from: expected SLOT:CHARACTER, got '{value}'"
+                        ))
+                    })?;
+                    args.from.push((parse_char(slot)?, parse_char(from)?));
                 }
                 "--export-textures" => {
                     export_textures = Some(crate::normalize_path(Path::new(&value)));
@@ -300,7 +310,8 @@ pub fn execute(command: Command, log: &mut dyn FnMut(&str)) -> Result<()> {
     match command {
         Command::Help => log(include_str!("help.txt")),
         Command::Clone(args) => {
-            if !args.textures.is_empty() {
+            // ponytail: with --from the early checks would need every source; clone() still checks.
+            if !args.textures.is_empty() && args.from.is_empty() {
                 // check the painted folders before the long copy of the game
                 let (_, body) = read_only_body(&args.disc, &args.source)?;
                 let source = crate::api::pretty_name(parse_char(&args.source)?);
@@ -308,7 +319,7 @@ pub fn execute(command: Command, log: &mut dyn FnMut(&str)) -> Result<()> {
                     Painted::load(folder, &body, &source)?;
                 }
             }
-            if !args.anims.is_empty() {
+            if !args.anims.is_empty() && args.from.is_empty() {
                 // check the skeletons before the long copy of the game
                 let disc = read_only_disc(&args.disc)?;
                 let dol = Dol::new(disc.system("main.dol")?)?;

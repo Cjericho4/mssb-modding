@@ -147,6 +147,8 @@ pub fn default_rows(choices: &[SlotChoice]) -> Vec<CloneRow> {
             colour: colour.into(),
             textures: None,
             anims: None,
+            source: None,
+            regions: None,
         })
         .collect()
 }
@@ -553,6 +555,18 @@ pub struct CloneRow {
     /// "Animations from" (#9): the charID whose animations this clone plays; none = the source's.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub anims: Option<usize>,
+    /// The character this clone copies (#18); none = the job's `source`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source: Option<usize>,
+    /// Ticked colour regions of this clone's character; none = the job's `regions`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub regions: Option<Vec<usize>>,
+}
+impl CloneRow {
+    /// The character this clone copies.
+    pub fn source_or(&self, job_source: usize) -> usize {
+        self.source.unwrap_or(job_source)
+    }
 }
 /// Window job arguments from API.md.
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -600,6 +614,9 @@ pub fn validate_job(job: &Job, free_bytes: Option<u64>) -> Result<()> {
         if let Some(a) = row.anims {
             check_id(a)?;
         }
+        if let Some(c) = row.source {
+            check_id(c)?;
+        }
     }
     for row in &job.clones {
         if job.clones.iter().filter(|r| r.slot == row.slot).count() > 1 {
@@ -609,10 +626,22 @@ pub fn validate_job(job: &Job, free_bytes: Option<u64>) -> Result<()> {
             )));
         }
     }
-    if job.clones.iter().any(|r| r.slot == job.source) {
-        return Err(Error::new(
-            "A character can't be a clone of itself. Pick another slot.".into(),
-        ));
+    for row in &job.clones {
+        if row.slot == row.source_or(job.source) {
+            return Err(Error::new(
+                "A character can't be a clone of itself. Pick another slot.".into(),
+            ));
+        }
+        if job
+            .clones
+            .iter()
+            .any(|r| r.source_or(job.source) == row.slot)
+        {
+            return Err(Error::new(format!(
+                "{} is being cloned, so it can't also be replaced. Pick another slot.",
+                pretty_name(row.slot)
+            )));
+        }
     }
     if !job
         .output
@@ -768,9 +797,10 @@ pub fn run_job(job: &Job, emit: &dyn Fn(Event), cancel: &AtomicBool) -> Result<D
         return Err(Error::new(status.message));
     }
     let mut game = game.unwrap();
-    let selected = region_selection(&game.preview(job.source)?.regions, &job.regions);
     let mut slots = Vec::new();
     for row in &job.clones {
+        let regions = row.regions.as_ref().unwrap_or(&job.regions);
+        let selected = region_selection(&game.preview(row.source_or(job.source))?.regions, regions);
         slots.push(format!(
             "{}:{}",
             row.slot,
@@ -826,6 +856,12 @@ pub fn run_job(job: &Job, emit: &dyn Fn(Event), cancel: &AtomicBool) -> Result<D
                 .clones
                 .iter()
                 .filter_map(|r| Some((r.slot, r.anims?)))
+                .collect(),
+            from: job
+                .clones
+                .iter()
+                .filter(|r| r.source_or(job.source) != job.source)
+                .map(|r| (r.slot, r.source_or(job.source)))
                 .collect(),
             ..CloneArgs::default()
         };
@@ -888,12 +924,23 @@ pub fn run_job(job: &Job, emit: &dyn Fn(Event), cancel: &AtomicBool) -> Result<D
         None
     };
     result?;
-    let hint = pick_hint(
-        &game.dol,
-        job.source,
-        &job.clones.iter().map(|r| r.slot).collect::<Vec<_>>(),
-        job.ui_source,
-    )?;
+    let mut sources: Vec<usize> = Vec::new();
+    for r in &job.clones {
+        if !sources.contains(&r.source_or(job.source)) {
+            sources.push(r.source_or(job.source));
+        }
+    }
+    let mut hints = Vec::new();
+    for c in sources {
+        let slots: Vec<_> = job
+            .clones
+            .iter()
+            .filter(|r| r.source_or(job.source) == c)
+            .map(|r| r.slot)
+            .collect();
+        hints.push(pick_hint(&game.dol, c, &slots, job.ui_source)?);
+    }
+    let hint = hints.join(" ");
     Ok(Done {
         iso: job.output.clone(),
         work: kept,
@@ -1166,18 +1213,22 @@ impl Core {
             let game = lock
                 .as_mut()
                 .ok_or_else(|| Error::new("Choose a game first.".into()))?;
-            let slots: Vec<_> = job.clones.iter().map(|r| r.slot).collect();
-            anims::plan(
-                &mut game.rigs,
-                &game.disc,
-                &game.dol,
-                job.source,
-                &slots,
-                &wanted,
-            )?;
-            let body = &game.preview(job.source)?.body;
-            for folder in job.clones.iter().filter_map(|r| r.textures.as_ref()) {
-                Painted::load(folder, body, &pretty_name(job.source))?;
+            for row in &job.clones {
+                let c = row.source_or(job.source);
+                if let Some(a) = row.anims {
+                    anims::plan(
+                        &mut game.rigs,
+                        &game.disc,
+                        &game.dol,
+                        c,
+                        &[row.slot],
+                        &[(row.slot, a)],
+                    )?;
+                }
+                if let Some(folder) = &row.textures {
+                    let body = &game.preview(c)?.body;
+                    Painted::load(folder, body, &pretty_name(c))?;
+                }
             }
             Ok(())
         };

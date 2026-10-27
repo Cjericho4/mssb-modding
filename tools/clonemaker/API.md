@@ -30,8 +30,19 @@ exactly the source's defaults (`region_selection`). `fraction` is 0..1 of the wh
 | `create` | `job` | starts the job; results come as events | `run_job` |
 | `cancel` | | stops the running job at its next progress step | `run_job(cancel=)` |
 
-`job` = `{ game, output, source, clones: [{ slot, colour, textures?, anims? }], keeplum, regions: [index],
+`job` = `{ game, output, source, clones: [{ slot, colour, textures?, anims?, source?, regions? }], keeplum, regions: [index],
 ui_source, copy_stats, keep_colour_word, keep_work }`.
+
+`clones[].source` and `clones[].regions` (optional, #18; no Python reference) let one game hold clones
+of several characters: the charID that clone copies and its ticked colour regions (`source_info`
+of that character). Omitted: the job's `source` and `regions`, and a job whose clones all copy
+`source` is byte-identical to one without the fields. Every per-character row (tracks, ARAM body,
+model scale, game.rel tables, stats row, voice) comes from the clone's own character; chemistry
+between two clones of different characters is those characters' chemistry. `validate_job` refuses
+a slot that is also one of the job's cloned characters ("X is being cloned, so it can't also be
+replaced"). With `ui_source: false`, a donor family bank used by clones of several characters gets
+all of their voices (one merge per character, one ARAM check for the whole set). The `done` hint
+has one sentence per character.
 
 `clones[].textures` (optional, #37; no Python reference) is a folder of painted PNGs made by
 `export_textures` for the job's source. Each edited PNG replaces that body texture in every copy

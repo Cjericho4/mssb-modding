@@ -237,7 +237,7 @@ impl MenuTextures {
 pub fn patch_menu_art(
     common: Vec<u8>,
     grid: Vec<u8>,
-    c: usize,
+    srcs: &[usize],
     clones: &[(usize, Recolour)],
 ) -> Result<(MenuTextures, MenuTextures)> {
     let names = frame_textures(&common, 0x82)?;
@@ -256,10 +256,10 @@ pub fn patch_menu_art(
     }
     let mut ce = MenuTextures::new(common)?;
     let mut ge = MenuTextures::new(grid)?;
-    for (s, _) in clones {
+    for ((s, _), &c) in clones.iter().zip(srcs) {
         ce.retarget(names[*s], names[c], None)?;
     }
-    for (s, rc) in clones {
+    for ((s, rc), &c) in clones.iter().zip(srcs) {
         let pal = rc.for_palette();
         let cp = pal.recolour_tlut(ce.tf.tlut(mini[c]))?;
         let gp = pal.recolour_tlut(ge.tf.tlut(portraits[c]))?;

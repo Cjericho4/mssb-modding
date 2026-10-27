@@ -270,7 +270,7 @@ select:disabled {
 }
 option { background: var(--pop); color: var(--text); }
 option:checked { background: var(--pop-select); }
-#source { width: 184px; }
+.group .source { width: 184px; }
 
 input[type="checkbox"], input[type="radio"] {
   appearance: none;
@@ -338,10 +338,20 @@ input[type="range"]:disabled::-webkit-slider-thumb { background: var(--dim); }
 .status.bad { color: var(--danger); }
 
 /* ---- 02 clones ---------------------------------------------------------------------------- */
-#regions { margin-bottom: 12px; }
-#regions .label { margin-bottom: 4px; }
-#regions-box { display: grid; grid-template-columns: repeat(3, max-content); gap: 2px 18px; }
-#regions-box:empty { display: none; }
+/* one block per cloned character */
+.group + .group { margin-top: 14px; padding-top: 14px; border-top: 1px solid var(--line); }
+.group-head { margin-bottom: 10px; }
+/* adds a whole new character section, so it spans the card and stands apart from "+ Add a clone" */
+button.add-group { display: block; width: 100%; height: 40px; margin: 14px 0 10px; border: 1px dashed var(--red-line);
+  background: transparent; color: var(--red); font-weight: 600; letter-spacing: 0.02em; }
+button.add-group:hover { border-style: solid; background: var(--hover); color: var(--text); }
+button.add-group:disabled { border-color: var(--line); color: var(--dim); background: transparent; }
+.group-head .grow { flex: 1; }
+.group .add { margin-top: 8px; }
+.group .regions { margin-bottom: 12px; }
+.group .regions .label { margin-bottom: 4px; }
+.regions-box { display: grid; grid-template-columns: repeat(3, max-content); gap: 2px 18px; }
+.regions-box:empty { display: none; }
 .region { display: flex; align-items: center; gap: 6px; }
 .region i { width: 14px; height: 14px; border: 1px solid var(--soft-line); }
 .region .check { padding: 3px 0; }
@@ -356,7 +366,7 @@ input[type="range"]:disabled::-webkit-slider-thumb { background: var(--dim); }
 .clone-row.head { margin: 0 0 6px; }
 .clone-row input[type="radio"] { margin-left: 4px; }
 .swatch { width: 26px; height: 26px; margin-left: 2px; border: 3px solid var(--soft-line); border-radius: 6px; }
-#no-game-hint { margin: 4px 2px; }
+.no-game-hint { margin: 4px 2px; }
 .textures { display: flex; min-width: 0; }
 .textures button.pick { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; padding: 0 10px; color: var(--muted); }
 .textures.set button.pick { border-color: var(--red-line); color: var(--text); border-radius: var(--radius) 0 0 var(--radius); }

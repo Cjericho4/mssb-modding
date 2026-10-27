@@ -18,6 +18,7 @@ changes your original game. It saves a new `.iso` next to it.
 [3. Set up your clones](#3-set-up-your-clones) ·
 [4. Create the game](#4-create-the-game) ·
 [5. Play it](#5-play-it) ·
+[Clones of several characters](#clones-of-several-characters) ·
 [Your own textures](#your-own-textures) ·
 [Animations from another character](#animations-from-another-character) ·
 [Advanced options](#advanced-options) ·
@@ -99,6 +100,22 @@ game list (**Config → Paths → Add…**). Keep your original `.iso` too; the 
 With [Show clones as …](#advanced-options) on (the default), the extra Toads are listed with the
 cloned character's name and a picture in their colour, and the announcer uses that name.
 
+## Clones of several characters
+
+One game can hold clones of more than one character, for example two Mario recolours on the Toad
+colours and a green Bowser on a Shy Guy slot.
+
+1. Set up the first character's clones as usual.
+2. Click **+ Clone another character** (under the clones). A new section appears with its own
+   **Character to clone** (the next character nobody uses yet) and one clone on a free slot.
+3. Each section works like the first: its own colours to change, clones, animations, textures and
+   **Export textures…**. The **×** at the top right of a section removes that character and its
+   clones.
+
+A slot can only be used once in the whole game, and a character you clone can't also be replaced.
+Slots another section already uses are greyed out with *(used by another character)*.
+**Advanced options** apply to every section.
+
 ## Your own textures
 
 Paint a character any way you like instead of picking a colour.
@@ -128,7 +145,8 @@ Mario with Luigi's animations.
 
 ## Advanced options
 
-Click **Advanced options ▸**. You normally don't need these.
+Click **Advanced options ▸**. You normally don't need these. They apply to every clone in the game;
+with several characters, each clone follows the character it copies.
 
 - **Show clones as … (recommended):** the roster screen, select grid, lineup and in-match card show
   the cloned character's name and a picture in the clone's colour, and the announcer says that name.

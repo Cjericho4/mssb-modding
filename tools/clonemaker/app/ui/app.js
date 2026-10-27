@@ -23,17 +23,12 @@ const el = (tag, props = {}, children = []) => {
 const state = {
   game: null,          // path of a game that passed its checks
   sources: [],         // [{ id, name }]
-  info: null,          // source_info of the shown source: { regions, slots, default_rows }
-  animChoices: [],     // anim_choices of the shown source: [{ id, label, exact, note }], its own first
-  infoSource: null,
-  infoSeq: 0,
-  rows: [],            // { id, slot, colour, textures, anims (null: the source's own), el }
+  groups: [],          // one block per cloned character, see newGroup()
   rowSeq: 0,
   previewRow: null,
   previewSeq: 0,
   previewTimer: null,
   previewed: new Set(), // sources whose textures have been loaded once
-  ticks: null,          // Set of ticked region indices, null until the regions are known
   busy: false,
   cancelling: false,
 };
@@ -45,8 +40,8 @@ const serial = (fn) => (rowQueue = rowQueue.then(fn, fn));
 
 const isCustom = (c) => c.startsWith("#");
 const colourLabel = (c) => (isCustom(c) ? "Custom " + c.toUpperCase() : c[0].toUpperCase() + c.slice(1));
-const sourceId = () => Number($("source").value);
-const sourceName = (id = sourceId()) => (state.sources.find((s) => s.id === id) || { name: "" }).name;
+const sourceName = (id) => (state.sources.find((s) => s.id === id) || { name: "" }).name;
+const allRows = () => state.groups.flatMap((g) => g.rows);
 const withSuffix = (path, suffix) => path.replace(/\.[^./\\]*$/, "") + suffix;
 const fileName = (path) => path.split(/[\\/]/).pop();
 
@@ -84,19 +79,26 @@ function log(line) {
 
 /** Inputs that wait for a game and are locked while one is being made. */
 function setEnabled(on) {
-  const inputs = ["source", "btn-add", "btn-export", "chk-ui", "chk-colour", "chk-stats", "keeplum", "chk-keep", "out-path", "btn-out", "btn-go"]
+  const inputs = ["btn-group", "chk-ui", "chk-colour", "chk-stats", "keeplum", "chk-keep", "out-path", "btn-out", "btn-go"]
     .map($)
-    .concat([...document.querySelectorAll("#rows input, #rows select, #rows button, #regions-box input")]);
+    .concat([...document.querySelectorAll("#groups input, #groups select, #groups button")]);
   for (const w of inputs) w.disabled = !on;
   $("btn-iso").disabled = $("btn-dir").disabled = state.busy;
   if (on && !$("chk-ui").checked) $("chk-colour").disabled = true;  // the colour word only matters with source menus
 }
 
 function updateSourceLabels() {
-  const n = sourceName();
-  $("btn-export").title = `Save ${n}'s textures as PNG pictures to paint your own`;
-  $("chk-ui-text").textContent = `Show clones as ${n}: name and pictures in menus, HUD, announcer (recommended)`;
-  $("chk-stats-text").textContent = `Give clones ${n}'s stats`;
+  const many = state.groups.length > 1, n = sourceName(state.groups[0]?.source ?? 0);
+  for (const g of state.groups) {
+    g.ui.export.title = `Save ${sourceName(g.source)}'s textures as PNG pictures to paint your own`;
+    g.ui.drop.hidden = !many;
+  }
+  // With several characters, say "each clone ... it copies" and name them, so nobody reads it as one character.
+  const names = state.groups.map((g) => sourceName(g.source)).join(", ");
+  $("chk-ui-text").textContent = many
+    ? `Show each clone as the character it copies (${names}): name and pictures in menus, HUD, announcer (recommended)`
+    : `Show clones as ${n}: name and pictures in menus, HUD, announcer (recommended)`;
+  $("chk-stats-text").textContent = many ? `Give each clone the stats of the character it copies (${names})` : `Give clones ${n}'s stats`;
 }
 
 // ---------------------------------------------------------------- dialogs
@@ -167,20 +169,82 @@ async function startLoad(path) {
     return;
   }
   $("out-path").value = await invoke("default_output", { gamePath: path });
-  state.info = state.infoSource = null;
-  await loadSource(true);
+  while (state.groups.length > 1) dropGroup(state.groups[state.groups.length - 1]);
+  state.groups[0].info = state.groups[0].infoSource = null;
+  await loadSource(state.groups[0], true);
 }
 
-// ---------------------------------------------------------------- source, regions, rows
-/** Fetch the shown source's slots and colour regions, then fit the rows (reset: the default rows). */
-async function loadSource(reset) {
-  const src = sourceId(), seq = ++state.infoSeq;
-  if (state.infoSource !== src) showRegions(null, `Finding ${sourceName(src)}'s colours…`);
+// ---------------------------------------------------------------- characters, regions, rows
+/** A block for one cloned character: its own source, colour regions and clone rows. The first
+ *  block's parts carry the page's old ids (#source, #rows, ...). */
+function newGroup(source) {
+  const root = $("group-tpl").content.firstElementChild.cloneNode(true);
+  const q = (c) => root.querySelector("." + c);
+  const g = {
+    source, rows: [], ticks: null, info: null, animChoices: [], infoSource: null, infoSeq: 0,
+    ui: { root, source: q("source"), regionsBox: q("regions-box"), regionsHint: q("regions-hint"),
+      noGame: q("no-game-hint"), rows: q("rows"), add: q("add"), export: q("export"), drop: q("drop") },
+  };
+  g.ui.source.replaceChildren(...state.sources.map((s) => el("option", { value: s.id, textContent: s.name })));
+  g.ui.source.value = String(source);
+  g.ui.source.addEventListener("change", () => sourceChanged(g));
+  g.ui.add.addEventListener("click", () => serial(() => addRow(g)));
+  g.ui.export.addEventListener("click", () => exportTextures(g));
+  g.ui.drop.addEventListener("click", () => removeGroup(g));
+  state.groups.push(g);
+  $("groups").append(root);
+  setGroupIds();
+  updateSourceLabels();
+  return g;
+}
+
+function setGroupIds() {
+  const ids = { source: "source", regionsBox: "regions-box", regionsHint: "regions-hint", noGame: "no-game-hint",
+    rows: "rows", add: "btn-add", export: "btn-export" };
+  state.groups.forEach((g, i) => {
+    for (const [part, id] of Object.entries(ids)) g.ui[part].id = i === 0 ? id : "";
+  });
+}
+
+function dropGroup(g) {
+  state.groups.splice(state.groups.indexOf(g), 1);
+  g.ui.root.remove();
+  setGroupIds();
+  updateSourceLabels();
+}
+
+/** Slots and characters that another block uses (a slot or character can only be used once). */
+function usedElsewhere(g) {
+  return state.groups.filter((o) => o !== g).flatMap((o) => [o.source, ...o.rows.map((r) => r.slot)]);
+}
+
+async function addGroup() {
+  if (!state.game || state.busy) return;
+  const taken = state.groups.flatMap((g) => [g.source, ...g.rows.map((r) => r.slot)]);
+  const free = state.sources.find((s) => !taken.includes(s.id));
+  if (!free) return;
+  const g = newGroup(free.id);
+  setEnabled(false);
+  await loadSource(g, true);
+  g.ui.root.scrollIntoView({ block: "nearest" });
+}
+
+function removeGroup(g) {
+  if (state.groups.length < 2 || state.busy) return;
+  const previewed = g.rows.some((r) => r.id === state.previewRow);
+  dropGroup(g);
+  if (previewed) selectPreviewRow(state.groups[0].rows[0], true);
+}
+
+/** Fetch a block's source slots and colour regions, then fit its rows (reset: the default rows). */
+async function loadSource(g, reset) {
+  const src = g.source, seq = ++g.infoSeq;
+  if (g.infoSource !== src) showRegions(g, null, `Finding ${sourceName(src)}'s colours…`);
   let info, anims;
   try {
     info = await invoke("source_info", { source: src });
   } catch (e) {
-    if (seq === state.infoSeq) showRegions(null, `No preview for ${sourceName(src)}: ${e.error}`);
+    if (seq === g.infoSeq) showRegions(g, null, `No preview for ${sourceName(src)}: ${e.error}`);
     return;
   }
   try {
@@ -189,81 +253,100 @@ async function loadSource(reset) {
     anims = [{ id: src, label: `${sourceName(src)} (own)`, exact: true, note: "" }];
     log(`animations: ${e.error ?? e}`);
   }
-  if (seq !== state.infoSeq || !state.game) return;
-  state.info = info;
-  state.animChoices = anims;
-  state.infoSource = src;
-  showRegions(info.regions, `${sourceName(src)} has no colours that can be changed.`);
-  await serial(() => rebuildRows(reset));
+  if (seq !== g.infoSeq || !state.game) return;
+  g.info = info;
+  g.animChoices = anims;
+  g.infoSource = src;
+  showRegions(g, info.regions, `${sourceName(src)} has no colours that can be changed.`);
+  await serial(() => rebuildRows(g, reset));
   setEnabled(!state.busy);
   schedulePreview(true);
 }
 
-/** Checkboxes for the source's colour regions (the defaults ticked); `note` when there are none. */
-function showRegions(regions, note) {
-  const box = $("regions-box");
+/** Checkboxes for the block's colour regions (the defaults ticked); `note` when there are none. */
+function showRegions(g, regions, note) {
+  const box = g.ui.regionsBox;
   box.replaceChildren();
-  state.ticks = regions ? new Set(regions.filter((r) => r.default).map((r) => r.index)) : null;
+  g.ticks = regions ? new Set(regions.filter((r) => r.default).map((r) => r.index)) : null;
   for (const r of (regions || []).slice(0, MAX_REGIONS)) {
     const chk = el("input", { type: "checkbox", checked: r.default, disabled: state.busy });
-    chk.addEventListener("change", () => regionsChanged(r.index, chk));
+    chk.addEventListener("change", () => regionsChanged(g, r.index, chk));
     const swatch = el("i");
     swatch.style.background = r.swatch;
     box.append(el("div", { className: "region" }, [swatch, el("label", { className: "check" }, [chk, el("span", { textContent: r.label })])]));
   }
-  $("regions-hint").textContent = note;
-  $("regions-hint").hidden = Boolean(regions && regions.length);
+  g.ui.regionsHint.textContent = note;
+  g.ui.regionsHint.hidden = Boolean(regions && regions.length);
 }
 
-function regionsChanged(index, chk) {
-  if (chk.checked) state.ticks.add(index);
-  else if (state.ticks.size > 1) state.ticks.delete(index);
+function regionsChanged(g, index, chk) {
+  if (chk.checked) g.ticks.add(index);
+  else if (g.ticks.size > 1) g.ticks.delete(index);
   else chk.checked = true;            // at least one colour has to change
-  schedulePreview();
+  const row = g.rows.find((r) => r.id === state.previewRow);
+  if (row) schedulePreview();
+  else if (g.rows.length) selectPreviewRow(g.rows[0], true);
 }
 
 /** Ticked region indices (the core drops them when they are exactly the defaults). */
-const tickedRegions = () => [...state.ticks].sort((a, b) => a - b);
+const tickedRegions = (g) => [...(g.ticks || [])].sort((a, b) => a - b);
 
-async function rebuildRows(reset) {
-  $("no-game-hint").hidden = true;
-  const valid = new Set(state.info.slots.map((s) => s.id));
+async function rebuildRows(g, reset) {
+  g.ui.noGame.hidden = true;
+  const valid = new Set(g.info.slots.map((s) => s.id));
+  const used = usedElsewhere(g);
   let wanted;
-  if (reset || !state.rows.length) {
-    wanted = state.info.default_rows;
-    for (const r of state.rows) setRowTextures(r, null);
+  if ((reset || !g.rows.length) && state.groups.length > 1 && g !== state.groups[0]) {
+    // another character starts with one clone, on the first slot no other block uses
+    for (const r of g.rows) setRowTextures(r, null);
+    const slot = await invoke("next_free_slot", { source: g.source, used });
+    wanted = slot === null ? [] : [{ slot, colour: "blue" }];
+  } else if (reset || !g.rows.length) {
+    wanted = g.info.default_rows;
+    for (const r of g.rows) setRowTextures(r, null);
   } else {
     wanted = [];
-    const used = [];
-    for (const r of state.rows) {
+    for (const r of g.rows) {
       const slot = valid.has(r.slot) && !used.includes(r.slot)
-        ? r.slot : await invoke("next_free_slot", { source: sourceId(), used });
+        ? r.slot : await invoke("next_free_slot", { source: g.source, used });
       if (slot !== null) {
         wanted.push({ slot, colour: r.colour, anims: r.anims });
         used.push(slot);
       }
     }
   }
-  while (state.rows.length > wanted.length) state.rows.pop().el.remove();
-  state.rows.forEach((row, i) => {
+  while (g.rows.length > wanted.length) g.rows.pop().el.remove();
+  g.rows.forEach((row, i) => {
     fillSlots(row);
     setRow(row, wanted[i].slot, wanted[i].colour);
     setRowAnims(row, wanted[i].anims ?? null);
   });
-  for (const w of wanted.slice(state.rows.length)) await addRow(w.slot, w.colour);
-  if (state.rows.length && !state.rows.some((r) => r.id === state.previewRow)) selectPreviewRow(state.rows[0]);
-  updateAddLabel();
+  for (const w of wanted.slice(g.rows.length)) await addRow(g, w.slot, w.colour);
+  if (!allRows().some((r) => r.id === state.previewRow) && g.rows.length) selectPreviewRow(g.rows[0]);
+  updateAddLabel(g);
 }
 
+/** The block's slot list; slots another block uses are greyed out. */
 function fillSlots(row) {
-  row.slotSelect.replaceChildren(...state.info.slots.map((s) => el("option", { value: s.id, textContent: s.label })));
+  const g = row.group, taken = usedElsewhere(g);
+  row.slotSelect.replaceChildren(...g.info.slots.map((s) => el("option", {
+    value: s.id,
+    textContent: taken.includes(s.id) ? `${s.label} (used by another character)` : s.label,
+    disabled: taken.includes(s.id),
+  })));
+  row.slotSelect.value = String(row.slot);
+}
+
+/** Refresh every block's slot lists after a slot or character changed somewhere. */
+function refreshSlots() {
+  for (const g of state.groups) if (g.info) for (const r of g.rows) fillSlots(r);
 }
 
 /** The row's "Animations" dropdown: the source's own, exact bone matches, then a group of
  *  characters whose animations fit with warnings (the core leaves out the ones that don't fit). */
 function setRowAnims(row, anims) {
-  const own = sourceId();
-  const choices = state.animChoices;
+  const own = row.group.source;
+  const choices = row.group.animChoices;
   if (!choices.some((c) => c.id === anims) || anims === own) anims = null;
   const option = (c) => el("option", { value: c.id, textContent: c.label, title: c.note });
   const warned = choices.filter((c) => !c.exact);
@@ -294,20 +377,20 @@ function setRow(row, slot, colour) {
   row.swatch.style.background = colourSwatch(colour);
 }
 
-async function addRow(slot = null, colour = null) {
-  if (!state.game) return;
+async function addRow(g, slot = null, colour = null) {
+  if (!state.game || !g.info) return;
   if (slot === null) {
-    slot = await invoke("next_free_slot", { source: sourceId(), used: state.rows.map((r) => r.slot) });
+    slot = await invoke("next_free_slot", { source: g.source, used: usedElsewhere(g).concat(g.rows.map((r) => r.slot)) });
     if (slot === null) {
       await showInfo(APP_TITLE, "Every available slot already has a clone.");
       return;
     }
   }
   if (colour === null) {
-    const taken = new Set(state.rows.map((r) => r.colour));
+    const taken = new Set(g.rows.map((r) => r.colour));
     colour = NEW_ROW_COLOURS.find((c) => !taken.has(c)) || "blue";
   }
-  const row = { id: ++state.rowSeq };
+  const row = { id: ++state.rowSeq, group: g };
   row.radio = el("input", { type: "radio", name: "preview-row", title: "Show this clone in the preview" });
   row.slotSelect = el("select");
   row.colourSelect = el("select");
@@ -321,7 +404,8 @@ async function addRow(slot = null, colour = null) {
   row.radio.addEventListener("change", () => selectPreviewRow(row, true));
   row.slotSelect.addEventListener("change", () => {
     row.slot = Number(row.slotSelect.value);
-    schedulePreview();
+    refreshSlots();
+    selectPreviewRow(row, true);
   });
   row.colourSelect.addEventListener("change", () => colourChanged(row));
   row.animSelect.addEventListener("change", () => {
@@ -331,30 +415,38 @@ async function addRow(slot = null, colour = null) {
   row.remove.addEventListener("click", () => removeRow(row));
   row.texturesPick.addEventListener("click", () => pickRowTextures(row));
   row.texturesClear.addEventListener("click", () => setRowTextures(row, null));
+  row.slot = slot;
   fillSlots(row);
   setRow(row, slot, colour);
   setRowAnims(row, null);
   setRowTextures(row, null);
-  state.rows.push(row);
-  $("rows").append(row.el);
-  if (state.rows.length === 1) selectPreviewRow(row);
-  updateAddLabel();
+  g.rows.push(row);
+  g.ui.rows.append(row.el);
+  if (!allRows().some((r) => r.id === state.previewRow) || g.rows.length === 1) selectPreviewRow(row);
+  updateAddLabel(g);
+  refreshSlots();
   schedulePreview();
 }
 
 function removeRow(row) {
+  const g = row.group;
   row.el.remove();
-  state.rows.splice(state.rows.indexOf(row), 1);
-  if (state.rows.length && state.previewRow === row.id) selectPreviewRow(state.rows[0]);
-  updateAddLabel();
+  g.rows.splice(g.rows.indexOf(row), 1);
+  if (state.previewRow === row.id) {
+    const next = g.rows[0] || allRows()[0];
+    if (next) selectPreviewRow(next);
+  }
+  updateAddLabel(g);
+  refreshSlots();
   schedulePreview();
 }
 
-function updateAddLabel() {
-  $("btn-add").textContent = state.rows.length ? "+ Add another clone" : "+ Add a clone";
+function updateAddLabel(g) {
+  g.ui.add.textContent = g.rows.length ? "+ Add another clone" : "+ Add a clone";
 }
 
 function selectPreviewRow(row, refresh = false) {
+  if (!row) return;
   state.previewRow = row.id;
   row.radio.checked = true;
   if (refresh) schedulePreview();
@@ -380,16 +472,16 @@ function colourChanged(row) {
 
 // ---------------------------------------------------------------- painted textures
 /** Save the shown source's textures as PNGs into a new "<Name> textures" folder inside `folder`. */
-async function exportTextures(folder = null) {
+async function exportTextures(g = state.groups[0], folder = null) {
   if (!state.game || state.busy) return null;
-  const name = sourceName();
+  const name = sourceName(g.source);
   if (folder === null) {
     folder = await dialog.open({ title: `Choose where to save ${name}'s textures (a "${name} textures" folder is made there)`, directory: true });
     if (!folder) return null;
   }
   let res;
   try {
-    res = await invoke("export_textures", { source: sourceId(), folder });
+    res = await invoke("export_textures", { source: g.source, folder });
   } catch (e) {
     await showError(APP_TITLE, e.error ?? String(e));
     return null;
@@ -425,10 +517,16 @@ function setRowTextures(row, folder) {
   if (row.radio.checked) schedulePreview(true);
 }
 
-function sourceChanged() {
+function sourceChanged(g) {
+  const src = Number(g.ui.source.value);
+  if (usedElsewhere(g).includes(src)) {
+    g.ui.source.value = String(g.source);
+    showInfo(APP_TITLE, `${sourceName(src)} is already used by another character's clones. Pick someone else.`);
+    return;
+  }
+  g.source = src;
   updateSourceLabels();
-  $("preview-chip").textContent = sourceName();
-  if (state.game) loadSource(false);
+  if (state.game) loadSource(g, false);
 }
 
 // ---------------------------------------------------------------- preview
@@ -439,11 +537,11 @@ function schedulePreview(now = false) {
 }
 
 async function requestPreview() {
-  const row = state.rows.find((r) => r.id === state.previewRow);
-  if (!state.game || !row || state.infoSource !== sourceId()) return;
-  const src = sourceId(), seq = ++state.previewSeq;
+  const row = allRows().find((r) => r.id === state.previewRow);
+  if (!state.game || !row || row.group.infoSource !== row.group.source) return;
+  const g = row.group, src = g.source, seq = ++state.previewSeq;
   if (!state.previewed.has(src)) $("preview-caption").textContent = `Loading ${sourceName(src)}'s textures…`;
-  const request = { source: src, slot: row.slot, colour: row.colour, keeplum: keeplum(), regions: tickedRegions(), textures: row.textures, anims: row.anims };
+  const request = { source: src, slot: row.slot, colour: row.colour, keeplum: keeplum(), regions: tickedRegions(g), textures: row.textures, anims: row.anims };
   let res, failure;
   try {
     res = await invoke("preview", { request });
@@ -497,18 +595,20 @@ async function chooseOutput() {
 }
 
 function makeJob() {
+  const [first, ...others] = state.groups;
+  const clones = (g, extra) => g.rows.map((r) => {
+    const clone = { slot: r.slot, colour: r.colour, ...extra };
+    if (r.textures) clone.textures = r.textures;
+    if (r.anims !== null) clone.anims = r.anims;
+    return clone;
+  });
   return {
     game: $("game-path").value,
     output: $("out-path").value.trim(),
-    source: sourceId(),
-    clones: state.rows.map((r) => {
-      const clone = { slot: r.slot, colour: r.colour };
-      if (r.textures) clone.textures = r.textures;
-      if (r.anims !== null) clone.anims = r.anims;
-      return clone;
-    }),
+    source: first.source,
+    clones: clones(first, {}).concat(...others.map((g) => clones(g, { source: g.source, regions: tickedRegions(g) }))),
     keeplum: keeplum(),
-    regions: tickedRegions(),
+    regions: tickedRegions(first),
     ui_source: $("chk-ui").checked,
     copy_stats: $("chk-stats").checked,
     keep_colour_word: $("chk-colour").checked,
@@ -517,7 +617,7 @@ function makeJob() {
 }
 
 async function create() {
-  if (!state.game || state.busy || state.infoSource !== sourceId()) return;   // the source is still loading
+  if (!state.game || state.busy || state.groups.some((g) => g.infoSource !== g.source)) return;   // a source is still loading
   if (!$("out-path").value.trim()) {
     await chooseOutput();
     if (!$("out-path").value.trim()) return;
@@ -590,16 +690,13 @@ function listenToJob() {
 // ---------------------------------------------------------------- start
 async function main() {
   state.sources = await invoke("sources");
-  $("source").replaceChildren(...state.sources.map((s) => el("option", { value: s.id, textContent: s.name })));
-  updateSourceLabels();
+  newGroup(state.sources[0].id);
   setEnabled(false);
 
   $("btn-iso").addEventListener("click", chooseIso);
   $("btn-dir").addEventListener("click", chooseFolder);
-  $("source").addEventListener("change", sourceChanged);
-  $("btn-add").addEventListener("click", () => serial(() => addRow()));
+  $("btn-group").addEventListener("click", addGroup);
   $("btn-adv").addEventListener("click", toggleAdvanced);
-  $("btn-export").addEventListener("click", () => exportTextures());
   $("chk-ui").addEventListener("change", () => { $("chk-colour").disabled = !$("chk-ui").checked || state.busy || !state.game; });
   $("keeplum").addEventListener("input", () => {
     $("keeplum-value").textContent = Number($("keeplum").value).toFixed(2);

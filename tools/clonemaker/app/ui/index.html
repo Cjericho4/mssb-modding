@@ -40,30 +40,11 @@
   </section>
 
   <section class="card" id="card-clones">
-    <header>
-      <span class="chip red">02</span><h2>Clones</h2>
-      <label class="label right" for="source">Character to clone</label>
-      <select id="source"></select>
-    </header>
+    <header><span class="chip red">02</span><h2>Clones</h2></header>
     <div class="body">
-      <div id="regions">
-        <h3 class="label">Colours to change</h3>
-        <div id="regions-box"></div>
-        <p id="regions-hint" class="muted">Choose your game first.</p>
-      </div>
-      <div class="clone-row head">
-        <h3 class="label">Preview</h3><h3 class="label">Slot it takes over</h3><h3 class="label">Colour</h3>
-        <span></span><h3 class="label" title="Whose animations each clone plays">Animations</h3><h3 class="label">Own textures</h3>
-      </div>
-      <p id="no-game-hint" class="muted">Choose your game first.</p>
-      <div id="rows"></div>
-      <div class="line spread">
-        <button id="btn-add">+ Add a clone</button>
-        <div class="line">
-          <button id="btn-export" title="Save the character's textures as PNG pictures to paint your own">Export textures…</button>
-          <button id="btn-adv">Advanced options  ▸</button>
-        </div>
-      </div>
+      <div id="groups"></div>
+      <button id="btn-group" class="add-group" title="Add clones of a different character to the same game">+ Clone another character</button>
+      <div class="line end"><button id="btn-adv">Advanced options  ▸</button></div>
       <div id="adv" hidden>
         <hr>
         <h3 class="kicker">Advanced</h3>
@@ -131,5 +112,28 @@
 
 <input type="color" id="picker" class="offscreen" tabindex="-1">
 <script src="app.js"></script>
+<template id="group-tpl">
+  <div class="group">
+    <div class="line group-head">
+      <label class="label">Character to clone</label>
+      <select class="source"></select>
+      <span class="grow"></span>
+      <button class="export" title="Save the character's textures as PNG pictures to paint your own">Export textures…</button>
+      <button class="icon remove drop" title="Remove this character and its clones">×</button>
+    </div>
+    <div class="regions">
+      <h3 class="label">Colours to change</h3>
+      <div class="regions-box"></div>
+      <p class="regions-hint muted">Choose your game first.</p>
+    </div>
+    <div class="clone-row head">
+      <h3 class="label">Preview</h3><h3 class="label">Slot it takes over</h3><h3 class="label">Colour</h3>
+      <span></span><h3 class="label" title="Whose animations each clone plays">Animations</h3><h3 class="label">Own textures</h3>
+    </div>
+    <p class="no-game-hint muted">Choose your game first.</p>
+    <div class="rows"></div>
+    <div class="line"><button class="add">+ Add a clone</button></div>
+  </div>
+</template>
 </body>
 </html>
