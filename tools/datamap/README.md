@@ -101,6 +101,26 @@ Files/JSON with key values are local game data; don't redistribute them. Extract
 filenames (check the output manifest). Track purposes, binary layouts, swap requirements and
 remaining Blender work: [.agent/animations.md](https://github.com/Cjericho4/mssb-dtk/blob/main/.agent/animations.md).
 
+### Exporting a skeleton and clip to glTF
+
+From the repo root, export Mario's normal batting swing (track 2, sequence 2):
+
+```powershell
+py tools/datamap/export_gltf.py --disc orig/GYQE01 --character mario --out mario_swing.gltf
+py tools/datamap/export_gltf.py --disc orig/GYQE01 --character dk --bank 2 --sequence 2 --out dk_swing.gltf
+py tools/datamap/export_gltf.py --disc orig/GYQE01 --character babymario --skeleton-only --out baby_bones.gltf
+py tools/datamap/test_export_gltf.py
+```
+
+The self-contained glTF has one small marker cube per bone, parent hierarchy, rest transforms,
+and one animation sampled every raw ANIM frame at 30 fps. It uses the game's right-handed,
++Y-up coordinates directly; Blender's glTF importer handles Blender's coordinate convention.
+Scale-axis quaternion nodes preserve the game's T·R·Qs·S·Qs⁻¹ order. No body geometry,
+textures, skinned mesh, bat/glove, gameplay event timing, blend transitions, or Blender-side
+visual validation are included yet. The animation exporter matches tracks to bones by bone ID;
+tracks without a matching bone are omitted. Exports contain local retail animation data:
+do not commit or redistribute them.
+
 ## Voices, announcer, sound effects and music
 
 Every voice line, sound effect and announcer call is a sample inside one of 48 sound groups
