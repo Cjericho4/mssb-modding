@@ -1921,7 +1921,7 @@ pub fn export(
     } = doc;
     let count = animations.len();
     let mut out = json!({
-        "asset": {"version": "2.0", "generator": concat!("MSSB Clone Maker ", env!("CARGO_PKG_VERSION"))},
+        "asset": {"version": "2.0", "generator": "MSSB Clone Maker"},
         "scene": 0, "scenes": [{"nodes": scene}], "nodes": nodes, "meshes": meshes,
         "extras": {"character_id": c, "bone_count": layout.bones.len(),
                    "coordinate_system": "game and glTF: right-handed, +Y up"},
