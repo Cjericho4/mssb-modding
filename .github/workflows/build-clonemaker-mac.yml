@@ -69,13 +69,16 @@ jobs:
       run: |
         v=$(python3 -c 'import json; print(json.load(open("tauri.conf.json"))["version"])')
         [ "v$v" = "${{ github.ref_name }}" ] || { echo "tag ${{ github.ref_name }} but tauri.conf.json says $v"; exit 1; }
+        notes="$GITHUB_WORKSPACE/release-notes/${{ github.ref_name }}.md"
+        [ -s "$notes" ] || { echo "write release-notes/${{ github.ref_name }}.md first (copy release-notes/TEMPLATE.md)"; exit 1; }
 
     - name: Attach to the release
       if: startsWith(github.ref, 'refs/tags/v')
       uses: softprops/action-gh-release@v2
       with:
         files: tools/clonemaker/app/MSSB-Clone-Maker-Mac.zip
-        generate_release_notes: true
+        body_path: release-notes/${{ github.ref_name }}.md   # written by hand from release-notes/TEMPLATE.md
+        generate_release_notes: false
 
     - name: Upload the .app
       uses: actions/upload-artifact@v4

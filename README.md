@@ -6,27 +6,37 @@ Tools for modding Mario Superstar Baseball (GameCube, USA, GYQE01), built on wha
 You need your own copy of the game. Nothing here contains game files, and the tools never upload
 or share yours.
 
+## MSSB Clone Maker
+
+Put copies of a character on other characters' slots: recoloured, or wearing textures you painted,
+with the character's voice, size and stats, and optionally another character's animations.
+Windows and Mac.
+
+**[Download the latest release](https://github.com/Cjericho4/mssb-modding/releases/latest)** ·
+**[How to use it](tools/clonemaker/README.md)** ·
+**[Report a problem](https://github.com/Cjericho4/mssb-modding/issues/new/choose)**
+
+## What's in this repository
+
 | Folder | What it is |
 |---|---|
-| `tools/clonemaker` | **MSSB Clone Maker**: puts a recoloured copy of a character (or your own painted textures) on another character's slot, with the right voice, size and stats. Rust core + Tauri window for Windows, Mac and Linux. Start at [tools/modding/README_GUI.md](tools/modding/README_GUI.md). |
+| `tools/clonemaker` | **MSSB Clone Maker**: puts a recoloured copy of a character (or your own painted textures) on another character's slot, with the right voice, size and stats. Rust core + Tauri window for Windows, Mac and Linux. User guide: [tools/clonemaker/README.md](tools/clonemaker/README.md). |
 | `tools/datamap` | List, extract and replace the game's files; stats, sounds and animations ([README](tools/datamap/README.md)). |
 | `tools/modding` | The original Python clone patcher (the reference the Rust core is tested against), the recolour audit and small inspectors. |
 
-## Download
-
-Get the newest version from **[Releases](https://github.com/Cjericho4/mssb-modding/releases/latest)**:
-`MSSB-Clone-Maker.exe` (Windows) or `MSSB-Clone-Maker-Mac.zip` (Mac). The app tells you when a newer
-release is out. Test builds of every change are under
-[Actions](https://github.com/Cjericho4/mssb-modding/actions) (artifacts, GitHub login needed).
-
-Found a problem? [Report it](https://github.com/Cjericho4/mssb-modding/issues/new/choose).
+Test builds of every change are under [Actions](https://github.com/Cjericho4/mssb-modding/actions)
+(artifacts, GitHub login needed).
 
 ## Making a release
 
-1. Set the same new version in `tools/clonemaker/app/tauri.conf.json` and `tools/clonemaker/app/Cargo.toml`, commit and push.
-2. `git tag v0.2.0 && git push origin v0.2.0`. Both build workflows check the tag matches the version,
-   run the tests and attach the Windows exe and the Mac zip to the release `v0.2.0`.
-3. Edit the release notes on GitHub (known issues!).
+1. Set the same new version in `tools/clonemaker/app/tauri.conf.json` and `tools/clonemaker/app/Cargo.toml`
+   (and the `mssb-clone-maker` entry in its `Cargo.lock`).
+2. Write the release notes: copy [release-notes/TEMPLATE.md](release-notes/TEMPLATE.md) to
+   `release-notes/v0.2.0.md` and fill it in (what's new, fixes, known issues, how to update).
+   Update the [Known issues](tools/clonemaker/README.md#known-issues) in the user guide to match.
+3. Commit and push, then `git tag v0.2.0 && git push origin v0.2.0`. Both build workflows check that the
+   tag matches the version and that the notes file exists, run the tests, and publish the release
+   `v0.2.0` with those notes, the Windows exe and the Mac zip.
 
 ## How it relates to mssb-dtk
 
