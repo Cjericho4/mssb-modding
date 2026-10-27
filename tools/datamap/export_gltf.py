@@ -1,11 +1,13 @@
 #!/usr/bin/env python3
-"""Export a character's actor skeleton to self-contained glTF 2.0."""
+"""Export a character's textured actor mesh, skeleton and clip to glTF 2.0."""
 import argparse
 import base64
 import json
 import math
 from pathlib import Path
 import struct
+import sys
+import zlib
 
 import animations
 import mssb_files
@@ -74,7 +76,7 @@ class Buffer:
 
     def add(self, values, component, shape, target=None):
         fmt, size, code = {5126: ("f", 4, 5126), 5123: ("H", 2, 5123)}[component]
-        count_per = {"SCALAR": 1, "VEC3": 3, "VEC4": 4, "MAT4": 16}[shape]
+        count_per = {"SCALAR": 1, "VEC2": 2, "VEC3": 3, "VEC4": 4, "MAT4": 16}[shape]
         if len(values) % count_per:
             raise ValueError("accessor component count mismatch")
         while len(self.data) % 4:
@@ -508,12 +510,12 @@ def gx_triangles(op, vertices):
 
 
 def decode_display_list(data, offset, size, stride, position_count):
-    """Read GX FIFO lists whose vertex record begins with a u16 position index."""
+    """Read GX FIFO position, normal and TEX0 indices."""
     reader = animations.Reader(data)
     reader.check(offset, size)
     end = offset + size
     cursor = offset
-    positions = []
+    vertices = []
     triangles = []
     groups = 0
     while cursor < end:
@@ -531,16 +533,17 @@ def decode_display_list(data, offset, size, stride, position_count):
             count, = reader.unpack("H", cursor+1)
             if cursor + 3 + count * stride > end:
                 raise ValueError("GX vertex list exceeds its declared size")
-            first = len(positions)
+            first = len(vertices)
             for i in range(count):
                 address = cursor + 3 + i * stride
                 if stride == 2:  # compact GX index8 position plus one other attribute
                     pos = data[address]
+                    normal = texcoord = None
                 else:
-                    pos, = reader.unpack("H", address)
+                    pos, normal, texcoord = reader.unpack("3H", address)
                 if pos >= position_count:
                     raise ValueError("GX position index %d >= %d" % (pos, position_count))
-                positions.append(pos)
+                vertices.append((pos, normal, texcoord))
             triangles.extend(gx_triangles(op, list(range(first, first+count))))
             groups += 1
             cursor += 3 + count * stride
@@ -548,7 +551,7 @@ def decode_display_list(data, offset, size, stride, position_count):
             raise ValueError("unsupported GX command 0x%02X at 0x%X" % (op, cursor))
     if not groups:
         raise ValueError("display list has no triangles")
-    return positions, triangles, groups
+    return vertices, triangles, groups
 
 
 def infer_vertex_stride(data, offset, size, position_count):
@@ -592,65 +595,190 @@ def geometry_descriptors(body):
         for j in range(total):
             raw = reader.unpack("3h", layout + array + j*components*2)
             vertices.append([v / (1 << shift) for v in raw])
+        normals = []
+        if light:
+            normal_array, normal_count, normal_quant, normal_components = reader.unpack(
+                "IHBB", layout + light)
+            if normal_quant >> 4 != 3 or normal_components not in (3, 6):
+                raise ValueError("unsupported normal encoding")
+            reader.check(layout + normal_array, normal_count * normal_components * 2)
+            for j in range(normal_count):
+                values = reader.unpack("3h", layout + normal_array +
+                                       j*normal_components*2)
+                xyz = [value / (1 << (normal_quant & 15)) for value in values]
+                length = math.sqrt(sum(value*value for value in xyz))
+                normals.append([value/length for value in xyz] if length else [0, 0, 1])
+        texcoords = []
+        if tex:
+            channels = body[layout+0x14]
+            if channels:
+                uv_array, uv_count, uv_quant, uv_components = reader.unpack(
+                    "IHBB", layout + tex)
+                if uv_quant >> 4 != 3 or uv_components != 2:
+                    raise ValueError("unsupported TEX0 encoding")
+                reader.check(layout + uv_array, uv_count * 4)
+                for j in range(uv_count):
+                    uv = reader.unpack("2h", layout + uv_array + j*4)
+                    texcoords.append([v / (1 << (uv_quant & 15)) for v in uv])
         primitive_bank, states, num_states = reader.unpack("IIH", layout + display)
         if num_states > 1024:
             raise ValueError("invalid display state count")
-        positions = []
-        source_indices = []
-        triangles = []
+        groups = []
         formats = set()
+        texture_id = None
         for j in range(num_states):
             state_id, pad, pad16, setting, primitive, size = reader.unpack(
                 "BBHIII", layout + states + j*16)
+            # State 1 / 0x1511 selects the primary texture. 0x1500 is an
+            # additional TEV stage that the simple glTF material omits.
+            if state_id == 1 and setting >> 16 == 0x1511:
+                texture_id = setting & 0xFFFF
             if not primitive or not size:
                 continue
-            stride, ids, faces = infer_vertex_stride(
+            stride, records, faces = infer_vertex_stride(
                 body, layout + primitive, size, total)
             formats.add(stride)
-            base = len(positions)
-            positions.extend(vertices[k] for k in ids)
-            source_indices.extend(ids)
-            triangles.extend((base+a, base+b, base+c) for a,b,c in faces)
-        if triangles:
-            yield i, positions, triangles, sorted(formats), source_indices, total
+            for pos_id, normal_id, tex_id in records:
+                if normal_id is not None and normal_id >= len(normals):
+                    raise ValueError("GX normal index exceeds normal array")
+                if tex_id is not None and tex_id >= len(texcoords):
+                    raise ValueError("GX TEX0 index exceeds texture coordinate array")
+            groups.append({"positions": [vertices[p] for p, _, _ in records],
+                           "normals": [normals[n] for _, n, _ in records]
+                           if stride != 2 else [],
+                           "uvs": [texcoords[t] for _, _, t in records]
+                           if stride != 2 else [],
+                           "source_ids": [p for p, _, _ in records],
+                           "triangles": faces, "texture_id": texture_id,
+                           "stride": stride})
+        if groups:
+            yield i, groups, sorted(formats), total
 
 
-def add_geometry(doc, buffer, body, layout, handles, poses):
-    """Attach skinned geometry at scene root and rigid geometry below its bone."""
+def png_rgb(width, height, pixels):
+    """Store decoded RGB pixels as a PNG without external dependencies."""
+    if len(pixels) != width*height*3:
+        raise ValueError("decoded texture size mismatch")
+
+    def chunk(name, payload):
+        return (struct.pack(">I", len(payload)) + name + payload +
+                struct.pack(">I", zlib.crc32(name+payload) & 0xFFFFFFFF))
+
+    rows = b"".join(b"\0" + pixels[y*width*3:(y+1)*width*3]
+                    for y in range(height))
+    return (b"\x89PNG\r\n\x1a\n" +
+            chunk(b"IHDR", struct.pack(">IIBBBBB", width, height, 8, 2, 0, 0, 0)) +
+            chunk(b"IDAT", zlib.compress(rows)) + chunk(b"IEND", b""))
+
+
+def add_textures(doc, body, textures_dir=None):
+    """Embed every body texture, using the existing Clone Maker GX decoder."""
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "modding"))
+    import clone_character
+
+    archive = clone_character.Gpc(body)
+    wrap = {0: 33071, 1: 10497, 2: 33648}
+    doc["images"] = []
+    doc["samplers"] = []
+    doc["textures"] = []
+    doc["materials"] = []
+    for item in archive.textures:
+        index = item["index"]
+        edited = (textures_dir / ("t%02d_%dx%d.png" %
+                   (index, item["w"], item["h"]))) if textures_dir else None
+        if edited and edited.is_file():
+            png = edited.read_bytes()
+            if (len(png) < 24 or png[:8] != b"\x89PNG\r\n\x1a\n" or
+                    png[12:16] != b"IHDR" or
+                    struct.unpack_from(">II", png, 16) != (item["w"], item["h"])):
+                raise ValueError("%s is not a %dx%d PNG" %
+                                 (edited, item["w"], item["h"]))
+        else:
+            data = clone_character.texture_bytes(archive, item)
+            pixels = clone_character.decode_texture(data, item)
+            png = png_rgb(item["w"], item["h"], pixels)
+        doc["images"].append({"name": "texture_%02d" % index,
+                              "uri": "data:image/png;base64," +
+                                     base64.b64encode(png).decode("ascii")})
+        hdr = item["hdr"]
+        wrap_s, wrap_t, min_filter, mag_filter = body[hdr+12:hdr+16]
+        if wrap_s not in wrap or wrap_t not in wrap:
+            raise ValueError("unsupported texture wrap mode")
+        doc["samplers"].append({"wrapS": wrap[wrap_s], "wrapT": wrap[wrap_t],
+                                "minFilter": 9728 if min_filter == 0 else 9729,
+                                "magFilter": 9728 if mag_filter == 0 else 9729})
+        doc["textures"].append({"source": index, "sampler": index})
+        doc["materials"].append({
+            "name": "texture_%02d" % index, "doubleSided": True,
+            "alphaMode": "MASK", "alphaCutoff": 0.5,
+            "pbrMetallicRoughness": {
+                "baseColorTexture": {"index": index},
+                "metallicFactor": 0, "roughnessFactor": 1}})
+    plain = len(doc["materials"])
+    doc["materials"].append({"name": "untextured body", "doubleSided": True,
+                             "pbrMetallicRoughness": {
+                                 "baseColorFactor": [0.7, 0.7, 0.7, 1],
+                                 "metallicFactor": 0, "roughnessFactor": 1}})
+    return plain
+
+
+def add_geometry(doc, buffer, body, layout, handles, poses, textures_dir=None):
+    """Attach textured skin geometry and rigid geometry below its bone."""
     skin_id = layout["skin_file_id"]
+    plain_material = add_textures(doc, body, textures_dir)
     rigid = {}
     for i, bone in enumerate(layout["bones"]):
         if bone["geometry_id"] != 0xFFFF:
             rigid.setdefault(bone["geometry_id"], i)
     counts = []
-    for descriptor_id, positions, triangles, strides, source_ids, total in geometry_descriptors(body):
-        flat = [x for point in positions for x in point]
-        faces = [i for triangle in triangles for i in triangle]
-        if len(positions) > 65535:
-            raise ValueError("geometry needs u32 indices")
-        pos_accessor = buffer.add(flat, 5126, "VEC3", 34962)
-        face_accessor = buffer.add(faces, 5123, "SCALAR", 34963)
+    for descriptor_id, groups, strides, total in geometry_descriptors(body):
         mesh_id = len(doc["meshes"])
-        attributes = {"POSITION": pos_accessor}
-        if descriptor_id == skin_id:
-            influences = skin_weights(body, layout, total)
-            missing = set(source_ids) - influences.keys()
-            if missing:
-                raise ValueError("display list references %d unweighted skin vertices: %s" %
-                                 (len(missing), sorted(missing)[:10]))
-            for group in range(1 + any(any(influences[index][1][4:])
-                                       for index in source_ids)):
-                start = group * 4
-                joints = [joint for index in source_ids
-                          for joint in influences[index][0][start:start+4]]
-                weights = [weight for index in source_ids
-                           for weight in influences[index][1][start:start+4]]
-                attributes["JOINTS_%d" % group] = buffer.add(joints, 5123, "VEC4", 34962)
-                attributes["WEIGHTS_%d" % group] = buffer.add(weights, 5126, "VEC4", 34962)
-        doc["meshes"].append({
-            "name": "geo_%d" % descriptor_id,
-            "primitives": [{"attributes": attributes,
-                            "indices": face_accessor, "mode": 4, "material": 0}]})
+        primitives = []
+        influences = skin_weights(body, layout, total) if descriptor_id == skin_id else {}
+        for group in groups:
+            positions = group["positions"]
+            source_ids = group["source_ids"]
+            triangles = group["triangles"]
+            if len(positions) > 65535:
+                raise ValueError("geometry group needs u32 indices")
+            attributes = {"POSITION": buffer.add(
+                [x for point in positions for x in point], 5126, "VEC3", 34962)}
+            if group["normals"]:
+                attributes["NORMAL"] = buffer.add(
+                    [x for normal in group["normals"] for x in normal],
+                    5126, "VEC3", 34962)
+            if group["uvs"]:
+                attributes["TEXCOORD_0"] = buffer.add(
+                    [x for uv in group["uvs"] for x in uv],
+                    5126, "VEC2", 34962)
+            if descriptor_id == skin_id:
+                missing = set(source_ids) - influences.keys()
+                if missing:
+                    raise ValueError("display list references %d unweighted skin vertices: %s" %
+                                     (len(missing), sorted(missing)[:10]))
+                for set_id in range(1 + any(any(influences[index][1][4:])
+                                            for index in source_ids)):
+                    start = set_id * 4
+                    joints = [joint for index in source_ids
+                              for joint in influences[index][0][start:start+4]]
+                    weights = [weight for index in source_ids
+                               for weight in influences[index][1][start:start+4]]
+                    attributes["JOINTS_%d" % set_id] = buffer.add(
+                        joints, 5123, "VEC4", 34962)
+                    attributes["WEIGHTS_%d" % set_id] = buffer.add(
+                        weights, 5126, "VEC4", 34962)
+            face_accessor = buffer.add(
+                [i for triangle in triangles for i in triangle], 5123, "SCALAR", 34963)
+            material = group["texture_id"]
+            if material is None:
+                material = plain_material
+            elif material >= plain_material:
+                raise ValueError("display state references texture %d >= %d" %
+                                 (material, plain_material))
+            primitives.append({"attributes": attributes, "indices": face_accessor,
+                               "mode": 4, "material": material})
+        doc["meshes"].append({"name": "geo_%d" % descriptor_id,
+                              "primitives": primitives})
         node_id = len(doc["nodes"])
         doc["nodes"].append({"name": "geo_%d" % descriptor_id, "mesh": mesh_id,
                              "extras": {"descriptor": descriptor_id,
@@ -674,11 +802,9 @@ def add_geometry(doc, buffer, body, layout, handles, poses):
             doc["nodes"][handles[rigid[descriptor_id]][3]]["children"].append(node_id)
         else:
             raise ValueError("unowned rigid geometry descriptor %d" % descriptor_id)
-        counts.append((descriptor_id, len(positions), len(triangles)))
-    doc["materials"] = [{"name": "untextured body", "doubleSided": True,
-                         "pbrMetallicRoughness": {
-                             "baseColorFactor": [0.7, 0.7, 0.7, 1],
-                             "metallicFactor": 0, "roughnessFactor": 1}}]
+        counts.append((descriptor_id,
+                       sum(len(group["positions"]) for group in groups),
+                       sum(len(group["triangles"]) for group in groups)))
     buffer.finish(doc)
     return counts
 
@@ -702,15 +828,19 @@ def main():
     parser.add_argument("--sequence", type=int, default=2, help="bank sequence (default: 2 swing)")
     parser.add_argument("--skeleton-only", action="store_true")
     parser.add_argument("--no-mesh", action="store_true", help="show joint markers only")
+    parser.add_argument("--textures", type=Path,
+                        help="preview painted PNGs from Clone Maker's Export textures folder")
     parser.add_argument("--out", type=Path, required=True)
     args = parser.parse_args()
+    if args.textures and not args.textures.is_dir():
+        parser.error("--textures must name an existing folder")
     if not 2 <= args.bank <= 18:
         parser.error("--bank must be 2..18")
     _, catalog = mssb_files.open_catalog(args.disc)
     body = catalog.data(catalog.find("subfile.%d" % (args.character * 19)))
     doc, buffer, layout, handles, poses = skeleton(body, args.character)
     if not args.no_mesh:
-        counts = add_geometry(doc, buffer, body, layout, handles, poses)
+        counts = add_geometry(doc, buffer, body, layout, handles, poses, args.textures)
         print("Geometry: " + ", ".join("%d: %d vertices, %d triangles" % row
                                        for row in counts))
     if not args.skeleton_only:
