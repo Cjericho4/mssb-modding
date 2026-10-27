@@ -279,3 +279,12 @@ rules that keep that safe:
 character: every slot's tracks, ARAM body, DOL rows, game.rel rows, stats row and its chemistry
 with non-clones must be the same, plus a shared voice bank and the source-is-a-slot refusal.
 
+## FINDCHAR patch vs retail (`fn_800698F8`)
+
+With `ui_source`, `FINDCHAR_PATCH` replaces retail `fn_800698F8` (charID -> menu grid index). Retail
+scans the 32 base charIDs then the 22 colour variants (variant -> its family's base index), returns
+Birdo's alternate 0x20 once when `useAltBirdoGrid` is set, and `OSPanic`s on an unknown charID. The
+patch reads `lbl_800E8558[charID].uniqueIdx` and keeps the Birdo case, so it agrees for every charID
+0..53, but has **no bounds check or panic**: a charID outside 0..53 reads past the table. All callers
+found pass roster charIDs (mssb-dtk `.agent/character_modding_report.md` §8, Codex reading 2026-10-27).
+
