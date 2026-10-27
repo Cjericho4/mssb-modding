@@ -93,8 +93,12 @@ function updateSourceLabels() {
     g.ui.export.title = `Save ${sourceName(g.source)}'s textures as PNG pictures to paint your own`;
     g.ui.drop.hidden = !many;
   }
-  $("chk-ui-text").textContent = `Show clones as ${many ? "the character they copy" : n}: name and pictures in menus, HUD, announcer (recommended)`;
-  $("chk-stats-text").textContent = many ? "Give clones the stats of the character they copy" : `Give clones ${n}'s stats`;
+  // With several characters, say "each clone ... it copies" and name them, so nobody reads it as one character.
+  const names = state.groups.map((g) => sourceName(g.source)).join(", ");
+  $("chk-ui-text").textContent = many
+    ? `Show each clone as the character it copies (${names}): name and pictures in menus, HUD, announcer (recommended)`
+    : `Show clones as ${n}: name and pictures in menus, HUD, announcer (recommended)`;
+  $("chk-stats-text").textContent = many ? `Give each clone the stats of the character it copies (${names})` : `Give clones ${n}'s stats`;
 }
 
 // ---------------------------------------------------------------- dialogs

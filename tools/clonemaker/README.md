@@ -145,7 +145,8 @@ Mario with Luigi's animations.
 
 ## Advanced options
 
-Click **Advanced options ▸**. You normally don't need these.
+Click **Advanced options ▸**. You normally don't need these. They apply to every clone in the game;
+with several characters, each clone follows the character it copies.
 
 - **Show clones as … (recommended):** the roster screen, select grid, lineup and in-match card show
   the cloned character's name and a picture in the clone's colour, and the announcer says that name.

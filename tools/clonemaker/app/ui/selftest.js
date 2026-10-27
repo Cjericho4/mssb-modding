@@ -224,7 +224,8 @@ export async function run(options, app) {
     check(rows().map((r) => r.querySelector("select").value).join() === before, "Mario's clones keep their slots");
     check([...rows()[0].querySelector("select").options].find((o) => o.value === luigiSlot)?.disabled, "Luigi's slot is greyed out for Mario");
     check(blocks()[1].querySelectorAll(".regions-box input").length > 0, "Luigi's own colours to change");
-    check($("chk-stats").nextElementSibling.textContent === "Give clones the stats of the character they copy", "labels for several characters");
+    check($("chk-stats").nextElementSibling.textContent === "Give each clone the stats of the character it copies (Mario, Luigi)",
+      "labels for several characters: " + $("chk-stats").nextElementSibling.textContent);
     await shot("two_characters");
 
     // a wrong output name, an existing file
