@@ -179,6 +179,43 @@ class CurveTests(unittest.TestCase):
         self.assertEqual([m[2][3] for m in matrices], [0, -3, 0])
         self.assertEqual([m[1][3] for m in matrices], [0, 0, -2])
 
+    def test_named_animations_share_skeleton_nodes(self):
+        self.assertEqual(gltf.animation_name(2, 2), "t2_s02_id77_BatterSwingBat")
+        self.assertEqual(gltf.animation_name(4, 17), "t4_s17_id17_FielderCatchHighBall")
+        self.assertEqual(gltf.animation_name(15, 2), "t15_s02_id107_WinningCelebration")
+        self.assertEqual(gltf.animation_name(15, 0), "t15_s00_id105")
+        self.assertEqual(gltf.animation_name(7, 0), "t7_s00")
+        self.assertEqual(gltf.animation_name(4, 44),
+                         "t4_s44_id44_FielderWallSidleLeft")
+        self.assertEqual(gltf.animation_name(5, 11),
+                         "t5_s11_id74_PitcherAwait_CockedHead")
+        self.assertEqual(gltf.animation_name(2, 29),
+                         "t2_s29_id104_BatterUnsure_Recovery2")
+        self.assertEqual(gltf.bank_tracks("2,4,2,15"), (2, 4, 15))
+
+        def move(distance):
+            return {"bone_id": 5, "duration": 1, "interpolation": 1,
+                    "keyframes": [key(0, "translation", [0, 0, 0]),
+                                  key(1, "translation", [distance, 0, 0])]}
+
+        bank = {"bank_id": 0, "num_sequences": 2,
+                "sequences": [{"tracks": [move(1)]}, {"tracks": [move(2)]}]}
+        doc = {"nodes": [{"name": "bone_5"}]}
+        buffer = gltf.Buffer()
+        layout = {"bones": [{"bone_id": 5}]}
+        handles = [(0, 1, 2, 3)]
+        gltf.add_animation(doc, buffer, bank, 0, layout, handles, [{}],
+                           gltf.animation_name(2, 0))
+        gltf.add_animation(doc, buffer, bank, 1, layout, handles, [{}],
+                           gltf.animation_name(2, 1))
+        buffer.finish(doc)
+        self.assertEqual(len(doc["animations"]), 2)
+        self.assertEqual(len(doc["nodes"]), 1)
+        self.assertEqual([a["channels"][0]["target"]["node"]
+                          for a in doc["animations"]], [0, 0])
+        self.assertEqual([a["name"] for a in doc["animations"]],
+                         ["t2_s00_id75_BatterIdle", "t2_s01_id76_BatterReadyBat"])
+
 
 if __name__ == "__main__":
     unittest.main()
