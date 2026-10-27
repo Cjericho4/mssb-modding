@@ -486,7 +486,7 @@ figure .label { display: block; margin-bottom: 6px; }
   -webkit-user-select: text;
 }
 .dialog > .line { flex: none; padding: 0 18px 16px; }
-/* Export to Blender: a character, a checkbox and a note */
+/* Export 3D model: a character, a checkbox and a note */
 .dialog > .form { display: grid; gap: 8px; padding: 16px 18px 18px; min-width: min(380px, 100%); }
 .dialog > .form select { width: 100%; }
 .dialog > .form .muted { min-height: 1.35em; }

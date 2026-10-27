@@ -152,7 +152,7 @@ Mario with Luigi's animations.
 Look at any character's model, skeleton and animations in [Blender](https://www.blender.org/)
 (3.6 or newer), for example to study a move up close.
 
-1. Choose your game, then click **Export to Blender…** (next to **Export textures…**).
+1. Choose your game, then click **Export 3D model…** (next to **Export textures…**).
 2. Pick the **Character**; it starts with the one you're cloning. Leave **All animations** ticked
    for every batting, running, fielding and pitching move (about 115), or untick it for just the
    normal swing (a much smaller file).

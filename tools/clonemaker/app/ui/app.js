@@ -564,7 +564,7 @@ async function exportBlender(g = state.groups[0], path = null) {
   }
   reset();
   log(`exported ${name} for Blender (${res.animations} animation${res.animations === 1 ? "" : "s"}) to ${res.path}`);
-  const closed = showInfo("Exported for Blender", `Saved ${name} to\n${res.path}\n\n`
+  const closed = showInfo("3D model exported", `Saved ${name} to\n${res.path}\n\n`
     + `${res.bones} bones, ${res.animations} animation${res.animations === 1 ? "" : "s"}.\n\n`
     + "Open in Blender: File > Import > glTF 2.0\n\n"
     + "The file contains the game's models and textures: keep it to yourself.\n\n");
