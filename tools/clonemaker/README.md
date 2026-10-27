@@ -168,7 +168,9 @@ with several characters, each clone follows the character it copies.
 
 - **Animations marked "Some bones differ" can look glitchy** in a few moves.
 - **Some recolours have rough spots**, especially on Donkey Kong and Peach (small areas that keep
-  the old colour or change when they shouldn't).
+  the old colour or change when they shouldn't). For Peach, tick both **Pink (dress)** and
+  **Dark pink (dress)**: part of her dress is the darker pink, so with only the first ticked a
+  pink patch stays ([#16](https://github.com/Cjericho4/mssb-modding/issues/16)).
 - **On the select screen, the big 3D character behind the team shows the cloned character in
   its own colours**, not the clone's colour (those menu models can't be recoloured yet).
 - **Not every character has been played as a clone in Rio yet.** Mario, Peach, King Boo and DK have.
