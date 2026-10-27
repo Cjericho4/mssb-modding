@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Check that Clone Maker's "Export 3D model" (core/src/gltf.rs, `mssb-clone export-gltf`) writes
+"""Check that Clone Maker's "Export 3D Model" (core/src/gltf.rs, `mssb-clone export-gltf`) writes
 the same glTF as the Python reference tools/datamap/export_gltf.py (stdlib only).
 
 For each character and option both exporters run into a temporary folder under .scratch, then:

@@ -594,7 +594,7 @@ function setRowTextures(row, folder) {
   row.texturesPick.textContent = row.textures ? fileName(row.textures.replace(/[\\/]+$/, "")) : "My textures…";
   row.texturesPick.title = row.textures
     ? `Painted textures from ${row.textures}\nClick to pick another folder.`
-    : "Use textures you painted (export them first with \"Export textures\")";
+    : "Use textures you painted (export them first with \"Export Textures\")";
   row.texturesClear.hidden = !row.textures;
   // Painted rows keep the source's colours, so the colour choice does not apply.
   row.colourSelect.style.visibility = row.swatch.style.visibility = row.textures ? "hidden" : "";

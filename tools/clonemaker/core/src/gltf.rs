@@ -1,4 +1,4 @@
-//! "Export 3D model": one character's textured body, skeleton and animations as a
+//! "Export 3D Model": one character's textured body, skeleton and animations as a
 //! self-contained glTF 2.0 file. A port of the Python reference `tools/datamap/export_gltf.py`
 //! (with the ANIM and actor-layout readers of `tools/datamap/animations.py`); every function
 //! below is named after the Python function it ports, and `difftest.py --gltf` checks that both
@@ -1870,7 +1870,7 @@ pub struct Export {
 
 /// Export charID `c` from a clean game: textured body, skeleton and either the normal swing or
 /// every non-empty sequence of `DEFAULT_ANIMATION_BANKS`. `painted` is a folder of
-/// `tNN_WxH.png` pictures (Clone Maker's "Export textures") used instead of those textures.
+/// `tNN_WxH.png` pictures (Clone Maker's "Export Textures") used instead of those textures.
 pub fn export(
     disc: &Disc,
     dol: &Dol,

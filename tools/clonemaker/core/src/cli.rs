@@ -83,7 +83,7 @@ Blender opens (File > Import > glTF 2.0).
   --character NAME    name or id, e.g. mario, dk, babymario, kingboo, 0
   --all-animations    every batting, running, fielding, pitching and extra
                       animation (default: only the normal swing)
-  --textures FOLDER   use your painted tNN_WxH.png pictures from Export textures
+  --textures FOLDER   use your painted tNN_WxH.png pictures from Export Textures
   --out FILE.gltf     the file to write
 ";
 const GLTF_PREFIX: &str = "export-gltf: ";

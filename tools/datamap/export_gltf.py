@@ -909,7 +909,7 @@ def main():
     parser.add_argument("--skeleton-only", action="store_true")
     parser.add_argument("--no-mesh", action="store_true", help="show joint markers only")
     parser.add_argument("--textures", type=Path,
-                        help="preview painted PNGs from Clone Maker's Export textures folder")
+                        help="preview painted PNGs from Clone Maker's Export Textures folder")
     parser.add_argument("--out", type=Path, required=True)
     args = parser.parse_args()
     if args.textures and not args.textures.is_dir():

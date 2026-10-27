@@ -229,12 +229,12 @@ export async function run(options, app) {
     check(!textures().classList.contains("set") && textures().querySelector(".pick").textContent === "My textures…", "clear");
     app.setRowTextures(app.state.groups[0].rows[0], exported.folder);
 
-    // Export 3D model: the button opens the choice (the shown character, all animations); Cancel
+    // Export 3D Model: the button opens the choice (the shown character, all animations); Cancel
     // closes it. Then an export to a known path (no save dialog) that must parse as glTF.
     $("btn-blender").click();
     await waitFor(() => !$("blender").hidden, "the Blender export window");
     check($("blender-source").value === "0" && $("blender-all").checked && !$("blender-go").disabled,
-      "Export 3D model starts with Mario and all animations");
+      "Export 3D Model starts with Mario and all animations");
     await shot("blender");
     await resizeTo(640, 560);
     const blenderBox = document.querySelector("#blender .dialog").getBoundingClientRect();

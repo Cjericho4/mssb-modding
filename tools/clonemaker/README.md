@@ -113,7 +113,7 @@ colours and a green Bowser on a Shy Guy slot.
 2. Click **+ Clone another character** (under the clones). A new section appears with its own
    **Character to clone** (the next character nobody uses yet) and one clone on a free slot.
 3. Each section works like the first: its own colours to change, clones, animations, textures and
-   **Export textures**. The **×** at the top right of a section removes that character and its
+   **Export Textures**. The **×** at the top right of a section removes that character and its
    clones.
 
 A slot can only be used once in the whole game, and a character you clone can't also be replaced.
@@ -124,7 +124,7 @@ Slots another section already uses are greyed out with *(used by another charact
 
 Paint a character any way you like instead of picking a colour.
 
-1. Choose the **Character to clone**, then click **Export textures** and pick a place to save.
+1. Choose the **Character to clone**, then click **Export Textures** and pick a place to save.
    The app makes a folder (for example *Mario textures*) with one PNG picture per texture and a
    `README.txt`.
 2. Paint over the pictures in any paint program. **Keep each picture's size and file name.**
@@ -152,7 +152,7 @@ Mario with Luigi's animations.
 Look at any character's model, skeleton and animations in [Blender](https://www.blender.org/)
 (3.6 or newer), for example to study a move up close.
 
-1. Choose your game, then click **Export 3D model** (next to **Export textures**).
+1. Choose your game, then click **Export 3D Model** (next to **Export Textures**).
 2. Pick the **Character**; it starts with the one you're cloning. Leave **All animations** ticked
    for every batting, running, fielding and pitching move (about 115), or untick it for just the
    normal swing (a much smaller file).
