@@ -78,6 +78,9 @@ class CurveTests(unittest.TestCase):
         accessor = buf.add([0, 1, 2, 3, 4, 5], 5126, "VEC3")
         self.assertEqual(buf.accessors[accessor]["min"], [0, 1, 2])
         self.assertEqual(buf.accessors[accessor]["max"], [3, 4, 5])
+        rounded = buf.add([0, 0.2], 5126, "SCALAR")
+        self.assertEqual(buf.accessors[rounded]["max"],
+                         [0.20000000298023224])
 
 
 if __name__ == "__main__":

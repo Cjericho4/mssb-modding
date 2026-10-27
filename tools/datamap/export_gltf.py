@@ -80,13 +80,16 @@ class Buffer:
         while len(self.data) % 4:
             self.data.append(0)
         start = len(self.data)
-        self.data.extend(struct.pack("<" + fmt * len(values), *values))
+        packed = struct.pack("<" + fmt * len(values), *values)
+        self.data.extend(packed)
+        stored = struct.unpack("<" + fmt * len(values), packed)
         view = {"buffer": 0, "byteOffset": start, "byteLength": len(self.data) - start}
         if target:
             view["target"] = target
         view_id = len(self.views)
         self.views.append(view)
-        chunks = [values[i:i+count_per] for i in range(0, len(values), count_per)]
+        # Bounds describe the stored f32 values, not their higher-precision Python inputs.
+        chunks = [stored[i:i+count_per] for i in range(0, len(stored), count_per)]
         accessor = {"bufferView": view_id, "componentType": code,
                     "count": len(chunks), "type": shape,
                     "min": [min(v[i] for v in chunks) for i in range(count_per)],
