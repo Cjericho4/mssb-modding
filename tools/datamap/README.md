@@ -111,14 +111,21 @@ py tools/datamap/export_gltf.py --disc orig/GYQE01 --character dk --bank 2 --seq
 py tools/datamap/export_gltf.py --disc orig/GYQE01 --character babymario --skeleton-only --out baby_bones.gltf
 py tools/datamap/export_gltf.py --disc orig/GYQE01 --character mario --no-mesh --out mario_markers.gltf
 py tools/datamap/export_gltf.py --disc orig/GYQE01 --character mario --textures painted_mario --out mario_painted.gltf
+py tools/datamap/export_gltf.py --disc orig/GYQE01 --character mario --all-animations --out mario_moves.gltf
+py tools/datamap/export_gltf.py --disc orig/GYQE01 --character mario --all-animations --banks 2,4,15 --out mario_bat_field_extra.gltf
 py tools/datamap/test_export_gltf.py
 ```
 
 The self-contained glTF includes body triangles, normals and UVs from the `.gpc` geo palette,
 its embedded body textures as PNGs, skin weights from its SK1, SK2 and accumulator lists,
 inverse bind matrices from the full rest transforms, rigid geometry parented to its bone,
-and a small marker cube per bone. Each draw group uses its primary texture. It has one
-animation sampled every raw ANIM frame at 30 fps. `--skeleton-only` omits the clip;
+and a small marker cube per bone. Each draw group uses its primary texture. By default it has
+one animation sampled every raw ANIM frame at 30 fps. `--all-animations` adds every nonempty
+sequence from normal-match tracks 2 (batting), 3 (running), 4 (fielding), 5 (pitching) and
+15 (extra); use `--banks` to choose other disc tracks. The Actions share the same skeleton
+and have names such as `t2_s02_id77_BatterSwingBat`. Gameplay IDs and labels are
+reverse-engineered annotations, not strings stored in the ANIM bank; unnamed IDs retain
+their numeric `tN_sNN_idN` label. `--skeleton-only` omits the clip;
 `--no-mesh` shows only bone markers. `--textures` reads matching `tNN_WxH.png` files from
 Clone Maker's **Export textures…** folder, embedding painted PNGs where present and keeping
 the other retail textures. The exporter uses the game's right-handed, +Y-up

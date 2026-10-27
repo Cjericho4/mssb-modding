@@ -14,6 +14,67 @@ import mssb_files
 from stats import NAME_ID
 
 
+# .agent/animations.md §1 in mssb-dtk maps gameplay IDs to bank sequence slots.
+# The labels below are the reverse-engineered EnumCharacterAnimation_short names
+# from mssb-dtk/in_game.h, not names stored in the retail ANIM sequences.
+GAMEPLAY_NAME_GROUPS = (
+    (0, """FielderStandStill FielderHoldBallStill FielderStandReady
+FielderStandReadyToCatchOverhead FielderLookDissapointed FielderRunForwards
+FielderRunForwardsLookUpLeft FielderWalkForwards FielderWalkForwardsLookUp
+FielderWalkBackwards FielderSidleLeft FielderSidleRight FielderWalkForwardLow
+FielderRunForwardsLookDownRight FielderRunForwardsLookDownLeft FielderTPose
+FielderOnFire FielderCatchHighBall FielderCatchMidBall FielderCatchLowBall
+FielderCatchHighRightBall FielderCatchMidRightBall FielderCatchLowRightBall
+FielderCatchHighLeftBall FielderCatchMidLeftBall FielderCatchLowLeftBall
+FielderPickUpBall FielderDive FielderBallKnockout FielderBallThrow
+FielderBallThrow_Super FielderBallLob FielderTPose2 FielderTagBase
+FielderRunToTagOut FielderStunned FielderEnvironmentKnockout
+FielderRecoverFromKnockout FielderJump FielderLandFromJump FielderWallHang
+FielderWallCatchBallAndRelease FielderWallClimb FielderWallSidleRight
+FielderWallSidleLeft""".split()),
+    (45, """RunnerRun Runner_Tpose RunnerWalk RunnerSkidStop RunnerTurnAround
+RunnerDiveTurnAround Runner_BodyCheck RunnerDiveTurnSide
+RunnerWalkAwayFrom2ndBase Runner_Tpose3 Runner_Tpose4 RunnerWait RunnerReady
+RunnerExcited RunnerCelebration RunnerHomeRunCelebration""".split()),
+    (61, "PitcherIdleLeft PitcherIdleRight".split()),
+    (63, """PitcherIdle PitcherChargeThrow PitcherChargeThrowRecover
+PitcherRegularThrow PitcherRegularThrowRecover PitcherResultHappy
+PitcherResultSad PitcherTired PitcherStretch PitcherTaunt PitcherAwait
+PitcherAwait_CockedHead""".split()),
+    (75, """BatterIdle BatterReadyBat BatterSwingBat BatterResetAfterSwing
+BatterUnsure_ResetAfterSwing BatterCoolDownAfterSwing BatterStrikePose
+BatterHoldPose BatterSmallSwipe BatterSwipeCoolDown BatterHoldCharge
+BatterHoldReady BatterGetReady BatterUnsure_Reset BatterReadyBunt
+BatterHoldBunt BatterResetBunt BatterSwipeReset BatterBuntStrikeout
+BatterSwingStrikeout BatterNoSwingStrikeout BatterChargeStrikout
+BatterBallWalked BatterHitByBall BatterUnsure_Unhappy2
+BatterUnsure_SwingLefty BatterPickOff3rdOut BatterReadyIntro
+BatterWalkUpToPlate BatterUnsure_Recovery2""".split()),
+    (107, ["WinningCelebration"]),
+)
+
+# Normal-match defaults are 2/3/4/5/15. Related mode variants use the same
+# gameplay ID partition; 7/8 have no proven request path or ID mapping.
+BANK_GAMEPLAY_BASE = {2: 75, 3: 45, 4: 0, 5: 63, 6: 61,
+                      9: 75, 10: 75, 11: 45, 12: 45, 13: 0, 14: 45,
+                      15: 105, 16: 105, 17: 105, 18: 63}
+DEFAULT_ANIMATION_BANKS = (2, 3, 4, 5, 15)
+
+
+def animation_name(bank_track, sequence_id):
+    """Name a disc-bank sequence by the gameplay ID it occupies, if known."""
+    prefix = "t%d_s%02d" % (bank_track, sequence_id)
+    base = BANK_GAMEPLAY_BASE.get(bank_track)
+    if base is None:
+        return prefix
+    gameplay_id = base + sequence_id
+    prefix += "_id%d" % gameplay_id
+    for start, names in GAMEPLAY_NAME_GROUPS:
+        if start <= gameplay_id < start + len(names):
+            return prefix + "_" + names[gameplay_id-start]
+    return prefix
+
+
 def unit(q):
     length = math.sqrt(sum(x * x for x in q))
     if not math.isfinite(length) or length == 0:
@@ -431,7 +492,7 @@ def sample_track(track, time):
     return result
 
 
-def add_animation(doc, buffer, bank, sequence_id, layout, handles, poses):
+def add_animation(doc, buffer, bank, sequence_id, layout, handles, poses, name=None):
     if not 0 <= sequence_id < bank["num_sequences"]:
         raise ValueError("sequence %d is outside bank" % sequence_id)
     sequence = bank["sequences"][sequence_id]
@@ -442,8 +503,8 @@ def add_animation(doc, buffer, bank, sequence_id, layout, handles, poses):
     if not frames or frames[-1] != duration:
         frames.append(duration)
     seconds = [t/30 for t in frames]
-    time_accessor = buffer.add(seconds, 5126, "SCALAR")
-    animation = {"name": "bank%d_sequence%d" % (bank["bank_id"], sequence_id),
+    time_accessor = None
+    animation = {"name": name or "bank%d_sequence%d" % (bank["bank_id"], sequence_id),
                  "samplers": [], "channels": [],
                  "extras": {"raw_duration": duration, "sample_rate_hz": 30}}
     bone_by_id = {}
@@ -451,6 +512,9 @@ def add_animation(doc, buffer, bank, sequence_id, layout, handles, poses):
         bone_by_id.setdefault(bone["bone_id"], index)
 
     def channel(node, path, values):
+        nonlocal time_accessor
+        if time_accessor is None:
+            time_accessor = buffer.add(seconds, 5126, "SCALAR")
         width = 4 if path == "rotation" else 3
         flattened = [x for value in values for x in value]
         output = buffer.add(flattened, 5126, "VEC4" if width == 4 else "VEC3")
@@ -482,9 +546,10 @@ def add_animation(doc, buffer, bank, sequence_id, layout, handles, poses):
             axes = [unit(s["scale_quaternion"]) for s in samples]
             channel(axis, "rotation", axes)
             channel(leaf, "rotation", [inverse(q) for q in axes])
-    doc["animations"] = [animation]
-    buffer.finish(doc)
-    return animation
+    if animation["channels"]:
+        doc.setdefault("animations", []).append(animation)
+        return animation
+    return None
 
 
 def gx_triangles(op, vertices):
@@ -820,12 +885,26 @@ def character_id(value):
     raise argparse.ArgumentTypeError("unknown character: %s" % value)
 
 
+def bank_tracks(value):
+    try:
+        tracks = tuple(int(part) for part in value.split(","))
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError("--banks expects comma-separated tracks") from exc
+    if not tracks or any(not 2 <= track <= 18 for track in tracks):
+        raise argparse.ArgumentTypeError("--banks tracks must be 2..18")
+    return tuple(dict.fromkeys(tracks))
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--disc", required=True, help="extracted game directory or ISO")
     parser.add_argument("--character", required=True, type=character_id)
     parser.add_argument("--bank", type=int, default=2, help="disc subfile track (default: 2 batting)")
     parser.add_argument("--sequence", type=int, default=2, help="bank sequence (default: 2 swing)")
+    parser.add_argument("--all-animations", action="store_true",
+                        help="include every nonempty sequence from normal-match banks")
+    parser.add_argument("--banks", type=bank_tracks,
+                        help="comma-separated tracks for --all-animations (default: 2,3,4,5,15)")
     parser.add_argument("--skeleton-only", action="store_true")
     parser.add_argument("--no-mesh", action="store_true", help="show joint markers only")
     parser.add_argument("--textures", type=Path,
@@ -836,6 +915,10 @@ def main():
         parser.error("--textures must name an existing folder")
     if not 2 <= args.bank <= 18:
         parser.error("--bank must be 2..18")
+    if args.banks and not args.all_animations:
+        parser.error("--banks requires --all-animations")
+    if args.skeleton_only and args.all_animations:
+        parser.error("--skeleton-only conflicts with --all-animations")
     _, catalog = mssb_files.open_catalog(args.disc)
     body = catalog.data(catalog.find("subfile.%d" % (args.character * 19)))
     doc, buffer, layout, handles, poses = skeleton(body, args.character)
@@ -844,10 +927,26 @@ def main():
         print("Geometry: " + ", ".join("%d: %d vertices, %d triangles" % row
                                        for row in counts))
     if not args.skeleton_only:
-        bank_data = catalog.data(catalog.find("subfile.%d" % (args.character * 19 + args.bank)))
-        bank = animations.parse_bank(bank_data, keyframes=True)
-        clip = add_animation(doc, buffer, bank, args.sequence, layout, handles, poses)
-        print("Sampled %d channels at 30 fps" % len(clip["channels"]))
+        if args.all_animations:
+            for track in args.banks or DEFAULT_ANIMATION_BANKS:
+                bank_data = catalog.data(catalog.find(
+                    "subfile.%d" % (args.character * 19 + track)))
+                bank = animations.parse_bank(bank_data, keyframes=True)
+                for sequence_id, sequence in enumerate(bank["sequences"]):
+                    if sequence["tracks"]:
+                        add_animation(doc, buffer, bank, sequence_id, layout,
+                                      handles, poses, animation_name(track, sequence_id))
+            print("Sampled %d animations at 30 fps" % len(doc.get("animations", [])))
+        else:
+            bank_data = catalog.data(catalog.find(
+                "subfile.%d" % (args.character * 19 + args.bank)))
+            bank = animations.parse_bank(bank_data, keyframes=True)
+            clip = add_animation(doc, buffer, bank, args.sequence,
+                                 layout, handles, poses,
+                                 animation_name(args.bank, args.sequence))
+            print("Sampled %d channels at 30 fps" %
+                  (len(clip["channels"]) if clip else 0))
+    buffer.finish(doc)
     args.out.write_text(json.dumps(doc, separators=(",", ":"), allow_nan=False) + "\n",
                         encoding="utf-8")
     print("Exported character %d: %d bones, %d nodes -> %s" %
