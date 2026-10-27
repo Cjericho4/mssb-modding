@@ -21,6 +21,7 @@ changes your original game. It saves a new `.iso` next to it.
 [Clones of several characters](#clones-of-several-characters) ·
 [Your own textures](#your-own-textures) ·
 [Animations from another character](#animations-from-another-character) ·
+[Open a character in Blender](#open-a-character-in-blender) ·
 [Advanced options](#advanced-options) ·
 [Known issues](#known-issues) ·
 [Troubleshooting](#troubleshooting) ·
@@ -145,6 +146,31 @@ Mario with Luigi's animations.
   dropdown to see which. They work, but some moves can look **glitchy** (limbs bending oddly for a
   moment). Mario with Luigi's animations plays fine but isn't perfect.
 - Leave it on the character's own animations if you only want a new look.
+
+## Open a character in Blender
+
+Look at any character's model, skeleton and animations in [Blender](https://www.blender.org/)
+(3.6 or newer), for example to study a move up close.
+
+1. Choose your game, then click **Export to Blender…** (next to **Export textures…**).
+2. Pick the **Character**; it starts with the one you're cloning. Leave **All animations** ticked
+   for every batting, running, fielding and pitching move (about 115), or untick it for just the
+   normal swing (a much smaller file).
+3. Click **Save as…** and choose where to save the `.gltf` file. It takes a second or two.
+
+Then, in Blender:
+
+1. **File > Import > glTF 2.0**, and pick the file.
+2. Blender plays only the first animation (`t2_s00_id75_BatterIdle`). To pick another: select the
+   skeleton, enter **Pose Mode**, set a Dope Sheet panel to **Action Editor**, click the browse
+   icon left of the action name and choose one. Names start with `t2` (batting), `t3` (running),
+   `t4` (fielding), `t5` (pitching) or `t15` (extras).
+3. The normal swing (`t2_s02_id77_BatterSwingBat`) is only **6 frames**: set the timeline end to 6,
+   or step through it with the arrow keys.
+
+Each part shows its main texture; see-through parts of a texture show as a grey checkerboard.
+The file contains the game's models and textures: **keep it to yourself**, don't share or upload
+it.
 
 ## Advanced options
 

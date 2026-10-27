@@ -32,6 +32,8 @@ clones you design. Play it in Project Rio or Dolphin.
   chemistry, and its name and picture in the menus.
 - **Animations from another character.** Make a clone move like someone else (characters whose
   skeleton fits are offered).
+- **Open characters in Blender.** Export any character's textured model, skeleton and animations
+  to a file Blender opens.
 - **Safe.** Your original game is never changed; the Clone Maker saves a new `.iso` next to it.
 
 ## Quick start
