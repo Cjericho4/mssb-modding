@@ -7,8 +7,8 @@ textures, a Mario who moves like Luigi, and so on.
 Each clone gets the character's look, voice, size and (if you like) stats. The Clone Maker never
 changes your original game. It saves a new `.iso` next to it.
 
-> **Beta.** Clones based on Mario have been played in Project Rio; other characters are still being
-> tested. See [Known issues](#known-issues), and use the **Feedback** button in the app to tell us
+> **Beta.** Clones of Mario, Peach, King Boo and DK, and games mixing several of them, have been
+> played in Project Rio; other characters are still being tested. See [Known issues](#known-issues), and use the **Feedback** button in the app to tell us
 > what you find.
 
 **Contents**
@@ -165,8 +165,10 @@ with several characters, each clone follows the character it copies.
 - **Some recolours have rough spots**, especially on Donkey Kong and Peach (small areas that keep
   the old colour or change when they shouldn't).
 - **The slot list cuts off long names** in narrow windows. Widen the window to read them.
-- **Only Mario-based clones have been fully played in Rio so far.** Other characters as the source,
-  and matches with several clones that each have their own voice, are still being tested.
+- **On the select screen, a clone's name box has no colour and the big character picture shows
+  the replaced character** ([#19](https://github.com/Cjericho4/mssb-modding/issues/19)); a fix is
+  being tested.
+- **Not every character has been played as a clone in Rio yet.** Mario, Peach, King Boo and DK have.
 - **Rio's online and ranked modes** expect the original game. Play the clones game offline.
 
 ## Troubleshooting
