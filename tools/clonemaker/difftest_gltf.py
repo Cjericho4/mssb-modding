@@ -27,7 +27,7 @@ CORE = ROOT / "tools/clonemaker/core"
 REFERENCE = ROOT / "tools/datamap/export_gltf.py"
 SKIP = {("asset", "generator")}
 # Mario, Donkey Kong, Peach, Baby Mario, King Boo, Blue Toad, Red Shy Guy
-DEFAULT_CHARS = [0, 2, 4, 7, 15, 29, 37]
+DEFAULT_CHARS = [0, 2, 4, 7, 37, 29, 16]
 
 
 class Mismatch(Exception):
