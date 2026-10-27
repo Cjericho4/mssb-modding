@@ -1,6 +1,6 @@
 [package]
 name = "mssb-clone-maker"
-version = "0.1.0"
+version = "0.1.0-beta"
 edition = "2021"
 description = "MSSB Clone Maker: the window (Tauri)"
 publish = false
