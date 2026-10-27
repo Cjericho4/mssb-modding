@@ -110,7 +110,13 @@ with no relocations and no other copies; `fn_2_18398` picks the charID from the
 captain grid, the roster or the grid cursor, `fn_2_18148` loads it). With
 `--ui source` each donor's row becomes the source's (`menu::patch_menu_models`,
 which refuses a table whose 54 rows are not distinct retail descriptors). The
-model keeps the source's own colours. `menu_char_b` (`.data+0x12EC0`) is left
+model keeps the source's own colours. The preview buffer stride
+(`fn_2_17C88` / `fn_2_17ED8`) is the largest `menu_char_a[charID]` over stat rows
+0..52 only (row 53 is never scanned), rounded to 32 B; `menu_model_stride`
+recomputes it on the patched table and stat charIDs, and a donor whose new model
+would not fit keeps its own row (logged). With retail stats every row 0..52
+names its own charID, so the source's row is always scanned and the redirect
+always fits; the check guards non-retail stat charIDs (and slot 53). `menu_char_b` (`.data+0x12EC0`) is left
 alone: retail already points most colour-variant rows at Mario's file, and its
 only traced readers (`fn_2_47540`, `fn_2_478F4`, `fn_2_481F4`) size buffers.
 

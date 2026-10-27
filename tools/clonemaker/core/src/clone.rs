@@ -773,16 +773,44 @@ pub fn clone(
             ));
         }
         if i == 0 && args.ui_source {
-            let rows = patch_menu_models(&mut rel, c, &slots)?;
-            lines.push(format!(
-                "3D select models (menu_char_a) of {} := {}'s (rows at {})",
-                names(&clones),
-                CHAR_NAMES[c],
-                rows.iter()
-                    .map(|o| format!("0x{o:X}"))
-                    .collect::<Vec<_>>()
-                    .join(", ")
-            ));
+            // The preview stride scans the stat rows' charIDs (+0x24); the stats step below
+            // keeps row s's CharID = s, so the clean block's IDs are the patched ones.
+            let stats = disc.read("ZZZZ.dat", 0x6cf8800, 54 * 0xa0)?;
+            let mut stat_ids = (0..54)
+                .map(|k| u16_at(&stats, k * 0xa0 + 0x24).map(|v| v as i16))
+                .collect::<Result<Vec<_>>>()?;
+            if !args.no_stats {
+                for s in &slots {
+                    stat_ids[*s] = *s as i16;
+                }
+            }
+            let (rows, skipped) = patch_menu_models(&mut rel, c, &slots, &stat_ids)?;
+            let done: Vec<_> = slots.iter().filter(|s| !skipped.contains(s)).collect();
+            if !rows.is_empty() {
+                lines.push(format!(
+                    "3D select models (menu_char_a) of {} := {}'s (rows at {})",
+                    done.iter()
+                        .map(|s| CHAR_NAMES[**s])
+                        .collect::<Vec<_>>()
+                        .join(", "),
+                    CHAR_NAMES[c],
+                    rows.iter()
+                        .map(|o| format!("0x{o:X}"))
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                ));
+            }
+            if !skipped.is_empty() {
+                lines.push(format!(
+                    "3D select models of {} kept: {}'s model is larger than the select screen's preview buffer (largest model of stat rows 0..52)",
+                    skipped
+                        .iter()
+                        .map(|s| CHAR_NAMES[*s])
+                        .collect::<Vec<_>>()
+                        .join(", "),
+                    CHAR_NAMES[c]
+                ));
+            }
         }
         if i == 1 {
             let (base, size) = rel_data_section(&rel)?;

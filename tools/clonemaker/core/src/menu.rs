@@ -361,7 +361,30 @@ pub fn patch_colour_word(rel: &mut [u8], labels: &[(usize, usize)]) -> Result<Ve
 pub const MENU_MODELS: usize = 0x241c;
 /// Point each donor's `menu_char_a` row at the source's model, after checking that the table is
 /// the retail one (54 distinct LZSS rows). Returns the edited rows' file offsets.
-pub fn patch_menu_models(rel: &mut [u8], c: usize, donors: &[usize]) -> Result<Vec<usize>> {
+/// The select-screen preview buffer stride (`fn_2_17C88` / `fn_2_17ED8`): the largest
+/// `menu_char_a[charID]` unpacked size over stat rows 0..52 only (row 53 is never scanned),
+/// rounded up to 32 B. `stat_ids` are the stats block's per-row charIDs (+0x24).
+pub fn menu_model_stride(rel: &[u8], stat_ids: &[i16]) -> Result<usize> {
+    let table = rel_header(rel)?.sections[5].0 as usize + MENU_MODELS;
+    let mut stride = 0;
+    for id in stat_ids.iter().take(53) {
+        if (0..54).contains(id) {
+            let size = (u32_at(rel, table + *id as usize * 16 + 4)? & 0x0fffffff) as usize;
+            stride = stride.max(align(size, 32));
+        }
+    }
+    Ok(stride)
+}
+/// Point each donor's `menu_char_a` row at the source's model, after checking that the table is
+/// the retail one (54 distinct LZSS rows). A donor whose new model would not fit the preview
+/// stride of the patched table (`menu_model_stride`) keeps its own row. Returns the edited rows'
+/// file offsets and the donors left alone.
+pub fn patch_menu_models(
+    rel: &mut [u8],
+    c: usize,
+    donors: &[usize],
+    stat_ids: &[i16],
+) -> Result<(Vec<usize>, Vec<usize>)> {
     let hdr = rel_header(rel)?;
     let (data, size) = hdr.sections[5];
     let table = data as usize + MENU_MODELS;
@@ -391,13 +414,23 @@ pub fn patch_menu_models(rel: &mut [u8], c: usize, donors: &[usize]) -> Result<V
             "menus.rel: menu model rows share files (patched disc?)".into(),
         ));
     }
-    let mut out = Vec::new();
+    let old = rel.to_vec();
+    for s in donors {
+        rel.copy_within(table + c * 16..table + c * 16 + 16, table + s * 16);
+    }
+    let stride = menu_model_stride(rel, stat_ids)?;
+    let need = align((u32_at(rel, table + c * 16 + 4)? & 0x0fffffff) as usize, 32);
+    let (mut out, mut skipped) = (Vec::new(), Vec::new());
     for s in donors {
         let row = table + s * 16;
-        rel.copy_within(table + c * 16..table + c * 16 + 16, row);
-        out.push(row);
+        if need > stride {
+            rel[row..row + 16].copy_from_slice(&old[row..row + 16]);
+            skipped.push(*s);
+        } else {
+            out.push(row);
+        }
     }
-    Ok(out)
+    Ok((out, skipped))
 }
 #[cfg(test)]
 mod tests {
@@ -450,18 +483,39 @@ mod tests {
             put_u32(&mut rel, row + 12, 0x100).unwrap();
         }
         assert_eq!(rel_header(&rel).unwrap().sections[5].0, 0x100);
-        let rows = patch_menu_models(&mut rel, 2, &[30, 32]).unwrap();
+        let ids: Vec<i16> = (0..54).collect();
+        let (rows, skipped) = patch_menu_models(&mut rel, 2, &[30, 32], &ids).unwrap();
         assert_eq!(rows, vec![table + 30 * 16, table + 32 * 16]);
+        assert!(skipped.is_empty());
         assert_eq!(
             rel[table + 30 * 16..table + 31 * 16],
             rel[table + 32..table + 48]
         );
         assert!(
-            patch_menu_models(&mut rel, 2, &[31])
+            patch_menu_models(&mut rel, 2, &[31], &ids)
                 .err()
                 .unwrap()
                 .message
                 .contains("share files")
         );
+        // Preview stride: rows 0..52 only. Make charID 3's model the largest (0x2001 -> 0x2020)
+        // and let no stat row 0..52 name charID 3: a clone of 3 on slot 53 does not fit.
+        let mut rel2 = rel.clone();
+        for k in 0..54 {
+            put_u32(&mut rel2, table + k * 16 + 8, 0x800 * (k as u32 + 1)).unwrap();
+        }
+        put_u32(&mut rel2, table + 3 * 16 + 4, 0x40002001).unwrap();
+        let mut ids: Vec<i16> = (0..54).collect();
+        assert_eq!(menu_model_stride(&rel2, &ids).unwrap(), 0x2020);
+        ids[3] = 4;
+        assert_eq!(menu_model_stride(&rel2, &ids).unwrap(), 0x1000);
+        let before = rel2.clone();
+        let (rows, skipped) = patch_menu_models(&mut rel2, 3, &[53], &ids).unwrap();
+        assert!(rows.is_empty());
+        assert_eq!(skipped, vec![53]);
+        assert_eq!(rel2, before);
+        // A donor inside rows 0..52 is scanned, so its new size counts and it fits.
+        let (rows, skipped) = patch_menu_models(&mut rel2, 3, &[5], &ids).unwrap();
+        assert_eq!((rows.len(), skipped.len()), (1, 0));
     }
 }
