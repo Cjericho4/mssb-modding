@@ -724,7 +724,7 @@ pub fn clone(
     let mut rel_patches = Vec::new();
     for i in 0..3 {
         let edits: Vec<_> = moves.iter().filter(|m| m.counts[i] != 0).collect();
-        if !(i == 0 && !colour_word.is_empty()
+        if !(i == 0 && (args.ui_source || !colour_word.is_empty())
             || i == 1
             || i == 2 && !sound_moves.is_empty()
             || !edits.is_empty())
@@ -767,6 +767,18 @@ pub fn clone(
                     .join(", "),
                 offsets
                     .iter()
+                    .map(|o| format!("0x{o:X}"))
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            ));
+        }
+        if i == 0 && args.ui_source {
+            let rows = patch_menu_models(&mut rel, c, &slots)?;
+            lines.push(format!(
+                "3D select models (menu_char_a) of {} := {}'s (rows at {})",
+                names(&clones),
+                CHAR_NAMES[c],
+                rows.iter()
                     .map(|o| format!("0x{o:X}"))
                     .collect::<Vec<_>>()
                     .join(", ")

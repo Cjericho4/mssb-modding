@@ -20,6 +20,14 @@ CLI (not reachable from the window). `difftest.py` checks menus.rel's decompress
 the reference with exactly those jump-table addends replaced, and rewrites the reference's
 `menus.rel: colour word:` log line and `--colour-word` help the same way.
 
+Intended divergence (#19, select-screen models): with `ui_source: true` the core also points each
+donor's `menu_char_a` row (menus.rel `.data+0x241C`, 54 x 16-byte disc descriptors, read by
+`fn_2_18148` for the big 3D character of the captain/teammate screens) at the source's row, so
+hovering or picking a clone shows the source's model (in its own colours: no recolour path). The
+reference leaves the table alone. `difftest.py` checks exactly those rows in the decompressed
+menus.rel, adds the `3D select models` part to the reference's menus.rel log line and masks only
+that line's packed size.
+
 Types: `colour` is a preset name (`red orange yellow green cyan blue purple pink`) or `"#rrggbb"`
 (custom). Paths are strings. Errors are `{ "error": "<friendly message>" }` (see `friendly_error`).
 `regions` (in `preview` and `job`) are the ticked region indices; the core drops them when they are

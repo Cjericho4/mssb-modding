@@ -104,6 +104,16 @@ menus.rel. `--colour-word none` (the reference's default, plain boxes) and
 `donor` stay byte-identical to the reference; difftest accepts exactly the
 changed jump-table addends in the decompressed menus.rel (API.md).
 
+Select-screen models (#19): the big 3D character behind the captain/teammate
+screens is `menu_char_a[charID]` (menus.rel `.data+0x241C`, plain descriptors
+with no relocations and no other copies; `fn_2_18398` picks the charID from the
+captain grid, the roster or the grid cursor, `fn_2_18148` loads it). With
+`--ui source` each donor's row becomes the source's (`menu::patch_menu_models`,
+which refuses a table whose 54 rows are not distinct retail descriptors). The
+model keeps the source's own colours. `menu_char_b` (`.data+0x12EC0`) is left
+alone: retail already points most colour-variant rows at Mario's file, and its
+only traced readers (`fn_2_47540`, `fn_2_478F4`, `fn_2_481F4`) size buffers.
+
 `--grid` runs the sampled matrix and option switches. `--full-grid` additionally
 compares every source with every preset, grouping the eight presets into eight
 clone rows per source. Bowser uses two four-clone groups because eight HUD

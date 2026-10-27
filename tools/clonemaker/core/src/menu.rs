@@ -355,6 +355,50 @@ pub fn patch_colour_word(rel: &mut [u8], labels: &[(usize, usize)]) -> Result<Ve
     }
     Ok(out)
 }
+/// menus.rel `.data` offset of `menu_char_a` (54 x 16-byte disc descriptors, charID-keyed): the
+/// 3D character models of the captain/teammate select screens (`fn_2_18398` picks the charID,
+/// `fn_2_18148` loads `menu_char_a[charID]` by ARAMTransfer).
+pub const MENU_MODELS: usize = 0x241c;
+/// Point each donor's `menu_char_a` row at the source's model, after checking that the table is
+/// the retail one (54 distinct LZSS rows). Returns the edited rows' file offsets.
+pub fn patch_menu_models(rel: &mut [u8], c: usize, donors: &[usize]) -> Result<Vec<usize>> {
+    let hdr = rel_header(rel)?;
+    let (data, size) = hdr.sections[5];
+    let table = data as usize + MENU_MODELS;
+    if (size as usize) < MENU_MODELS + 54 * 16 {
+        return Err(Error::new(
+            "menus.rel: .data is too small for the menu model table".into(),
+        ));
+    }
+    let mut offsets = std::collections::BTreeSet::new();
+    for k in 0..54 {
+        let row = table + k * 16;
+        let (w0, w1, w2, w3) = (
+            u32_at(rel, row)?,
+            u32_at(rel, row + 4)?,
+            u32_at(rel, row + 8)?,
+            u32_at(rel, row + 12)?,
+        );
+        if w0 != 0x40b || w1 & 0xf0000000 != 0x40000000 || w2 == 0 || w2 % 0x800 != 0 || w3 == 0 {
+            return Err(Error::new(format!(
+                "menus.rel: menu model row {k} is not a retail descriptor"
+            )));
+        }
+        offsets.insert(w2);
+    }
+    if offsets.len() != 54 {
+        return Err(Error::new(
+            "menus.rel: menu model rows share files (patched disc?)".into(),
+        ));
+    }
+    let mut out = Vec::new();
+    for s in donors {
+        let row = table + s * 16;
+        rel.copy_within(table + c * 16..table + c * 16 + 16, row);
+        out.push(row);
+    }
+    Ok(out)
+}
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -388,5 +432,36 @@ mod tests {
             [3, 5, 1, 6, 0, 0]
         );
         assert_eq!(label_name(5), "purple");
+    }
+    #[test]
+    fn menu_models_refuse_non_retail() {
+        let mut rel = vec![0u8; 0x100 + 0x60 + MENU_MODELS + 54 * 16];
+        // a REL header with six sections; section 5 (.data) at 0x100
+        put_u32(&mut rel, 0xc, 6).unwrap();
+        put_u32(&mut rel, 0x10, 0x40).unwrap();
+        put_u32(&mut rel, 0x40 + 5 * 8, 0x100).unwrap();
+        put_u32(&mut rel, 0x40 + 5 * 8 + 4, (MENU_MODELS + 54 * 16) as u32).unwrap();
+        let table = 0x100 + MENU_MODELS;
+        for k in 0..54 {
+            let row = table + k * 16;
+            put_u32(&mut rel, row, 0x40b).unwrap();
+            put_u32(&mut rel, row + 4, 0x40001000).unwrap();
+            put_u32(&mut rel, row + 8, 0x800 * (k as u32 + 1)).unwrap();
+            put_u32(&mut rel, row + 12, 0x100).unwrap();
+        }
+        assert_eq!(rel_header(&rel).unwrap().sections[5].0, 0x100);
+        let rows = patch_menu_models(&mut rel, 2, &[30, 32]).unwrap();
+        assert_eq!(rows, vec![table + 30 * 16, table + 32 * 16]);
+        assert_eq!(
+            rel[table + 30 * 16..table + 31 * 16],
+            rel[table + 32..table + 48]
+        );
+        assert!(
+            patch_menu_models(&mut rel, 2, &[31])
+                .err()
+                .unwrap()
+                .message
+                .contains("share files")
+        );
     }
 }
