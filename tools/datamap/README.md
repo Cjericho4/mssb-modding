@@ -110,18 +110,25 @@ py tools/datamap/export_gltf.py --disc orig/GYQE01 --character mario --out mario
 py tools/datamap/export_gltf.py --disc orig/GYQE01 --character dk --bank 2 --sequence 2 --out dk_swing.gltf
 py tools/datamap/export_gltf.py --disc orig/GYQE01 --character babymario --skeleton-only --out baby_bones.gltf
 py tools/datamap/export_gltf.py --disc orig/GYQE01 --character mario --no-mesh --out mario_markers.gltf
+py tools/datamap/export_gltf.py --disc orig/GYQE01 --character mario --textures painted_mario --out mario_painted.gltf
 py tools/datamap/test_export_gltf.py
 ```
 
-The self-contained glTF includes body triangles from the `.gpc` geo palette, one flat material,
-skin weights from its SK1, SK2 and accumulator lists, inverse bind matrices from the full rest
-transforms, rigid geometry parented to its bone, and a small marker cube per bone. It has one
+The self-contained glTF includes body triangles, normals and UVs from the `.gpc` geo palette,
+its embedded body textures as PNGs, skin weights from its SK1, SK2 and accumulator lists,
+inverse bind matrices from the full rest transforms, rigid geometry parented to its bone,
+and a small marker cube per bone. Each draw group uses its primary texture. It has one
 animation sampled every raw ANIM frame at 30 fps. `--skeleton-only` omits the clip;
-`--no-mesh` shows only bone markers. The exporter uses the game's right-handed, +Y-up
+`--no-mesh` shows only bone markers. `--textures` reads matching `tNN_WxH.png` files from
+Clone Maker's **Export textures…** folder, embedding painted PNGs where present and keeping
+the other retail textures. The exporter uses the game's right-handed, +Y-up
 coordinates directly; Blender's glTF importer handles Blender's coordinate convention.
-Scale-axis quaternion nodes preserve the game's T·R·Qs·S·Qs⁻¹ order. Textures, normals,
-bat/glove, gameplay event timing, blend transitions, and Blender-side visual validation remain
-to be done. The animation exporter matches tracks to bones by bone ID; tracks without a
+Scale-axis quaternion nodes preserve the game's T·R·Qs·S·Qs⁻¹ order. Extra TEV texture stages
+and transparency are simplified: the primary stage supplies the base colour, and the existing
+Clone Maker RGB decoder paints transparent retail texels over a checkerboard; painted PNGs
+keep their original alpha. Bat/glove, gameplay
+event timing, blend transitions, and Blender-side visual validation remain to be done. The
+animation exporter matches tracks to bones by bone ID; tracks without a
 matching bone are omitted. Exports contain local retail animation and mesh data: do not commit
 or redistribute them.
 

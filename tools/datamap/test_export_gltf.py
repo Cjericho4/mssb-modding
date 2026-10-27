@@ -69,32 +69,69 @@ class CurveTests(unittest.TestCase):
         self.assertAlmostEqual(opposite[3], math.sqrt(.5))
 
     def test_synthetic_gpc_geometry_and_gx_triangles(self):
-        body = bytearray(256)
+        body = bytearray(320)
         struct.pack_into(">I", body, 8, 0x20)  # .gpc root geo
         struct.pack_into(">5I", body, 0x20, 0x005BBC61, 0, 0, 1, 0x14)
         struct.pack_into(">2I", body, 0x34, 0x1C, 0)
-        struct.pack_into(">5IBBHI", body, 0x3C, 0x20, 0, 0, 0, 0x60, 0, 0, 0, 0)
+        struct.pack_into(">5IBBHI", body, 0x3C, 0x20, 0, 0xC0, 0xA0, 0x60, 1, 0, 0, 0)
         struct.pack_into(">IHBB", body, 0x5C, 0x30, 3, 0x3E, 3)
         struct.pack_into(">9h", body, 0x6C, 0, 0, 0, 16384, 0, 0, 0, 16384, 0)
         struct.pack_into(">IIH", body, 0x9C, 0, 0x6C, 1)
         display = bytes([0x90, 0, 3]) + b"".join(
             struct.pack(">3H", index, index, index) for index in range(3))
         display += bytes(32-len(display))
-        struct.pack_into(">BBHIII", body, 0xA8, 2, 0, 0, 0, 0x80, len(display))
+        struct.pack_into(">BBHIII", body, 0xA8, 1, 0, 0, 0x15110002, 0x80, len(display))
         body[0xBC:0xBC+len(display)] = display
+        struct.pack_into(">IHBB", body, 0xDC, 0xA8, 3, 0x3E, 3)
+        struct.pack_into(">9h", body, 0xE4, *(0, 0, 16384)*3)
+        struct.pack_into(">IHBBII", body, 0xFC, 0xD0, 3, 0x3E, 2, 0, 0)
+        struct.pack_into(">6h", body, 0x10C, 0, 0, 16384, 0, 0, 16384)
         descriptors = list(gltf.geometry_descriptors(body))
         self.assertEqual(len(descriptors), 1)
-        number, positions, faces, strides, source_ids, total = descriptors[0]
-        self.assertEqual((number, len(positions), faces, strides),
+        number, groups, strides, total = descriptors[0]
+        positions = groups[0]["positions"]
+        self.assertEqual((number, len(positions), groups[0]["triangles"], strides),
                          (0, 3, [(0, 1, 2)], [6]))
-        self.assertEqual((source_ids, total), ([0, 1, 2], 3))
+        self.assertEqual((groups[0]["source_ids"], total), ([0, 1, 2], 3))
         self.assertEqual(positions[1], [1, 0, 0])
+        self.assertEqual(groups[0]["normals"], [[0, 0, 1]]*3)
+        self.assertEqual(groups[0]["uvs"], [[0, 0], [1, 0], [0, 1]])
+        self.assertEqual(groups[0]["texture_id"], 2)
         self.assertEqual(gltf.gx_triangles(0x98, [0, 1, 2, 3]),
                          [(0, 1, 2), (2, 1, 3)])
         self.assertEqual(gltf.gx_triangles(0x80, [0, 1, 2, 3]),
                          [(0, 1, 2), (0, 2, 3)])
         compact = bytes([0xA0, 0, 3, 0, 0, 1, 0, 2, 0]) + bytes(7)
         self.assertEqual(gltf.infer_vertex_stride(compact, 0, len(compact), 3)[0], 2)
+
+    def test_cmpr_texture_to_embedded_png(self):
+        import base64
+        from pathlib import Path
+        import tempfile
+        import zlib
+        body = bytearray(256)
+        struct.pack_into(">2I", body, 0, 0x20, 0x100)
+        struct.pack_into(">H", body, 0x20, 1)
+        struct.pack_into(">IIHH", body, 0x24, 0x40, 0, 8, 8)
+        body[0x24+0x17] = 14  # CMPR
+        body[0x60:0x80] = struct.pack(">HHI", 0xF800, 0x07E0, 0)*4
+        doc = {}
+        self.assertEqual(gltf.add_textures(doc, bytes(body)), 1)
+        self.assertEqual(len(doc["images"]), 1)
+        png = base64.b64decode(doc["images"][0]["uri"].split(",", 1)[1])
+        self.assertEqual(png[:8], b"\x89PNG\r\n\x1a\n")
+        self.assertEqual(struct.unpack_from(">II", png, 16), (8, 8))
+        size, = struct.unpack_from(">I", png, 33)
+        self.assertEqual(png[37:41], b"IDAT")
+        rows = zlib.decompress(png[41:41+size])
+        self.assertEqual(rows, (b"\0" + bytes([255, 0, 0])*8)*8)
+        with tempfile.TemporaryDirectory() as directory:
+            painted = gltf.png_rgb(8, 8, bytes([0, 0, 255])*64)
+            (Path(directory) / "t00_8x8.png").write_bytes(painted)
+            preview = {}
+            gltf.add_textures(preview, bytes(body), Path(directory))
+            self.assertEqual(base64.b64decode(
+                preview["images"][0]["uri"].split(",", 1)[1]), painted)
 
     def test_scale_axis_and_buffer_bounds(self):
         keys = [key(0, "scale_quaternion", [0, 0, 0, 1]),
