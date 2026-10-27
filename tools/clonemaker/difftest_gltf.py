@@ -8,7 +8,7 @@ are skipped), every accessor's data must match (u16 exactly, f32 within --tol), 
 picture must have the same pixels (painted PNGs: the same bytes). If the reference fails, the
 port must fail too. Nothing from the game is printed or kept.
 
-    py tools/clonemaker/difftest_gltf.py --disc orig/GYQE01                 # the usual six
+    py tools/clonemaker/difftest_gltf.py --disc orig/GYQE01                 # seven characters
     py tools/clonemaker/difftest_gltf.py --disc orig/GYQE01 --chars all     # all 54
 """
 import argparse
