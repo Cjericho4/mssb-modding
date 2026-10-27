@@ -76,6 +76,11 @@ export async function run(options, app) {
     if (options.game) await walkThrough();
     else say("no --game: the features that need the game were not tested");
 
+    // a long done message (several characters' pick hints, long paths) fits the window at any size (#20)
+    await longDialog("dialog_narrow", 640, 560);
+    await longDialog("dialog_long", 1320, 780);
+    await longDialog("dialog_scroll", 640, 560, 4);
+
     // a 1366 x 768 screen at 125 %
     await resizeTo(1093, 614);
     check(stacked(), "1093 px wide is stacked");
@@ -271,6 +276,35 @@ export async function run(options, app) {
     await waitFor(() => $("pill").textContent === "Cancelled", "the cancelled job");
     check(logHas("Cancelled. Nothing was saved.") && $("run-box").hidden, "cancel message, bar hidden");
 
+  }
+
+  async function longDialog(name, w, h, times = 1) {
+    await resizeTo(w, h);
+    const dir = "C:\\Users\\someone with a long name\\Documents\\Mario Superstar Baseball mods\\";
+    const hint = ["Blue Toad ones are Peach clones", "Purple Toad, Yellow Toad, Green Toad ones are King Boo clones",
+      "Red Noki, Green Noki ones are Donkey Kong clones"]
+      .map((c) => `In the game, put several Toads on one team: the game gives the extra ones colours by itself, and the ${c}.`).join(" ");
+    const closed = app.showInfo("Done!", `Saved to ${dir}Mario Superstar Baseball (US) - Multi Clones.iso.\n\n`
+      + `Open it in Dolphin or Project Rio: File → Open…\n\n${Array(times).fill(hint).join("\n\n")}\n\n`
+      + `The working folder was kept: ${dir}MSSB-Clone-Maker-work-PKWafm\\${"x".repeat(150)}`);
+    await painted();
+    // the window less its scroll bars
+    const view = { width: document.documentElement.clientWidth, height: document.documentElement.clientHeight };
+    const inside = (r) => r.left >= 0 && r.top >= 0 && r.right <= view.width && r.bottom <= view.height;
+    const box = document.querySelector(".dialog").getBoundingClientRect(), text = $("dialog-text");
+    const ok = dialogButton("OK"), okBox = ok.getBoundingClientRect();
+    const at = `${innerWidth}x${innerHeight}`;
+    check(inside(box), `${at}: the dialog is inside the window: ${JSON.stringify(box)}`);
+    check(Math.abs(box.left - (view.width - box.right)) <= 2, `${at}: the dialog is centred: ${box.left}..${box.right}`);
+    check(inside(okBox) && document.elementFromPoint((okBox.left + okBox.right) / 2, (okBox.top + okBox.bottom) / 2) === ok,
+      `${at}: the OK button is visible: ${JSON.stringify(okBox)}`);
+    check(text.scrollWidth <= text.clientWidth, `${at}: the text wraps (${text.scrollWidth} > ${text.clientWidth} px)`);
+    const scrolls = text.scrollHeight > text.clientHeight;
+    check(!scrolls || getComputedStyle(text).overflowY === "auto", `${at}: the text scrolls`);
+    check(scrolls === times > 1, `${at}: ${times > 1 ? "a very long" : "this"} text ${times > 1 ? "scrolls" : "fits"}`);
+    await shot(name);
+    ok.click();
+    await closed;
   }
 
   async function resizeTo(w, h) {

@@ -718,7 +718,7 @@ async function main() {
   $("feedback").addEventListener("click", () => invoke("open_feedback"));
   if (!options.selftest) checkForUpdate();
   if (options.selftest) {
-    await import("./selftest.js").then((m) => m.run(options, { state, startLoad, exportTextures, setRowTextures }));
+    await import("./selftest.js").then((m) => m.run(options, { state, startLoad, exportTextures, setRowTextures, showInfo }));
   }
 }
 
