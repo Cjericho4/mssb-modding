@@ -134,10 +134,17 @@ Scale-axis quaternion nodes preserve the game's T·R·Qs·S·Qs⁻¹ order. Extr
 and transparency are simplified: the primary stage supplies the base colour, and the existing
 Clone Maker RGB decoder paints transparent retail texels over a checkerboard; painted PNGs
 keep their original alpha. Bat/glove, gameplay
-event timing, blend transitions, and Blender-side visual validation remain to be done. The
+event timing and blend transitions remain to be done. The
 animation exporter matches tracks to bones by bone ID; tracks without a
 matching bone are omitted. Exports contain local retail animation and mesh data: do not commit
 or redistribute them.
+
+**Playing another animation in Blender.** The importer stores every animation as an NLA track
+but plays only the first (`t2_s00_id75_BatterIdle`). To switch: select the skeleton, enter Pose
+Mode, set a Dope Sheet panel to **Action Editor**, click the browse icon left of the action name
+and pick one. Or, in the **Nonlinear Animation** editor, click a track's star to solo it. The
+normal swing (`t2_s02_id77_BatterSwingBat`) is only 6 frames, so set the timeline end to 6 or
+step through it.
 
 ## Voices, announcer, sound effects and music
 
