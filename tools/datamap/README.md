@@ -93,9 +93,11 @@ py -m unittest test_animations
 
 The audit decodes all character banks and layouts, compares descriptor sharing and decoded-byte
 hashes, verifies ARAM/disc track-15 equality, and exports all 54 characters' DOL event windows.
-It takes several minutes. The inspector dumps key **settings** and interpolation modes/offsets;
-it does not evaluate curves, decode auxiliary curve payloads or write animations. Files/JSON
-with key values are local game data; don't redistribute them. Extraction uses canonical alias
+It takes several minutes. With --keyframes, the inspector dumps each key's **channels**
+and **auxiliary** data (in/out vectors or quaternion controls and, where present, an ease pair).
+For an eased segment, use the current key's ease[1] and the next key's ease[0]; the
+segment_ease helper returns that pair. The inspector does not evaluate curves or write animations.
+Files/JSON with key values are local game data; don't redistribute them. Extraction uses canonical alias
 filenames (check the output manifest). Track purposes, binary layouts, swap requirements and
 remaining Blender work: [.agent/animations.md](https://github.com/Cjericho4/mssb-dtk/blob/main/.agent/animations.md).
 
