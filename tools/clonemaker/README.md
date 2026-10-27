@@ -91,6 +91,9 @@ game list (**Config → Paths → Add…**). Keep your original `.iso` too; the 
 
 **Picking the clones:**
 
+In **Slot it takes over**, ★ marks a recommended extra colour; × marks a slot another clone
+already uses. Hover over the slot list to read the full explanation.
+
 - **Toad slots (the default):** the game has no colour button. On the roster screen, put **Toad** on
   a team several times. The first Toad is the normal red Toad; every extra Toad takes one of the
   other colours by itself, and each of those is now your clone. The same goes for other families
@@ -166,7 +169,6 @@ with several characters, each clone follows the character it copies.
 - **Animations marked "Some bones differ" can look glitchy** in a few moves.
 - **Some recolours have rough spots**, especially on Donkey Kong and Peach (small areas that keep
   the old colour or change when they shouldn't).
-- **The slot list cuts off long names** in narrow windows. Widen the window to read them.
 - **On the select screen, the big 3D character behind the team shows the cloned character in
   its own colours**, not the clone's colour (those menu models can't be recoloured yet).
 - **Not every character has been played as a clone in Rio yet.** Mario, Peach, King Boo and DK have.

@@ -329,12 +329,19 @@ async function rebuildRows(g, reset) {
 /** The block's slot list; slots another block uses are greyed out. */
 function fillSlots(row) {
   const g = row.group, taken = usedElsewhere(g);
-  row.slotSelect.replaceChildren(...g.info.slots.map((s) => el("option", {
-    value: s.id,
-    textContent: taken.includes(s.id) ? `${s.label} (used by another character)` : s.label,
-    disabled: taken.includes(s.id),
-  })));
+  row.slotSelect.replaceChildren(...g.info.slots.map((s) => {
+    const unavailable = taken.includes(s.id);
+    const name = s.label.split(" — ")[0];
+    const recommended = s.label.includes(" — recommended (");
+    return el("option", {
+      value: s.id,
+      textContent: `${unavailable ? "× " : recommended ? "★ " : ""}${name}`,
+      title: unavailable ? `${s.label} (used by another character)` : s.label,
+      disabled: unavailable,
+    });
+  }));
   row.slotSelect.value = String(row.slot);
+  row.slotSelect.title = row.slotSelect.selectedOptions[0]?.title || "";
 }
 
 /** Refresh every block's slot lists after a slot or character changed somewhere. */
