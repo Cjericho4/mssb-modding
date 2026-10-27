@@ -120,19 +120,32 @@ The self-contained glTF includes body triangles, normals and UVs from the `.gpc`
 (each display list's vertex layout comes from its vertex descriptor, display state 2; every one
 of the 54 characters exports),
 its embedded body textures as PNGs, skin weights from its SK1, SK2 and accumulator lists,
-inverse bind matrices from the full rest transforms, rigid geometry parented to its bone,
-and a small marker cube per bone. Each draw group uses its primary texture. By default it has
+inverse bind matrices from the full rest transforms, and every rigid display piece (a head,
+a hat, a crown) as its own mesh on the same skin, placed at its bone's rest transform and
+weighted 1.0 to that bone. Each draw group uses its primary texture. By default it has
 one animation sampled every raw ANIM frame at 30 fps. `--all-animations` adds every nonempty
 sequence from normal-match tracks 2 (batting), 3 (running), 4 (fielding), 5 (pitching) and
 15 (extra); use `--banks` to choose other disc tracks. The Actions share the same skeleton
 and have names such as `t2_s02_id77_BatterSwingBat`. Gameplay IDs and labels are
 reverse-engineered annotations, not strings stored in the ANIM bank; unnamed IDs retain
 their numeric `tN_sNN_idN` label. `--skeleton-only` omits the clip;
-`--no-mesh` shows only bone markers. `--textures` reads matching `tNN_WxH.png` files from
+`--no-mesh` leaves out the body and puts a small marker cube on each bone instead. `--textures` reads matching `tNN_WxH.png` files from
 Clone Maker's **Export Textures** folder, embedding painted PNGs where present and keeping
-the other retail textures. The exporter uses the game's right-handed, +Y-up
-coordinates directly; Blender's glTF importer handles Blender's coordinate convention.
-Scale-axis quaternion nodes preserve the game's T·R·Qs·S·Qs⁻¹ order. Extra TEV texture stages
+the other retail textures. Coordinates: every body's bind-space vertices and rest skeleton (all 54) have the
+feet at Y=0, the head toward -Y and the face toward -Z, so the root bones are turned 180° about
+X (a rotation, not a mirror) and the glTF stands up along +Y, facing +Z; in Blender it stands
+along +Z and faces -Y (the front view). GX winds front faces clockwise, so each triangle is
+written counter-clockwise, as glTF requires; the normals already point outwards.
+Bones: each bone is one node (T, R, S). A bone whose scale axis an exported clip turns away
+from identity keeps the exact T·R·Qs·S·Qs⁻¹ chain as four nodes (`bone_N`,
+`bone_N_scale_axis`, `bone_N_scale`, `bone_N_scale_axis_inverse`), so which bones have a chain
+depends on the clips exported. Blender's armature rest pose cannot hold scale; the importer
+puts a node's rest scale into the pose instead. So a leaf bone's rest scale (Mario's head is
+0.14) is folded into its geometry and divided out of its scale keys, and every clip keys the
+rest scale of the few non-leaf bones that have one (Donkey Kong, the Shy Guys, Toadsworth and
+the Magikoopas), so any Action poses the whole body even after **Pose > Clear Transform**.
+What is lost: on those non-leaf bones Blender's own rest pose (**Rest Position**, or a cleared
+pose with no Action) shows the parts they move unscaled. Extra TEV texture stages
 and transparency are simplified: the primary stage supplies the base colour, and the existing
 Clone Maker RGB decoder paints transparent retail texels over a checkerboard; painted PNGs
 keep their original alpha. Bat/glove, gameplay

@@ -182,31 +182,84 @@ def cube(buffer):
                                                     "indices": faces, "mode": 4}]}
 
 
-def skeleton(body, character):
+# The game's actor space has the head toward -Y and the face toward -Z. Each root bone is
+# turned 180 degrees about X so the glTF stands up along +Y and faces +Z (Blender: +Z up,
+# facing -Y). This is a rotation, so nothing is mirrored.
+TURN = [1.0, 0.0, 0.0, 0.0]
+
+
+def turn_vector(v):
+    return [v[0], -v[1], -v[2]]
+
+
+def scale_axis_bones(layout, sequences):
+    """Bones whose scale axis an exported clip turns away from identity (`sequences`: track lists)."""
+    bone_by_id = {}
+    for index, bone in enumerate(layout["bones"]):
+        bone_by_id.setdefault(bone["bone_id"], index)
+    result = set()
+    for tracks in sequences:
+        for track in tracks:
+            index = bone_by_id.get(track["bone_id"])
+            if index is None:
+                continue
+            for keyframe in track["keyframes"]:
+                q = keyframe["channels"].get("scale_quaternion")
+                if q is not None and any(q[:3]):
+                    result.add(index)
+    return result
+
+
+def skeleton(body, character, scale_axes=frozenset(), markers=True):
+    """One node per bone (T, R, S); a bone whose scale axis turns keeps the exact chain
+    T·R, Qs, S, Qs⁻¹ as four nodes. A leaf bone's rest scale is folded into its geometry, so
+    Blender (whose rest pose has no scale) shows it at the right size."""
     layout = animations.parse_layout(body)
     buffer = Buffer()
     doc = {"asset": {"version": "2.0", "generator": "mssb export_gltf.py"},
            "scene": 0, "scenes": [{"nodes": []}], "nodes": [],
-           "meshes": [cube(buffer)],
+           "meshes": [cube(buffer)] if markers else [],
            "extras": {"character_id": character, "bone_count": layout["num_bones"],
-                      "coordinate_system": "game and glTF: right-handed, +Y up"}}
+                      "coordinate_system": "glTF +Y up, facing +Z; the game's actor space "
+                                           "(head toward -Y) is turned 180 degrees about X "
+                                           "at the root bones"}}
     handles = []
     poses = []
-    for bone in layout["bones"]:
+    for index, bone in enumerate(layout["bones"]):
         pose = read_control(body, layout["layout_offset"], bone)
         poses.append(pose)
+        scale = pose["scale"]
+        chained = index in scale_axes or any(pose["scale_quaternion"][:3])
+        pose["turn"] = bone["parent_index"] is None
+        pose["fold"] = None
+        if (bone["child_index"] is None and scale != [1.0, 1.0, 1.0] and
+                (not chained or scale[0] == scale[1] == scale[2])):
+            pose["fold"] = scale
+            scale = [1.0, 1.0, 1.0]
+        pose["node_scale"] = scale
+        translation, rotation = pose["translation"], pose["rotation"]
+        if pose["turn"]:
+            translation, rotation = turn_vector(translation), multiply(TURN, rotation)
         bone_id = bone["bone_id"]
         main = len(doc["nodes"])
-        axis = main + 1
-        scaled = main + 2
-        leaf = main + 3
+        node = {"name": "bone_%d" % bone_id, "translation": translation,
+                "rotation": rotation}
+        if not chained:
+            node["scale"] = scale
+        if markers:
+            node["mesh"] = 0
+        node["children"] = []
+        node["extras"] = {"bone_id": bone_id}
+        doc["nodes"].append(node)
+        if not chained:
+            handles.append((main, main, main, main))
+            continue
+        axis, scaled, leaf = main + 1, main + 2, main + 3
+        node["children"].append(axis)
         doc["nodes"].extend([
-            {"name": "bone_%d" % bone_id, "translation": pose["translation"],
-             "rotation": pose["rotation"], "mesh": 0,
-             "children": [axis], "extras": {"bone_id": bone_id}},
             {"name": "bone_%d_scale_axis" % bone_id,
              "rotation": pose["scale_quaternion"], "children": [scaled]},
-            {"name": "bone_%d_scale" % bone_id, "scale": pose["scale"],
+            {"name": "bone_%d_scale" % bone_id, "scale": scale,
              "children": [leaf]},
             {"name": "bone_%d_scale_axis_inverse" % bone_id,
              "rotation": inverse(pose["scale_quaternion"]), "children": []}
@@ -282,21 +335,29 @@ def inverse_affine(m):
     return [inv[r]+[offset[r]] for r in range(3)] + [[0.0, 0.0, 0.0, 1.0]]
 
 
-def inverse_bind_matrices(layout, poses):
-    """Inverse of each joint's complete rest transform, including scale axis."""
-    order = runtime_bone_order(layout)
+def rest_worlds(layout, poses):
+    """Each joint's exported rest transform (turned roots, folded leaf scales), by bone index."""
     worlds = {}
-    for index in order:
+    for index in runtime_bone_order(layout):
         pose = poses[index]
-        local = translation_matrix(pose["translation"])
-        for part in (rotation_matrix(pose["rotation"]),
+        translation, rotation = pose["translation"], pose["rotation"]
+        if pose.get("turn"):
+            translation, rotation = turn_vector(translation), multiply(TURN, rotation)
+        local = translation_matrix(translation)
+        for part in (rotation_matrix(rotation),
                      rotation_matrix(pose["scale_quaternion"]),
-                     scale_matrix(pose["scale"]),
+                     scale_matrix(pose.get("node_scale", pose["scale"])),
                      rotation_matrix(inverse(pose["scale_quaternion"]))):
             local = matmul(local, part)
         parent = layout["bones"][index]["parent_index"]
         worlds[index] = matmul(worlds[parent], local) if parent is not None else local
-    return [inverse_affine(worlds[index]) for index in order]
+    return worlds
+
+
+def inverse_bind_matrices(layout, poses):
+    """Inverse of each joint's exported rest transform, in runtime (joint) order."""
+    worlds = rest_worlds(layout, poses)
+    return [inverse_affine(worlds[index]) for index in runtime_bone_order(layout)]
 
 
 def skin_weights(body, layout, vertex_count):
@@ -532,44 +593,60 @@ def add_animation(doc, buffer, bank, sequence_id, layout, handles, poses, name=N
         if not samples:
             continue
         main, axis, scaled, leaf = handles[index]
-        rest = poses[index]
+        turn = poses[index].get("turn")
+        fold = poses[index].get("fold")
         names = samples[0]
         if "translation" in names:
-            channel(main, "translation", [s["translation"] for s in samples])
+            channel(main, "translation", [turn_vector(s["translation"]) if turn
+                                          else s["translation"] for s in samples])
         if "quaternion" in names or "euler" in names:
             rotations = [unit(s["quaternion"]) if "quaternion" in s
                          else euler_xyz(s["euler"]) for s in samples]
-            channel(main, "rotation", rotations)
+            channel(main, "rotation", [multiply(TURN, q) if turn else q
+                                       for q in rotations])
         if "scale" in names:
-            channel(scaled, "scale", [s["scale"] for s in samples])
-        if "scale_quaternion" in names:
+            channel(scaled, "scale", [[v/f for v, f in zip(s["scale"], fold)] if fold
+                                      else s["scale"] for s in samples])
+        if "scale_quaternion" in names and axis != main:
             axes = [unit(s["scale_quaternion"]) for s in samples]
             channel(axis, "rotation", axes)
             channel(leaf, "rotation", [inverse(q) for q in axes])
     if animation["channels"]:
+        # Blender keeps rest scale only in the pose, so key the unfolded rest scales a clip
+        # leaves alone; each Action then poses the whole body even after a pose reset.
+        scaled_nodes = {c["target"]["node"] for c in animation["channels"]
+                        if c["target"]["path"] == "scale"}
+        for index, pose in enumerate(poses):
+            scale = pose.get("node_scale", [1.0, 1.0, 1.0])
+            if scale != [1.0, 1.0, 1.0] and handles[index][2] not in scaled_nodes:
+                channel(handles[index][2], "scale", [scale] * len(frames))
         doc.setdefault("animations", []).append(animation)
         return animation
     return None
 
 
 def gx_triangles(op, vertices):
-    """Triangulate GX quads, triangles, strips and fans."""
+    """Triangulate GX quads, triangles, strips and fans, counter-clockwise for glTF.
+
+    GX front faces are clockwise (the normals face away from the GX winding), so each
+    triangle's last two corners are swapped."""
     if op == 0x80:
         if len(vertices) % 4:
             raise ValueError("GX quad count is not a multiple of four")
         return [triangle for i in range(0, len(vertices), 4)
-                for triangle in ((vertices[i], vertices[i+1], vertices[i+2]),
-                                 (vertices[i], vertices[i+2], vertices[i+3]))]
+                for triangle in ((vertices[i], vertices[i+2], vertices[i+1]),
+                                 (vertices[i], vertices[i+3], vertices[i+2]))]
     if op == 0x90:
         if len(vertices) % 3:
             raise ValueError("GX triangle count is not a multiple of three")
-        return [tuple(vertices[i:i+3]) for i in range(0, len(vertices), 3)]
+        return [(vertices[i], vertices[i+2], vertices[i+1])
+                for i in range(0, len(vertices), 3)]
     if op == 0x98:
-        return [(vertices[i-2], vertices[i-1], vertices[i]) if i % 2 == 0
-                else (vertices[i-1], vertices[i-2], vertices[i])
+        return [(vertices[i-2], vertices[i], vertices[i-1]) if i % 2 == 0
+                else (vertices[i-1], vertices[i], vertices[i-2])
                 for i in range(2, len(vertices))]
     if op == 0xA0:
-        return [(vertices[0], vertices[i-1], vertices[i])
+        return [(vertices[0], vertices[i], vertices[i-1])
                 for i in range(2, len(vertices))]
     raise ValueError("unsupported GX primitive 0x%02X" % op)
 
@@ -788,36 +865,73 @@ def add_textures(doc, body, textures_dir=None):
     return plain
 
 
+def transform_point(m, p):
+    return [sum(m[r][k]*p[k] for k in range(3)) + m[r][3] for r in range(3)]
+
+
+def transform_normal(m, n):
+    """Normalized inverse-transpose of `m`'s 3x3 applied to `n`."""
+    inv = inverse_affine(m)
+    v = [sum(inv[k][r]*n[k] for k in range(3)) for r in range(3)]
+    length = math.sqrt(sum(x*x for x in v))
+    return [x/length for x in v] if length else v
+
+
 def add_geometry(doc, buffer, body, layout, handles, poses, textures_dir=None):
-    """Attach textured skin geometry and rigid geometry below its bone."""
+    """Add every display piece as a mesh on the one skin.
+
+    The skin is in the game's bind space and is only turned upright. A rigid piece (geometry
+    drawn by one bone) is placed at its bone's rest transform and weighted 1.0 to that bone, so
+    it follows the bone exactly while Blender sees only ordinary skinned meshes."""
     skin_id = layout["skin_file_id"]
     plain_material = add_textures(doc, body, textures_dir)
     rigid = {}
     for i, bone in enumerate(layout["bones"]):
         if bone["geometry_id"] != 0xFFFF:
             rigid.setdefault(bone["geometry_id"], i)
+    order = runtime_bone_order(layout)
+    worlds = rest_worlds(layout, poses)
     counts = []
     for descriptor_id, groups, strides, total in geometry_descriptors(body):
         mesh_id = len(doc["meshes"])
         primitives = []
-        influences = skin_weights(body, layout, total) if descriptor_id == skin_id else {}
+        skinned = descriptor_id == skin_id
+        if skinned:
+            influences = skin_weights(body, layout, total)
+        elif descriptor_id in rigid:
+            bone_index = rigid[descriptor_id]
+            place = matmul(worlds[bone_index],
+                           scale_matrix(poses[bone_index].get("fold") or [1.0, 1.0, 1.0]))
+            joint = order.index(bone_index)
+            a, b, c = place[0][:3], place[1][:3], place[2][:3]
+            mirrored = (a[0]*(b[1]*c[2]-b[2]*c[1]) - a[1]*(b[0]*c[2]-b[2]*c[0]) +
+                        a[2]*(b[0]*c[1]-b[1]*c[0])) < 0
+        else:
+            raise ValueError("unowned rigid geometry descriptor %d" % descriptor_id)
         for group in groups:
-            positions = group["positions"]
             source_ids = group["source_ids"]
             triangles = group["triangles"]
+            if skinned:
+                positions = [turn_vector(p) for p in group["positions"]]
+                normals = [turn_vector(n) for n in group["normals"]]
+            else:
+                positions = [transform_point(place, p) for p in group["positions"]]
+                normals = [transform_normal(place, n) for n in group["normals"]]
+                if mirrored:
+                    triangles = [(x, z, y) for x, y, z in triangles]
             if len(positions) > 65535:
                 raise ValueError("geometry group needs u32 indices")
             attributes = {"POSITION": buffer.add(
                 [x for point in positions for x in point], 5126, "VEC3", 34962)}
-            if group["normals"]:
+            if normals:
                 attributes["NORMAL"] = buffer.add(
-                    [x for normal in group["normals"] for x in normal],
+                    [x for normal in normals for x in normal],
                     5126, "VEC3", 34962)
             if group["uvs"]:
                 attributes["TEXCOORD_0"] = buffer.add(
                     [x for uv in group["uvs"] for x in uv],
                     5126, "VEC2", 34962)
-            if descriptor_id == skin_id:
+            if skinned:
                 missing = set(source_ids) - influences.keys()
                 if missing:
                     raise ValueError("display list references %d unweighted skin vertices: %s" %
@@ -833,6 +947,11 @@ def add_geometry(doc, buffer, body, layout, handles, poses, textures_dir=None):
                         joints, 5123, "VEC4", 34962)
                     attributes["WEIGHTS_%d" % set_id] = buffer.add(
                         weights, 5126, "VEC4", 34962)
+            else:
+                attributes["JOINTS_0"] = buffer.add(
+                    [joint, 0, 0, 0] * len(positions), 5123, "VEC4", 34962)
+                attributes["WEIGHTS_0"] = buffer.add(
+                    [1.0, 0.0, 0.0, 0.0] * len(positions), 5126, "VEC4", 34962)
             face_accessor = buffer.add(
                 [i for triangle in triangles for i in triangle], 5123, "SCALAR", 34963)
             material = group["texture_id"]
@@ -845,29 +964,23 @@ def add_geometry(doc, buffer, body, layout, handles, poses, textures_dir=None):
                                "mode": 4, "material": material})
         doc["meshes"].append({"name": "geo_%d" % descriptor_id,
                               "primitives": primitives})
-        node_id = len(doc["nodes"])
+        extras = {"descriptor": descriptor_id, "vertex_strides": strides}
+        if not skinned:
+            extras["rigid_bone_id"] = layout["bones"][bone_index]["bone_id"]
+        if "skins" not in doc:
+            matrices = inverse_bind_matrices(layout, poses)
+            gltf_matrices = [value for matrix in matrices
+                             for column in range(4) for value in
+                             (matrix[0][column], matrix[1][column],
+                              matrix[2][column], matrix[3][column])]
+            ibm = buffer.add(gltf_matrices, 5126, "MAT4")
+            doc["skins"] = [{"name": "actor skin",
+                             "inverseBindMatrices": ibm,
+                             "joints": [handles[index][3] for index in order],
+                             "skeleton": handles[layout["root_index"]][0]}]
+        doc["scenes"][0]["nodes"].append(len(doc["nodes"]))
         doc["nodes"].append({"name": "geo_%d" % descriptor_id, "mesh": mesh_id,
-                             "extras": {"descriptor": descriptor_id,
-                                        "vertex_strides": strides}})
-        if descriptor_id == skin_id:
-            if "skins" not in doc:
-                matrices = inverse_bind_matrices(layout, poses)
-                gltf_matrices = [value for matrix in matrices
-                                 for column in range(4) for value in
-                                 (matrix[0][column], matrix[1][column],
-                                  matrix[2][column], matrix[3][column])]
-                ibm = buffer.add(gltf_matrices, 5126, "MAT4")
-                order = runtime_bone_order(layout)
-                doc["skins"] = [{"name": "actor skin",
-                                 "inverseBindMatrices": ibm,
-                                 "joints": [handles[index][3] for index in order],
-                                 "skeleton": handles[layout["root_index"]][0]}]
-            doc["nodes"][node_id]["skin"] = 0
-            doc["scenes"][0]["nodes"].append(node_id)
-        elif descriptor_id in rigid:
-            doc["nodes"][handles[rigid[descriptor_id]][3]]["children"].append(node_id)
-        else:
-            raise ValueError("unowned rigid geometry descriptor %d" % descriptor_id)
+                             "skin": 0, "extras": extras})
         counts.append((descriptor_id,
                        sum(len(group["positions"]) for group in groups),
                        sum(len(group["triangles"]) for group in groups)))
@@ -907,7 +1020,8 @@ def main():
     parser.add_argument("--banks", type=bank_tracks,
                         help="comma-separated tracks for --all-animations (default: 2,3,4,5,15)")
     parser.add_argument("--skeleton-only", action="store_true")
-    parser.add_argument("--no-mesh", action="store_true", help="show joint markers only")
+    parser.add_argument("--no-mesh", action="store_true",
+                        help="no body; a small cube marks each joint instead")
     parser.add_argument("--textures", type=Path,
                         help="preview painted PNGs from Clone Maker's Export Textures folder")
     parser.add_argument("--out", type=Path, required=True)
@@ -922,31 +1036,36 @@ def main():
         parser.error("--skeleton-only conflicts with --all-animations")
     _, catalog = mssb_files.open_catalog(args.disc)
     body = catalog.data(catalog.find("subfile.%d" % (args.character * 19)))
-    doc, buffer, layout, handles, poses = skeleton(body, args.character)
-    if not args.no_mesh:
-        counts = add_geometry(doc, buffer, body, layout, handles, poses, args.textures)
-        print("Geometry: " + ", ".join("%d: %d vertices, %d triangles" % row
-                                       for row in counts))
+    clips = []  # (bank, sequence id, name)
     if not args.skeleton_only:
         if args.all_animations:
             for track in args.banks or DEFAULT_ANIMATION_BANKS:
                 bank_data = catalog.data(catalog.find(
                     "subfile.%d" % (args.character * 19 + track)))
                 bank = animations.parse_bank(bank_data, keyframes=True)
-                for sequence_id, sequence in enumerate(bank["sequences"]):
-                    if sequence["tracks"]:
-                        add_animation(doc, buffer, bank, sequence_id, layout,
-                                      handles, poses, animation_name(track, sequence_id))
-            print("Sampled %d animations at 30 fps" % len(doc.get("animations", [])))
+                clips += [(bank, sequence_id, animation_name(track, sequence_id))
+                          for sequence_id, sequence in enumerate(bank["sequences"])
+                          if sequence["tracks"]]
         else:
             bank_data = catalog.data(catalog.find(
                 "subfile.%d" % (args.character * 19 + args.bank)))
             bank = animations.parse_bank(bank_data, keyframes=True)
-            clip = add_animation(doc, buffer, bank, args.sequence,
-                                 layout, handles, poses,
-                                 animation_name(args.bank, args.sequence))
-            print("Sampled %d channels at 30 fps" %
-                  (len(clip["channels"]) if clip else 0))
+            if not 0 <= args.sequence < bank["num_sequences"]:
+                raise ValueError("sequence %d is outside bank" % args.sequence)
+            clips.append((bank, args.sequence, animation_name(args.bank, args.sequence)))
+    layout = animations.parse_layout(body)
+    scale_axes = scale_axis_bones(layout, [bank["sequences"][sequence_id]["tracks"]
+                                           for bank, sequence_id, _ in clips])
+    doc, buffer, layout, handles, poses = skeleton(body, args.character, scale_axes,
+                                                   markers=args.no_mesh)
+    if not args.no_mesh:
+        counts = add_geometry(doc, buffer, body, layout, handles, poses, args.textures)
+        print("Geometry: " + ", ".join("%d: %d vertices, %d triangles" % row
+                                       for row in counts))
+    for bank, sequence_id, name in clips:
+        add_animation(doc, buffer, bank, sequence_id, layout, handles, poses, name)
+    if not args.skeleton_only:
+        print("Sampled %d animations at 30 fps" % len(doc.get("animations", [])))
     buffer.finish(doc)
     args.out.write_text(json.dumps(doc, separators=(",", ":"), allow_nan=False) + "\n",
                         encoding="utf-8")

@@ -14,7 +14,7 @@ use crate::texture::{Gpc, decode_texture};
 use crate::{Error, Result};
 use base64::Engine;
 use serde_json::{Value, json};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::Path;
 
 /// Version word of ANIM banks and actor layouts.
@@ -396,12 +396,16 @@ fn inverse_affine(m: &Mat) -> Result<Mat> {
 
 // ------------------------------------------------------------------ rest pose and skeleton
 
-/// A bone's ControlExt rest pose: T·R·Qs·S·Qs⁻¹.
+/// A bone's ControlExt rest pose: T·R·Qs·S·Qs⁻¹, and how it is exported: a root bone is
+/// turned upright (`TURN`); a leaf bone's rest scale may be folded into its geometry.
 struct Pose {
     translation: Vec<f64>,
     rotation: Vec<f64>,
     scale: Vec<f64>,
     scale_quaternion: Vec<f64>,
+    turn: bool,
+    fold: Option<Vec<f64>>,
+    node_scale: Vec<f64>,
 }
 
 /// Read the file's ControlExt rest pose, whose pointer is layout-relative (`read_control`).
@@ -411,6 +415,9 @@ fn read_control(body: &[u8], layout: &Layout, bone: &Bone) -> Result<Pose> {
         rotation: vec![0.0, 0.0, 0.0, 1.0],
         scale: vec![1.0; 3],
         scale_quaternion: vec![0.0, 0.0, 0.0, 1.0],
+        turn: false,
+        fold: None,
+        node_scale: vec![1.0; 3],
     };
     if bone.control == 0 {
         return Ok(pose);
@@ -427,6 +434,7 @@ fn read_control(body: &[u8], layout: &Layout, bone: &Bone) -> Result<Pose> {
     }
     if kind & 1 != 0 {
         pose.scale = floats(offset + 4, 3)?;
+        pose.node_scale = pose.scale.clone();
     }
     if kind & 4 != 0 {
         pose.rotation = unit(&floats(offset + 16, 4)?)?;
@@ -442,17 +450,43 @@ fn read_control(body: &[u8], layout: &Layout, bone: &Bone) -> Result<Pose> {
     Ok(pose)
 }
 
-/// Inverse of each joint's complete rest transform, including scale axis, in runtime order.
-fn inverse_bind_matrices(layout: &Layout, poses: &[Pose]) -> Result<Vec<Mat>> {
-    let order = runtime_bone_order(layout)?;
+/// The game's actor space has the head toward -Y and the face toward -Z. Each root bone is
+/// turned 180 degrees about X so the glTF stands up along +Y and faces +Z (Blender: +Z up,
+/// facing -Y). This is a rotation, so nothing is mirrored.
+const TURN: Quat = [1.0, 0.0, 0.0, 0.0];
+
+fn turn_vector(v: &[f64]) -> Vec<f64> {
+    vec![v[0], -v[1], -v[2]]
+}
+
+fn turn_quaternion(q: &[f64]) -> Vec<f64> {
+    multiply(TURN, [q[0], q[1], q[2], q[3]]).to_vec()
+}
+
+/// A bone's exported translation and rotation (`turn` on root bones).
+fn node_pose(pose: &Pose) -> (Vec<f64>, Vec<f64>) {
+    if pose.turn {
+        (
+            turn_vector(&pose.translation),
+            turn_quaternion(&pose.rotation),
+        )
+    } else {
+        (pose.translation.clone(), pose.rotation.clone())
+    }
+}
+
+/// Each joint's exported rest transform (turned roots, folded leaf scales), by bone index
+/// (`rest_worlds`).
+fn rest_worlds(layout: &Layout, poses: &[Pose]) -> Result<HashMap<usize, Mat>> {
     let mut worlds: HashMap<usize, Mat> = HashMap::new();
-    for &index in &order {
+    for index in runtime_bone_order(layout)? {
         let pose = &poses[index];
-        let mut local = translation_matrix(&pose.translation);
+        let (translation, rotation) = node_pose(pose);
+        let mut local = translation_matrix(&translation);
         for part in [
-            rotation_matrix(&pose.rotation),
+            rotation_matrix(&rotation),
             rotation_matrix(&pose.scale_quaternion),
-            scale_matrix(&pose.scale),
+            scale_matrix(&pose.node_scale),
             rotation_matrix(&inverse(&pose.scale_quaternion)),
         ] {
             local = matmul(&local, &part);
@@ -468,7 +502,16 @@ fn inverse_bind_matrices(layout: &Layout, poses: &[Pose]) -> Result<Vec<Mat>> {
         };
         worlds.insert(index, world);
     }
-    order.iter().map(|i| inverse_affine(&worlds[i])).collect()
+    Ok(worlds)
+}
+
+/// Inverse of each joint's exported rest transform, in runtime (joint) order.
+fn inverse_bind_matrices(layout: &Layout, poses: &[Pose]) -> Result<Vec<Mat>> {
+    let worlds = rest_worlds(layout, poses)?;
+    runtime_bone_order(layout)?
+        .iter()
+        .map(|i| inverse_affine(&worlds[i]))
+        .collect()
 }
 
 // ------------------------------------------------------------------ glTF buffer
@@ -566,23 +609,8 @@ impl Buffer {
     }
 }
 
-/// A 5 cm marker shared by every bone, sufficient to inspect the hierarchy (`cube`).
-fn cube(buffer: &mut Buffer) -> Result<Value> {
-    let h = 0.025;
-    let vertices = [
-        -h, -h, -h, h, -h, -h, h, h, -h, -h, h, -h, -h, -h, h, h, -h, h, h, h, h, -h, h, h,
-    ];
-    let indices = [
-        0, 2, 1, 0, 3, 2, 4, 5, 6, 4, 6, 7, 0, 1, 5, 0, 5, 4, 3, 7, 6, 3, 6, 2, 0, 4, 7, 0, 7, 3,
-        1, 2, 6, 1, 6, 5,
-    ];
-    let positions = buffer.floats(&vertices, "VEC3", Some(ARRAY_BUFFER))?;
-    let faces = buffer.shorts(&indices, "SCALAR", Some(ELEMENT_ARRAY_BUFFER))?;
-    Ok(json!({"name": "bone markers", "primitives": [
-        {"attributes": {"POSITION": positions}, "indices": faces, "mode": 4}]}))
-}
-
-/// Node indices of one bone: the bone, its scale axis, its scale and the axis inverse (leaf).
+/// Node indices of one bone: the bone, its scale axis, its scale and the axis inverse (leaf);
+/// all four are the bone's one node when it has no scale-axis chain.
 type Handles = [usize; 4];
 
 /// The document under construction.
@@ -596,14 +624,41 @@ struct Doc {
     textures: Option<Textures>,
 }
 
-fn skeleton(body: &[u8]) -> Result<(Doc, Layout, Vec<Handles>, Vec<Pose>)> {
-    let layout = parse_layout(body)?;
-    let mut buffer = Buffer::default();
-    let meshes = vec![cube(&mut buffer)?];
+/// Bones whose scale axis an exported clip turns away from identity (`scale_axis_bones`).
+fn scale_axis_bones(layout: &Layout, sequences: &[&[Track]]) -> HashSet<usize> {
+    let mut bone_by_id = HashMap::new();
+    for (index, bone) in layout.bones.iter().enumerate() {
+        bone_by_id.entry(bone.bone_id).or_insert(index);
+    }
+    let mut result = HashSet::new();
+    for track in sequences.iter().flat_map(|s| s.iter()) {
+        let Some(&index) = bone_by_id.get(&track.bone_id) else {
+            continue;
+        };
+        if track.keys.iter().any(|k| {
+            k.channels
+                .scale_quaternion
+                .as_ref()
+                .is_some_and(|q| q[..3].iter().any(|&x| x != 0.0))
+        }) {
+            result.insert(index);
+        }
+    }
+    result
+}
+
+/// One node per bone (T, R, S); a bone whose scale axis turns keeps the exact chain T·R, Qs,
+/// S, Qs⁻¹ as four nodes. A leaf bone's rest scale is folded into its geometry, so Blender
+/// (whose rest pose has no scale) shows it at the right size (`skeleton`).
+fn skeleton(
+    body: &[u8],
+    layout: &Layout,
+    scale_axes: &HashSet<usize>,
+) -> Result<(Doc, Vec<Handles>, Vec<Pose>)> {
     let mut doc = Doc {
-        buffer,
+        buffer: Buffer::default(),
         nodes: Vec::new(),
-        meshes,
+        meshes: Vec::new(),
         scene: Vec::new(),
         skins: None,
         animations: Vec::new(),
@@ -611,18 +666,38 @@ fn skeleton(body: &[u8]) -> Result<(Doc, Layout, Vec<Handles>, Vec<Pose>)> {
     };
     let mut handles = Vec::new();
     let mut poses = Vec::new();
-    for bone in &layout.bones {
-        let pose = read_control(body, &layout, bone)?;
+    for (index, bone) in layout.bones.iter().enumerate() {
+        let mut pose = read_control(body, layout, bone)?;
+        let chained =
+            scale_axes.contains(&index) || pose.scale_quaternion[..3].iter().any(|&x| x != 0.0);
+        pose.turn = bone.parent.is_none();
+        let s = &pose.scale;
+        if bone.child.is_none()
+            && s.iter().any(|&x| x != 1.0)
+            && (!chained || (s[0] == s[1] && s[1] == s[2]))
+        {
+            pose.fold = Some(s.clone());
+            pose.node_scale = vec![1.0; 3];
+        }
+        let (translation, rotation) = node_pose(&pose);
         let id = bone.bone_id;
         let main = doc.nodes.len();
+        let mut node = json!({"name": format!("bone_{id}"), "translation": translation,
+            "rotation": rotation, "children": [], "extras": {"bone_id": id}});
+        if !chained {
+            node["scale"] = json!(pose.node_scale);
+            doc.nodes.push(node);
+            handles.push([main; 4]);
+            poses.push(pose);
+            continue;
+        }
         let (axis, scaled, leaf) = (main + 1, main + 2, main + 3);
+        children(&mut node).push(json!(axis));
         doc.nodes.extend([
-            json!({"name": format!("bone_{id}"), "translation": pose.translation,
-                   "rotation": pose.rotation, "mesh": 0, "children": [axis],
-                   "extras": {"bone_id": id}}),
+            node,
             json!({"name": format!("bone_{id}_scale_axis"),
                    "rotation": pose.scale_quaternion, "children": [scaled]}),
-            json!({"name": format!("bone_{id}_scale"), "scale": pose.scale,
+            json!({"name": format!("bone_{id}_scale"), "scale": pose.node_scale,
                    "children": [leaf]}),
             json!({"name": format!("bone_{id}_scale_axis_inverse"),
                    "rotation": inverse(&pose.scale_quaternion), "children": []}),
@@ -636,7 +711,7 @@ fn skeleton(body: &[u8]) -> Result<(Doc, Layout, Vec<Handles>, Vec<Pose>)> {
             Some(parent) => children(&mut doc.nodes[handles[parent][3]]).push(json!(handles[i][0])),
         }
     }
-    Ok((doc, layout, handles, poses))
+    Ok((doc, handles, poses))
 }
 
 fn children(node: &mut Value) -> &mut Vec<Value> {
@@ -1262,6 +1337,7 @@ fn add_animation(
     sequence: &[Track],
     layout: &Layout,
     handles: &[Handles],
+    poses: &[Pose],
     name: String,
 ) -> Result<()> {
     let duration = if sequence.is_empty() {
@@ -1299,6 +1375,8 @@ fn add_animation(
         samplers.push(json!({"input": input, "output": output, "interpolation": "LINEAR"}));
         Ok(())
     };
+    let mut emitted = false;
+    let mut scaled_nodes = HashSet::new();
     for track in sequence {
         // Aux tracks such as 0xFFFF have no actor bone.
         let Some(&index) = bone_by_id.get(&track.bone_id) else {
@@ -1319,8 +1397,18 @@ fn add_animation(
                 })
                 .collect()
         };
+        let pose = &poses[index];
+        emitted |= first.translation.is_some()
+            || first.quaternion.is_some()
+            || first.euler.is_some()
+            || first.scale.is_some()
+            || (first.scale_quaternion.is_some() && axis != main);
         if first.translation.is_some() {
-            channel(main, "translation", all(|s| &s.translation)?)?;
+            let mut values = all(|s| &s.translation)?;
+            if pose.turn {
+                values = values.iter().map(|v| turn_vector(v)).collect();
+            }
+            channel(main, "translation", values)?;
         }
         if first.quaternion.is_some() || first.euler.is_some() {
             let rotations = samples
@@ -1331,12 +1419,26 @@ fn add_animation(
                     _ => Err(bad("missing channel in a sample")),
                 })
                 .collect::<Result<Vec<_>>>()?;
+            let rotations = if pose.turn {
+                rotations.iter().map(|q| turn_quaternion(q)).collect()
+            } else {
+                rotations
+            };
             channel(main, "rotation", rotations)?;
         }
         if first.scale.is_some() {
-            channel(scaled, "scale", all(|s| &s.scale)?)?;
+            let mut values = all(|s| &s.scale)?;
+            if let Some(fold) = &pose.fold {
+                for v in &mut values {
+                    for (x, f) in v.iter_mut().zip(fold) {
+                        *x /= f;
+                    }
+                }
+            }
+            channel(scaled, "scale", values)?;
+            scaled_nodes.insert(scaled);
         }
-        if first.scale_quaternion.is_some() {
+        if first.scale_quaternion.is_some() && axis != main {
             let axes = all(|s| &s.scale_quaternion)?
                 .iter()
                 .map(|q| unit(q))
@@ -1346,7 +1448,15 @@ fn add_animation(
             channel(leaf, "rotation", inverses)?;
         }
     }
-    if !channels.is_empty() {
+    if emitted {
+        // Blender keeps rest scale only in the pose, so key the unfolded rest scales a clip
+        // leaves alone; each Action then poses the whole body even after a pose reset.
+        for (index, pose) in poses.iter().enumerate() {
+            let node = handles[index][2];
+            if pose.node_scale.iter().any(|&x| x != 1.0) && !scaled_nodes.contains(&node) {
+                channel(node, "scale", vec![pose.node_scale.clone(); frames.len()])?;
+            }
+        }
         doc.animations.push(
             json!({"name": name, "samplers": samplers, "channels": channels,
             "extras": {"raw_duration": duration, "sample_rate_hz": 30}}),
@@ -1367,7 +1477,9 @@ struct Group {
     texture_id: Option<usize>,
 }
 
-/// Triangulate GX quads, triangles, strips and fans (`gx_triangles`).
+/// Triangulate GX quads, triangles, strips and fans, counter-clockwise for glTF
+/// (`gx_triangles`). GX front faces are clockwise (the normals face away from the GX winding),
+/// so each triangle's last two corners are swapped.
 fn gx_triangles(op: u8, v: &[usize]) -> Result<Vec<[usize; 3]>> {
     Ok(match op {
         0x80 => {
@@ -1375,25 +1487,25 @@ fn gx_triangles(op: u8, v: &[usize]) -> Result<Vec<[usize; 3]>> {
                 return Err(bad("GX quad count is not a multiple of four"));
             }
             v.chunks(4)
-                .flat_map(|q| [[q[0], q[1], q[2]], [q[0], q[2], q[3]]])
+                .flat_map(|q| [[q[0], q[2], q[1]], [q[0], q[3], q[2]]])
                 .collect()
         }
         0x90 => {
             if !v.len().is_multiple_of(3) {
                 return Err(bad("GX triangle count is not a multiple of three"));
             }
-            v.chunks(3).map(|t| [t[0], t[1], t[2]]).collect()
+            v.chunks(3).map(|t| [t[0], t[2], t[1]]).collect()
         }
         0x98 => (2..v.len())
             .map(|i| {
                 if i % 2 == 0 {
-                    [v[i - 2], v[i - 1], v[i]]
+                    [v[i - 2], v[i], v[i - 1]]
                 } else {
-                    [v[i - 1], v[i - 2], v[i]]
+                    [v[i - 1], v[i], v[i - 2]]
                 }
             })
             .collect(),
-        0xA0 => (2..v.len()).map(|i| [v[0], v[i - 1], v[i]]).collect(),
+        0xA0 => (2..v.len()).map(|i| [v[0], v[i], v[i - 1]]).collect(),
         _ => return Err(bad(format!("unsupported GX primitive 0x{op:02X}"))),
     })
 }
@@ -1717,7 +1829,29 @@ fn add_textures(doc: &mut Doc, body: &[u8], painted: Option<&Path>) -> Result<us
     Ok(plain)
 }
 
-/// Attach textured skin geometry and rigid geometry below its bone (`add_geometry`).
+/// A draw group's exported positions, normals and triangles.
+type Placed = (Vec<[f64; 3]>, Vec<[f64; 3]>, Vec<[usize; 3]>);
+
+fn transform_point(m: &Mat, p: &[f64; 3]) -> [f64; 3] {
+    std::array::from_fn(|r| sum((0..3).map(|k| m[r][k] * p[k])) + m[r][3])
+}
+
+/// Normalized inverse-transpose of `m`'s 3x3 applied to `n` (`transform_normal`).
+fn transform_normal(m: &Mat, n: &[f64; 3]) -> Result<[f64; 3]> {
+    let inv = inverse_affine(m)?;
+    let v: [f64; 3] = std::array::from_fn(|r| sum((0..3).map(|k| inv[k][r] * n[k])));
+    let length = sum(v.iter().map(|x| x * x)).sqrt();
+    Ok(if length != 0.0 {
+        v.map(|x| x / length)
+    } else {
+        v
+    })
+}
+
+/// Add every display piece as a mesh on the one skin (`add_geometry`). The skin is in the
+/// game's bind space and is only turned upright. A rigid piece (geometry drawn by one bone) is
+/// placed at its bone's rest transform and weighted 1.0 to that bone, so it follows the bone
+/// exactly while Blender sees only ordinary skinned meshes.
 fn add_geometry(
     doc: &mut Doc,
     body: &[u8],
@@ -1734,29 +1868,74 @@ fn add_geometry(
             rigid.entry(bone.geometry_id as usize).or_insert(i);
         }
     }
+    let order = runtime_bone_order(layout)?;
+    let worlds = rest_worlds(layout, poses)?;
     for (descriptor, groups, strides, total) in geometry_descriptors(body)? {
         let mesh = doc.meshes.len();
         let skinned = descriptor == skin_id;
-        let influences = if skinned {
-            skin_weights(body, layout, total)?
+        let mut influences = HashMap::new();
+        // Rigid pieces: (bone, placement, joint, mirrored)
+        let mut piece = None;
+        if skinned {
+            influences = skin_weights(body, layout, total)?;
+        } else if let Some(&bone) = rigid.get(&descriptor) {
+            let fold = poses[bone].fold.clone().unwrap_or_else(|| vec![1.0; 3]);
+            let place = matmul(&worlds[&bone], &scale_matrix(&fold));
+            let joint = order
+                .iter()
+                .position(|&i| i == bone)
+                .ok_or_else(|| bad("bone missing from the joint order"))?;
+            let [a, b, c] = [place[0], place[1], place[2]];
+            let det = a[0] * (b[1] * c[2] - b[2] * c[1]) - a[1] * (b[0] * c[2] - b[2] * c[0])
+                + a[2] * (b[0] * c[1] - b[1] * c[0]);
+            piece = Some((bone, place, joint as u16, det < 0.0));
         } else {
-            HashMap::new()
-        };
+            return Err(bad(format!(
+                "unowned rigid geometry descriptor {descriptor}"
+            )));
+        }
         let mut primitives = Vec::new();
         for group in &groups {
-            if group.positions.len() > 65535 {
+            let (positions, normals, triangles): Placed = match &piece {
+                None => {
+                    let turn = |v: &[f64; 3]| [v[0], -v[1], -v[2]];
+                    (
+                        group.positions.iter().map(turn).collect(),
+                        group.normals.iter().map(turn).collect(),
+                        group.triangles.clone(),
+                    )
+                }
+                Some((_, place, _, mirrored)) => (
+                    group
+                        .positions
+                        .iter()
+                        .map(|p| transform_point(place, p))
+                        .collect(),
+                    group
+                        .normals
+                        .iter()
+                        .map(|n| transform_normal(place, n))
+                        .collect::<Result<_>>()?,
+                    if *mirrored {
+                        group.triangles.iter().map(|t| [t[0], t[2], t[1]]).collect()
+                    } else {
+                        group.triangles.clone()
+                    },
+                ),
+            };
+            if positions.len() > 65535 {
                 return Err(bad("geometry group needs u32 indices"));
             }
             let b = &mut doc.buffer;
             let mut attributes = serde_json::Map::new();
             attributes.insert(
                 "POSITION".into(),
-                json!(b.floats(&group.positions.concat(), "VEC3", Some(ARRAY_BUFFER))?),
+                json!(b.floats(&positions.concat(), "VEC3", Some(ARRAY_BUFFER))?),
             );
-            if !group.normals.is_empty() {
+            if !normals.is_empty() {
                 attributes.insert(
                     "NORMAL".into(),
-                    json!(b.floats(&group.normals.concat(), "VEC3", Some(ARRAY_BUFFER))?),
+                    json!(b.floats(&normals.concat(), "VEC3", Some(ARRAY_BUFFER))?),
                 );
             }
             if !group.uvs.is_empty() {
@@ -1765,7 +1944,17 @@ fn add_geometry(
                     json!(b.floats(&group.uvs.concat(), "VEC2", Some(ARRAY_BUFFER))?),
                 );
             }
-            if skinned {
+            if let Some((_, _, joint, _)) = &piece {
+                let n = positions.len();
+                attributes.insert(
+                    "JOINTS_0".into(),
+                    json!(b.shorts(&[*joint, 0, 0, 0].repeat(n), "VEC4", Some(ARRAY_BUFFER))?),
+                );
+                attributes.insert(
+                    "WEIGHTS_0".into(),
+                    json!(b.floats(&[1.0, 0.0, 0.0, 0.0].repeat(n), "VEC4", Some(ARRAY_BUFFER))?),
+                );
+            } else {
                 let mut missing: Vec<_> = group
                     .source_ids
                     .iter()
@@ -1808,7 +1997,7 @@ fn add_geometry(
                     );
                 }
             }
-            let faces: Vec<u16> = group.triangles.concat().iter().map(|&i| i as u16).collect();
+            let faces: Vec<u16> = triangles.concat().iter().map(|&i| i as u16).collect();
             let indices = b.shorts(&faces, "SCALAR", Some(ELEMENT_ARRAY_BUFFER))?;
             let material = match group.texture_id {
                 None => plain,
@@ -1824,34 +2013,27 @@ fn add_geometry(
         }
         doc.meshes
             .push(json!({"name": format!("geo_{descriptor}"), "primitives": primitives}));
-        let node = doc.nodes.len();
+        let mut extras = json!({"descriptor": descriptor, "vertex_strides": strides});
+        if let Some((bone, ..)) = piece {
+            extras["rigid_bone_id"] = json!(layout.bones[bone].bone_id);
+        }
+        if doc.skins.is_none() {
+            let matrices = inverse_bind_matrices(layout, poses)?;
+            // glTF matrices are column-major
+            let values: Vec<f64> = matrices
+                .iter()
+                .flat_map(|m| (0..4).flat_map(move |c| (0..4).map(move |r| m[r][c])))
+                .collect();
+            let ibm = doc.buffer.floats(&values, "MAT4", None)?;
+            let root = layout.root.ok_or_else(|| bad("actor has no root bone"))?;
+            doc.skins = Some(json!({"name": "actor skin", "inverseBindMatrices": ibm,
+                "joints": order.iter().map(|&i| handles[i][3]).collect::<Vec<_>>(),
+                "skeleton": handles[root][0]}));
+        }
+        doc.scene.push(doc.nodes.len());
         doc.nodes
             .push(json!({"name": format!("geo_{descriptor}"), "mesh": mesh,
-            "extras": {"descriptor": descriptor, "vertex_strides": strides}}));
-        if skinned {
-            if doc.skins.is_none() {
-                let matrices = inverse_bind_matrices(layout, poses)?;
-                // glTF matrices are column-major
-                let values: Vec<f64> = matrices
-                    .iter()
-                    .flat_map(|m| (0..4).flat_map(move |c| (0..4).map(move |r| m[r][c])))
-                    .collect();
-                let ibm = doc.buffer.floats(&values, "MAT4", None)?;
-                let order = runtime_bone_order(layout)?;
-                let root = layout.root.ok_or_else(|| bad("actor has no root bone"))?;
-                doc.skins = Some(json!({"name": "actor skin", "inverseBindMatrices": ibm,
-                    "joints": order.iter().map(|&i| handles[i][3]).collect::<Vec<_>>(),
-                    "skeleton": handles[root][0]}));
-            }
-            doc.nodes[node]["skin"] = json!(0);
-            doc.scene.push(node);
-        } else if let Some(&bone) = rigid.get(&descriptor) {
-            children(&mut doc.nodes[handles[bone][3]]).push(json!(node));
-        } else {
-            return Err(bad(format!(
-                "unowned rigid geometry descriptor {descriptor}"
-            )));
-        }
+            "skin": 0, "extras": extras}));
     }
     Ok(())
 }
@@ -1882,33 +2064,49 @@ pub fn export(
         return Err(bad(format!("character id out of range: {c}")));
     }
     let body = disc.load_subfile(dol, c * 19)?;
-    let (mut doc, layout, handles, poses) = skeleton(&body)?;
-    add_geometry(&mut doc, &body, &layout, &handles, &poses, painted)?;
     let clips: Vec<(usize, Option<usize>)> = if all_animations {
         DEFAULT_ANIMATION_BANKS.iter().map(|&t| (t, None)).collect()
     } else {
         vec![(DEFAULT_CLIP.0, Some(DEFAULT_CLIP.1))]
     };
+    let mut banks = Vec::new();
     for (track, only) in clips {
         let bank = parse_bank(&disc.load_subfile(dol, c * 19 + track)?)
             .map_err(|e| bad(format!("animation track {track}: {}", e.message)))?;
-        for (s, sequence) in bank.sequences.iter().enumerate() {
-            if only.is_some_and(|o| o != s) || (only.is_none() && sequence.is_empty()) {
-                continue;
-            }
-            add_animation(
-                &mut doc,
-                sequence,
-                &layout,
-                &handles,
-                animation_name(track, s),
-            )?;
-        }
         if let Some(o) = only
             && o >= bank.sequences.len()
         {
             return Err(bad(format!("sequence {o} is outside bank")));
         }
+        banks.push((track, only, bank));
+    }
+    // (track, sequence id, tracks) of every exported clip
+    let sequences: Vec<(usize, usize, &[Track])> = banks
+        .iter()
+        .flat_map(|(track, only, bank)| {
+            bank.sequences
+                .iter()
+                .enumerate()
+                .filter(move |(s, sequence)| match only {
+                    Some(o) => o == s,
+                    None => !sequence.is_empty(),
+                })
+                .map(move |(s, sequence)| (*track, s, sequence.as_slice()))
+        })
+        .collect();
+    let layout = parse_layout(&body)?;
+    let tracks: Vec<&[Track]> = sequences.iter().map(|&(_, _, t)| t).collect();
+    let (mut doc, handles, poses) = skeleton(&body, &layout, &scale_axis_bones(&layout, &tracks))?;
+    add_geometry(&mut doc, &body, &layout, &handles, &poses, painted)?;
+    for (track, s, sequence) in sequences {
+        add_animation(
+            &mut doc,
+            sequence,
+            &layout,
+            &handles,
+            &poses,
+            animation_name(track, s),
+        )?;
     }
     let Doc {
         buffer,
@@ -1924,7 +2122,8 @@ pub fn export(
         "asset": {"version": "2.0", "generator": "MSSB Clone Maker"},
         "scene": 0, "scenes": [{"nodes": scene}], "nodes": nodes, "meshes": meshes,
         "extras": {"character_id": c, "bone_count": layout.bones.len(),
-                   "coordinate_system": "game and glTF: right-handed, +Y up"},
+                   "coordinate_system": "glTF +Y up, facing +Z; the game's actor space \
+                       (head toward -Y) is turned 180 degrees about X at the root bones"},
         "buffers": [{"byteLength": buffer.data.len(),
             "uri": format!("data:application/octet-stream;base64,{}",
                 base64::engine::general_purpose::STANDARD.encode(&buffer.data))}],
@@ -2024,6 +2223,43 @@ mod tests {
     }
 
     #[test]
+    fn turned_root_stands_the_actor_up() {
+        let bone = |parent, child, next| Bone {
+            bone_id: 0,
+            parent,
+            next,
+            child,
+            geometry_id: 0xFFFF,
+            control: 0,
+        };
+        let layout = Layout {
+            offset: 0,
+            root: Some(0),
+            skin_file_id: 0,
+            bones: vec![bone(None, Some(1), None), bone(Some(0), None, None)],
+        };
+        let pose = |translation: Vec<f64>, turn| Pose {
+            translation,
+            rotation: vec![0.0, 0.0, 0.0, 1.0],
+            scale: vec![1.0; 3],
+            scale_quaternion: vec![0.0, 0.0, 0.0, 1.0],
+            turn,
+            fold: None,
+            node_scale: vec![1.0; 3],
+        };
+        let poses = [
+            pose(vec![1.0, 0.0, 0.0], true),
+            pose(vec![0.0, 2.0, 3.0], false),
+        ];
+        let worlds = rest_worlds(&layout, &poses).unwrap();
+        assert_eq!(
+            [worlds[&1][0][3], worlds[&1][1][3], worlds[&1][2][3]],
+            [1.0, -2.0, -3.0]
+        );
+        assert_eq!(turn_quaternion(&[0.0, 0.0, 0.0, 1.0]), [1.0, 0.0, 0.0, 0.0]);
+    }
+
+    #[test]
     fn slerp_handles_opposite_quaternions() {
         let q = slerp(&[0.0, 0.0, 0.0, 1.0], &[0.0, 0.0, 0.0, -1.0], 0.5);
         assert!((q[2] - 0.5f64.sqrt()).abs() < 1e-12 && (q[3] - 0.5f64.sqrt()).abs() < 1e-12);
@@ -2031,13 +2267,18 @@ mod tests {
 
     #[test]
     fn gx_primitives_and_names() {
+        // GX winds front faces clockwise; glTF triangles are counter-clockwise.
         assert_eq!(
             gx_triangles(0x98, &[0, 1, 2, 3]).unwrap(),
-            [[0, 1, 2], [2, 1, 3]]
+            [[0, 2, 1], [2, 3, 1]]
         );
         assert_eq!(
             gx_triangles(0x80, &[0, 1, 2, 3]).unwrap(),
-            [[0, 1, 2], [0, 2, 3]]
+            [[0, 2, 1], [0, 3, 2]]
+        );
+        assert_eq!(
+            gx_triangles(0xA0, &[0, 1, 2, 3]).unwrap(),
+            [[0, 2, 1], [0, 3, 2]]
         );
         let compact = [0xA0, 0, 3, 0, 0, 1, 0, 2, 0, 0, 0, 0, 0, 0, 0, 0];
         let layout = vertex_layout(0x28).unwrap();
@@ -2048,7 +2289,7 @@ mod tests {
             decode_display_list(&compact, 0, compact.len(), &layout, 3).unwrap(),
             (
                 vec![(0, Some(0), None), (1, Some(0), None), (2, Some(0), None)],
-                vec![[0, 1, 2]]
+                vec![[0, 2, 1]]
             )
         );
         assert_eq!(animation_name(2, 2), "t2_s02_id77_BatterSwingBat");

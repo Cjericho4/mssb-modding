@@ -93,21 +93,24 @@ class CurveTests(unittest.TestCase):
         number, groups, strides, total = descriptors[0]
         positions = groups[0]["positions"]
         self.assertEqual((number, len(positions), groups[0]["triangles"], strides),
-                         (0, 3, [(0, 1, 2)], [6]))
+                         (0, 3, [(0, 2, 1)], [6]))
         self.assertEqual((groups[0]["source_ids"], total), ([0, 1, 2], 3))
         self.assertEqual(positions[1], [1, 0, 0])
         self.assertEqual(groups[0]["normals"], [[0, 0, 1]]*3)
         self.assertEqual(groups[0]["uvs"], [[0, 0], [1, 0], [0, 1]])
         self.assertEqual(groups[0]["texture_id"], 2)
+        # GX winds front faces clockwise; glTF triangles are counter-clockwise.
         self.assertEqual(gltf.gx_triangles(0x98, [0, 1, 2, 3]),
-                         [(0, 1, 2), (2, 1, 3)])
+                         [(0, 2, 1), (2, 3, 1)])
         self.assertEqual(gltf.gx_triangles(0x80, [0, 1, 2, 3]),
-                         [(0, 1, 2), (0, 2, 3)])
+                         [(0, 2, 1), (0, 3, 2)])
+        self.assertEqual(gltf.gx_triangles(0xA0, [0, 1, 2, 3]),
+                         [(0, 2, 1), (0, 3, 2)])
         compact = bytes([0xA0, 0, 3, 0, 0, 1, 0, 2, 0]) + bytes(7)
         self.assertEqual(gltf.vertex_layout(0x28), [1, 1, 0, 0, 0, 0])
         self.assertEqual(gltf.vertex_layout(0x2CBC), [2, 2, 1, 0, 2, 1])
         self.assertEqual(gltf.decode_display_list(compact, 0, len(compact), [1, 1, 0, 0, 0, 0], 3),
-                         ([(0, 0, None), (1, 0, None), (2, 0, None)], [(0, 1, 2)]))
+                         ([(0, 0, None), (1, 0, None), (2, 0, None)], [(0, 2, 1)]))
         with self.assertRaises(ValueError):
             gltf.vertex_layout(0x2D)  # a direct (not indexed) attribute
 
@@ -185,6 +188,22 @@ class CurveTests(unittest.TestCase):
         matrices = gltf.inverse_bind_matrices(layout, poses)
         self.assertEqual([m[2][3] for m in matrices], [0, -3, 0])
         self.assertEqual([m[1][3] for m in matrices], [0, 0, -2])
+
+        # A turned root stands the actor up: its children's +Y (game down) becomes -Y.
+        poses[0]["turn"] = True
+        worlds = gltf.rest_worlds(layout, poses)
+        self.assertEqual([worlds[i][1][3] for i in range(3)], [0, -2, 0])
+        self.assertEqual([worlds[i][2][3] for i in range(3)], [0, 0, -3])
+
+    def test_scale_axis_bones_need_a_turned_axis(self):
+        layout = {"bones": [{"bone_id": 7}, {"bone_id": 8}]}
+
+        def scale_axis(q):
+            return {"bone_id": 7, "keyframes": [
+                {"channels": {"scale_quaternion": q, "scale": [1, 2, 1]}}]}
+
+        self.assertEqual(gltf.scale_axis_bones(layout, [[scale_axis([0, 0, 0, 1])]]), set())
+        self.assertEqual(gltf.scale_axis_bones(layout, [[scale_axis([0, .6, 0, .8])]]), {0})
 
     def test_named_animations_share_skeleton_nodes(self):
         self.assertEqual(gltf.animation_name(2, 2), "t2_s02_id77_BatterSwingBat")
