@@ -1,5 +1,6 @@
 """Synthetic interpolation tests; no retail game files."""
 import math
+import struct
 import unittest
 
 import export_gltf as gltf
@@ -66,6 +67,33 @@ class CurveTests(unittest.TestCase):
         opposite = gltf.slerp(a, [0, 0, 0, -1], 0.5)
         self.assertAlmostEqual(opposite[2], math.sqrt(.5))
         self.assertAlmostEqual(opposite[3], math.sqrt(.5))
+
+    def test_synthetic_gpc_geometry_and_gx_triangles(self):
+        body = bytearray(256)
+        struct.pack_into(">I", body, 8, 0x20)  # .gpc root geo
+        struct.pack_into(">5I", body, 0x20, 0x005BBC61, 0, 0, 1, 0x14)
+        struct.pack_into(">2I", body, 0x34, 0x1C, 0)
+        struct.pack_into(">5IBBHI", body, 0x3C, 0x20, 0, 0, 0, 0x60, 0, 0, 0, 0)
+        struct.pack_into(">IHBB", body, 0x5C, 0x30, 3, 0x3E, 3)
+        struct.pack_into(">9h", body, 0x6C, 0, 0, 0, 16384, 0, 0, 0, 16384, 0)
+        struct.pack_into(">IIH", body, 0x9C, 0, 0x6C, 1)
+        display = bytes([0x90, 0, 3]) + b"".join(
+            struct.pack(">3H", index, index, index) for index in range(3))
+        display += bytes(32-len(display))
+        struct.pack_into(">BBHIII", body, 0xA8, 2, 0, 0, 0, 0x80, len(display))
+        body[0xBC:0xBC+len(display)] = display
+        descriptors = list(gltf.geometry_descriptors(body))
+        self.assertEqual(len(descriptors), 1)
+        number, positions, faces, strides = descriptors[0]
+        self.assertEqual((number, len(positions), faces, strides),
+                         (0, 3, [(0, 1, 2)], [6]))
+        self.assertEqual(positions[1], [1, 0, 0])
+        self.assertEqual(gltf.gx_triangles(0x98, [0, 1, 2, 3]),
+                         [(0, 1, 2), (2, 1, 3)])
+        self.assertEqual(gltf.gx_triangles(0x80, [0, 1, 2, 3]),
+                         [(0, 1, 2), (0, 2, 3)])
+        compact = bytes([0xA0, 0, 3, 0, 0, 1, 0, 2, 0]) + bytes(7)
+        self.assertEqual(gltf.infer_vertex_stride(compact, 0, len(compact), 3)[0], 2)
 
     def test_scale_axis_and_buffer_bounds(self):
         keys = [key(0, "scale_quaternion", [0, 0, 0, 1]),

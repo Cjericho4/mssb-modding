@@ -343,6 +343,173 @@ def add_animation(doc, buffer, bank, sequence_id, layout, handles, poses):
     return animation
 
 
+def gx_triangles(op, vertices):
+    """Triangulate GX quads, triangles, strips and fans."""
+    if op == 0x80:
+        if len(vertices) % 4:
+            raise ValueError("GX quad count is not a multiple of four")
+        return [triangle for i in range(0, len(vertices), 4)
+                for triangle in ((vertices[i], vertices[i+1], vertices[i+2]),
+                                 (vertices[i], vertices[i+2], vertices[i+3]))]
+    if op == 0x90:
+        if len(vertices) % 3:
+            raise ValueError("GX triangle count is not a multiple of three")
+        return [tuple(vertices[i:i+3]) for i in range(0, len(vertices), 3)]
+    if op == 0x98:
+        return [(vertices[i-2], vertices[i-1], vertices[i]) if i % 2 == 0
+                else (vertices[i-1], vertices[i-2], vertices[i])
+                for i in range(2, len(vertices))]
+    if op == 0xA0:
+        return [(vertices[0], vertices[i-1], vertices[i])
+                for i in range(2, len(vertices))]
+    raise ValueError("unsupported GX primitive 0x%02X" % op)
+
+
+def decode_display_list(data, offset, size, stride, position_count):
+    """Read GX FIFO lists whose vertex record begins with a u16 position index."""
+    reader = animations.Reader(data)
+    reader.check(offset, size)
+    end = offset + size
+    cursor = offset
+    positions = []
+    triangles = []
+    groups = 0
+    while cursor < end:
+        op = data[cursor]
+        if op == 0:  # 32-byte display-list padding
+            cursor += 1
+        elif op == 0x61:  # BP register write: opcode + u32
+            reader.check(cursor, 5)
+            cursor += 5
+        elif op == 0x08:  # CP register write: opcode + u8 + u32
+            reader.check(cursor, 6)
+            cursor += 6
+        elif op in (0x80, 0x90, 0x98, 0xA0):
+            reader.check(cursor, 3)
+            count, = reader.unpack("H", cursor+1)
+            if cursor + 3 + count * stride > end:
+                raise ValueError("GX vertex list exceeds its declared size")
+            first = len(positions)
+            for i in range(count):
+                address = cursor + 3 + i * stride
+                if stride == 2:  # compact GX index8 position plus one other attribute
+                    pos = data[address]
+                else:
+                    pos, = reader.unpack("H", address)
+                if pos >= position_count:
+                    raise ValueError("GX position index %d >= %d" % (pos, position_count))
+                positions.append(pos)
+            triangles.extend(gx_triangles(op, list(range(first, first+count))))
+            groups += 1
+            cursor += 3 + count * stride
+        else:
+            raise ValueError("unsupported GX command 0x%02X at 0x%X" % (op, cursor))
+    if not groups:
+        raise ValueError("display list has no triangles")
+    return positions, triangles, groups
+
+
+def infer_vertex_stride(data, offset, size, position_count):
+    """Choose the layout that exactly parses this list; small lists can have padding."""
+    valid = []
+    for stride in (2, 6, 7):
+        try:
+            indices, triangles, groups = decode_display_list(
+                data, offset, size, stride, position_count)
+            if triangles:
+                valid.append((groups, -stride, stride, indices, triangles))
+        except ValueError:
+            pass
+    if not valid:
+        raise ValueError("cannot decode GX list at 0x%X (%d B)" % (offset, size))
+    _, _, stride, indices, triangles = max(valid)
+    return stride, indices, triangles
+
+
+def geometry_descriptors(body):
+    """Read unrelocated .gpc geo palette offsets (palette and layout relative)."""
+    reader = animations.Reader(body)
+    geo, = reader.unpack("I", 8)
+    version, user_size, user, count, descriptors = reader.unpack("5I", geo)
+    if version != 0x005BBC61 or count > 1024:
+        raise ValueError("invalid geo palette")
+    reader.check(geo + descriptors, count * 8)
+    for i in range(count):
+        layout_offset, name = reader.unpack("II", geo + descriptors + i*8)
+        layout = geo + layout_offset
+        pos, color, tex, light, display = reader.unpack("5I", layout)
+        if not pos or not display:
+            continue
+        array, total, quant, components = reader.unpack("IHBB", layout + pos)
+        kind, shift = quant >> 4, quant & 15
+        if kind != 3 or components not in (3, 6):
+            raise ValueError("unsupported position encoding 0x%02X/%d" %
+                             (quant, components))
+        reader.check(layout + array, total * components * 2)
+        vertices = []
+        for j in range(total):
+            raw = reader.unpack("3h", layout + array + j*components*2)
+            vertices.append([v / (1 << shift) for v in raw])
+        primitive_bank, states, num_states = reader.unpack("IIH", layout + display)
+        if num_states > 1024:
+            raise ValueError("invalid display state count")
+        positions = []
+        triangles = []
+        formats = set()
+        for j in range(num_states):
+            state_id, pad, pad16, setting, primitive, size = reader.unpack(
+                "BBHIII", layout + states + j*16)
+            if not primitive or not size:
+                continue
+            stride, ids, faces = infer_vertex_stride(
+                body, layout + primitive, size, total)
+            formats.add(stride)
+            base = len(positions)
+            positions.extend(vertices[k] for k in ids)
+            triangles.extend((base+a, base+b, base+c) for a,b,c in faces)
+        if triangles:
+            yield i, positions, triangles, sorted(formats)
+
+
+def add_geometry(doc, buffer, body, layout, handles):
+    """Attach static skin geometry at scene root and rigid geometry below its bone."""
+    skin_id = layout["skin_file_id"]
+    rigid = {}
+    for i, bone in enumerate(layout["bones"]):
+        if bone["geometry_id"] != 0xFFFF:
+            rigid.setdefault(bone["geometry_id"], i)
+    counts = []
+    for descriptor_id, positions, triangles, strides in geometry_descriptors(body):
+        flat = [x for point in positions for x in point]
+        faces = [i for triangle in triangles for i in triangle]
+        if len(positions) > 65535:
+            raise ValueError("geometry needs u32 indices")
+        pos_accessor = buffer.add(flat, 5126, "VEC3", 34962)
+        face_accessor = buffer.add(faces, 5123, "SCALAR", 34963)
+        mesh_id = len(doc["meshes"])
+        doc["meshes"].append({
+            "name": "geo_%d" % descriptor_id,
+            "primitives": [{"attributes": {"POSITION": pos_accessor},
+                            "indices": face_accessor, "mode": 4, "material": 0}]})
+        node_id = len(doc["nodes"])
+        doc["nodes"].append({"name": "geo_%d" % descriptor_id, "mesh": mesh_id,
+                             "extras": {"descriptor": descriptor_id,
+                                        "vertex_strides": strides}})
+        if descriptor_id == skin_id:
+            doc["scenes"][0]["nodes"].append(node_id)
+        elif descriptor_id in rigid:
+            doc["nodes"][handles[rigid[descriptor_id]][3]]["children"].append(node_id)
+        else:
+            raise ValueError("unowned rigid geometry descriptor %d" % descriptor_id)
+        counts.append((descriptor_id, len(positions), len(triangles)))
+    doc["materials"] = [{"name": "untextured body", "doubleSided": True,
+                         "pbrMetallicRoughness": {
+                             "baseColorFactor": [0.7, 0.7, 0.7, 1],
+                             "metallicFactor": 0, "roughnessFactor": 1}}]
+    buffer.finish(doc)
+    return counts
+
+
 def character_id(value):
     if value.isdecimal():
         number = int(value)
@@ -361,6 +528,7 @@ def main():
     parser.add_argument("--bank", type=int, default=2, help="disc subfile track (default: 2 batting)")
     parser.add_argument("--sequence", type=int, default=2, help="bank sequence (default: 2 swing)")
     parser.add_argument("--skeleton-only", action="store_true")
+    parser.add_argument("--no-mesh", action="store_true", help="show joint markers only")
     parser.add_argument("--out", type=Path, required=True)
     args = parser.parse_args()
     if not 2 <= args.bank <= 18:
@@ -368,6 +536,10 @@ def main():
     _, catalog = mssb_files.open_catalog(args.disc)
     body = catalog.data(catalog.find("subfile.%d" % (args.character * 19)))
     doc, buffer, layout, handles, poses = skeleton(body, args.character)
+    if not args.no_mesh:
+        counts = add_geometry(doc, buffer, body, layout, handles)
+        print("Geometry: " + ", ".join("%d: %d vertices, %d triangles" % row
+                                       for row in counts))
     if not args.skeleton_only:
         bank_data = catalog.data(catalog.find("subfile.%d" % (args.character * 19 + args.bank)))
         bank = animations.parse_bank(bank_data, keyframes=True)
