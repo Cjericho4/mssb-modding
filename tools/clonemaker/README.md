@@ -152,8 +152,10 @@ with several characters, each clone follows the character it copies.
   the cloned character's name and a picture in the clone's colour, and the announcer says that name.
   Untick it if a menu shows something odd; clones then keep the replaced character's name and
   picture in menus.
-  - **Keep the donor's colour word (e.g. 'Purple'):** off by default. The roster screen labels colour
-    variants such as *Purple Toad*; normally the clone gets the cloned character's label instead.
+  - **Keep the donor's name-box colour (e.g. Purple Toad's purple):** off by default. On the roster
+    screen a colour variant's name sits on a coloured box; normally a clone's box takes the colour
+    closest to the clone's (red, blue, yellow, green or purple). Tick it to keep the replaced
+    character's box colour.
 - **Give clones …'s stats:** on by default. Untick to keep the replaced character's stats.
 - **Keep shading:** how closely the new colour follows the original's light and dark areas. Higher
   keeps more of the original shading; lower is brighter and flatter.

@@ -1,6 +1,6 @@
 usage: clone_character.py [-h] --disc DISC [--out OUT] [--source SOURCE]
                           [--slot SLOT[:RECOLOUR]] [--iso ISO]
                           [--no-aram-overlay] [--ui {source,donor}]
-                          [--colour-word {none,donor}] [--no-stats]
+                          [--colour-word {clone,donor,none}] [--no-stats]
                           [--no-gameplay] [--list-slots] [--list-regions]
                           [--force] [--dry-run]

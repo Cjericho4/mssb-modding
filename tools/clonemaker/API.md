@@ -10,6 +10,24 @@ the clone rows, and with `ui_source: false` merges the source's voice into each 
 voice bank (`sound.(5+u)`, appended to ZZZZ.dat; DOL and challenge.rel descriptors updated), with
 `voice: ` log lines. The Python reference does neither; `difftest.py` allows exactly these bytes.
 
+Intended divergence (#19, mssb-modding): the roster screen's coloured name box (the "colour word",
+`fn_2_74F40` labels 1..6 = red, blue, yellow, green, purple, black). With `ui_source: true` and
+`keep_colour_word: false` each colour-variant donor gets the label of the colour preset nearest its
+clone's hue (red/orange red, yellow, green, cyan/blue blue, purple/pink purple; the donor's own
+without a hue), and only entries that change are written (none changed: menus.rel untouched). The
+reference instead points every donor at the plain box; that is still `--colour-word none` on the
+CLI (not reachable from the window). `difftest.py` checks menus.rel's decompressed bytes against
+the reference with exactly those jump-table addends replaced, and rewrites the reference's
+`menus.rel: colour word:` log line and `--colour-word` help the same way.
+
+Intended divergence (#19, select-screen models): with `ui_source: true` the core also points each
+donor's `menu_char_a` row (menus.rel `.data+0x241C`, 54 x 16-byte disc descriptors, read by
+`fn_2_18148` for the big 3D character of the captain/teammate screens) at the source's row, so
+hovering or picking a clone shows the source's model (in its own colours: no recolour path). The
+reference leaves the table alone. `difftest.py` checks exactly those rows in the decompressed
+menus.rel, adds the `3D select models` part to the reference's menus.rel log line and masks only
+that line's packed size.
+
 Types: `colour` is a preset name (`red orange yellow green cyan blue purple pink`) or `"#rrggbb"`
 (custom). Paths are strings. Errors are `{ "error": "<friendly message>" }` (see `friendly_error`).
 `regions` (in `preview` and `job`) are the ticked region indices; the core drops them when they are
@@ -31,7 +49,7 @@ exactly the source's defaults (`region_selection`). `fraction` is 0..1 of the wh
 | `cancel` | | stops the running job at its next progress step | `run_job(cancel=)` |
 
 `job` = `{ game, output, source, clones: [{ slot, colour, textures?, anims?, source?, regions? }], keeplum, regions: [index],
-ui_source, copy_stats, keep_colour_word, keep_work }`.
+ui_source, copy_stats, keep_colour_word, keep_work }` (`keep_colour_word`: keep the donors' retail name-box colour, #19).
 
 `clones[].source` and `clones[].regions` (optional, #18; no Python reference) let one game hold clones
 of several characters: the charID that clone copies and its ticked colour regions (`source_info`

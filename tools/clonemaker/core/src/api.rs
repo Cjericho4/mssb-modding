@@ -1,7 +1,7 @@
 //! Window-facing commands and job events described by ../API.md.
 use crate::anims::{self, Rigs};
 use crate::binary::{Dol, fst_paths, u32_at};
-use crate::clone::{CloneArgs, CloneResult, absolute_path};
+use crate::clone::{CloneArgs, CloneResult, ColourWord, absolute_path};
 use crate::colour::{Recolour, Region, hsv_to_rgb, rgb_to_hsv, source_regions};
 use crate::constants::*;
 use crate::custom_textures::{self, Painted};
@@ -587,7 +587,7 @@ pub struct Job {
     pub ui_source: bool,
     /// Copy source stats and chemistry.
     pub copy_stats: bool,
-    /// Keep the donor's roster colour word.
+    /// Keep the donor's roster name-box colour; `false` gives each clone's name box its colour.
     pub keep_colour_word: bool,
     /// Retain the working extraction for inspection.
     pub keep_work: bool,
@@ -845,7 +845,11 @@ pub fn run_job(job: &Job, emit: &dyn Fn(Event), cancel: &AtomicBool) -> Result<D
             iso: Some(partial.clone()),
             ui_source: job.ui_source,
             no_stats: !job.copy_stats,
-            keep_colour_word: job.keep_colour_word,
+            colour_word: if job.keep_colour_word {
+                ColourWord::Donor
+            } else {
+                ColourWord::Clone
+            },
             force: true,
             textures: job
                 .clones

@@ -1,7 +1,7 @@
 usage: clone_character.py [-h] --disc DISC [--out OUT] [--source SOURCE]
                           [--slot SLOT[:RECOLOUR]] [--iso ISO]
                           [--no-aram-overlay] [--ui {source,donor}]
-                          [--colour-word {none,donor}] [--no-stats]
+                          [--colour-word {clone,donor,none}] [--no-stats]
                           [--no-gameplay] [--list-slots] [--list-regions]
                           [--force] [--dry-run]
 
@@ -23,11 +23,12 @@ optional arguments:
                         look like the plain source in matches
   --ui {source,donor}   whose name/portrait/announcer call-out/voice the clone
                         slots get in menus and in-game (default: source)
-  --colour-word {none,donor}
-                        with --ui source: the colour word shown before a
-                        clone's name on the roster screen; none (default: the
-                        clone is the source, e.g. no 'Purple') or donor (keep
-                        e.g. 'Purple')
+  --colour-word {clone,donor,none}
+                        with --ui source: the coloured box behind a clone's
+                        name on the roster screen (colour variants only);
+                        clone (default: the colour nearest the clone's
+                        recolour, e.g. purple for hue=purple), donor (keep the
+                        donor's, e.g. Purple Toad's) or none (the plain box)
   --no-stats            keep the donor's stats instead of copying the source's
   --no-gameplay         keep the donor's game.rel/DOL gameplay tables
   --list-slots          print the slot table and exit

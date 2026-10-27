@@ -268,7 +268,10 @@ pub fn patch_menu_art(
     }
     Ok((ce, ge))
 }
-fn colour_label(c: usize) -> usize {
+/// Retail name-box colour label of a charID: `fn_2_74F40`'s switch (menus .text 0x75440) picks
+/// frame 1 red, 2 blue, 3 yellow, 4 green, 5 purple, 6 black of pane 0xAE + side (common
+/// sequence 0x7B); 0 is the plain box of characters without colour variants.
+pub fn colour_label(c: usize) -> usize {
     for (lab, ids) in [
         (1, &[13, 16, 20, 22, 25, 34, 42, 50, 52][..]),
         (2, &[21, 24, 29, 33, 44, 51, 53]),
@@ -283,8 +286,32 @@ fn colour_label(c: usize) -> usize {
     }
     0
 }
-/// Redirect donor colour-word switch entries to the empty label and return edited addend offsets.
-pub fn patch_colour_word(rel: &mut [u8], donors: &[usize]) -> Result<Vec<usize>> {
+/// Name of a name-box label for log lines.
+pub fn label_name(label: usize) -> &'static str {
+    ["plain", "red", "blue", "yellow", "green", "purple", "black"][label]
+}
+/// The name-box label of the colour preset nearest to `hue` (red and orange -> red, yellow ->
+/// yellow, green -> green, cyan and blue -> blue, purple and pink -> purple); `None` for a spec
+/// without a hue. Black (6) is never chosen.
+pub fn label_for_hue(hue: Option<f64>) -> Option<usize> {
+    let hue = hue?;
+    let label = |p: &str| match p {
+        "red" | "orange" => 1,
+        "cyan" | "blue" => 2,
+        "yellow" => 3,
+        "green" => 4,
+        _ => 5,
+    };
+    crate::constants::PRESETS
+        .iter()
+        .min_by(|a, b| {
+            crate::colour::hue_distance(hue, a.1).total_cmp(&crate::colour::hue_distance(hue, b.1))
+        })
+        .map(|p| label(p.0))
+}
+/// Point donor colour-word (name-box) switch entries at new labels, after checking the retail
+/// table; entries already holding their label are left alone. Returns the edited addend offsets.
+pub fn patch_colour_word(rel: &mut [u8], labels: &[(usize, usize)]) -> Result<Vec<usize>> {
     let cases = [
         0x7559c, 0x7556c, 0x75574, 0x7557c, 0x75584, 0x7558c, 0x75594,
     ];
@@ -315,12 +342,183 @@ pub fn patch_colour_word(rel: &mut [u8], donors: &[usize]) -> Result<Vec<usize>>
         ));
     }
     let mut out = Vec::new();
-    for s in donors {
-        if colour_label(*s) != 0 {
-            let p = found[s] + 4;
-            put_u32(rel, p, cases[0] as u32)?;
+    for (s, label) in labels {
+        if colour_label(*s) != *label {
+            let p = found.get(s).ok_or_else(|| {
+                Error::new(format!(
+                    "menus.rel: charID {s} has no colour-word jump-table entry"
+                ))
+            })? + 4;
+            put_u32(rel, p, cases[*label] as u32)?;
             out.push(p);
         }
     }
     Ok(out)
+}
+/// menus.rel `.data` offset of `menu_char_a` (54 x 16-byte disc descriptors, charID-keyed): the
+/// 3D character models of the captain/teammate select screens (`fn_2_18398` picks the charID,
+/// `fn_2_18148` loads `menu_char_a[charID]` by ARAMTransfer).
+pub const MENU_MODELS: usize = 0x241c;
+/// Point each donor's `menu_char_a` row at the source's model, after checking that the table is
+/// the retail one (54 distinct LZSS rows). Returns the edited rows' file offsets.
+/// The select-screen preview buffer stride (`fn_2_17C88` / `fn_2_17ED8`): the largest
+/// `menu_char_a[charID]` unpacked size over stat rows 0..52 only (row 53 is never scanned),
+/// rounded up to 32 B. `stat_ids` are the stats block's per-row charIDs (+0x24).
+pub fn menu_model_stride(rel: &[u8], stat_ids: &[i16]) -> Result<usize> {
+    let table = rel_header(rel)?.sections[5].0 as usize + MENU_MODELS;
+    let mut stride = 0;
+    for id in stat_ids.iter().take(53) {
+        if (0..54).contains(id) {
+            let size = (u32_at(rel, table + *id as usize * 16 + 4)? & 0x0fffffff) as usize;
+            stride = stride.max(align(size, 32));
+        }
+    }
+    Ok(stride)
+}
+/// Point each donor's `menu_char_a` row at the source's model, after checking that the table is
+/// the retail one (54 distinct LZSS rows). A donor whose new model would not fit the preview
+/// stride of the patched table (`menu_model_stride`) keeps its own row. Returns the edited rows'
+/// file offsets and the donors left alone.
+pub fn patch_menu_models(
+    rel: &mut [u8],
+    donors: &[(usize, usize)],
+    stat_ids: &[i16],
+) -> Result<(Vec<usize>, Vec<usize>)> {
+    let hdr = rel_header(rel)?;
+    let (data, size) = hdr.sections[5];
+    let table = data as usize + MENU_MODELS;
+    if (size as usize) < MENU_MODELS + 54 * 16 {
+        return Err(Error::new(
+            "menus.rel: .data is too small for the menu model table".into(),
+        ));
+    }
+    let mut offsets = std::collections::BTreeSet::new();
+    for k in 0..54 {
+        let row = table + k * 16;
+        let (w0, w1, w2, w3) = (
+            u32_at(rel, row)?,
+            u32_at(rel, row + 4)?,
+            u32_at(rel, row + 8)?,
+            u32_at(rel, row + 12)?,
+        );
+        if w0 != 0x40b || w1 & 0xf0000000 != 0x40000000 || w2 == 0 || w2 % 0x800 != 0 || w3 == 0 {
+            return Err(Error::new(format!(
+                "menus.rel: menu model row {k} is not a retail descriptor"
+            )));
+        }
+        offsets.insert(w2);
+    }
+    if offsets.len() != 54 {
+        return Err(Error::new(
+            "menus.rel: menu model rows share files (patched disc?)".into(),
+        ));
+    }
+    // donors are (slot, the character it copies); sources are never slots, so their rows stay clean
+    let old = rel.to_vec();
+    for &(s, c) in donors {
+        rel.copy_within(table + c * 16..table + c * 16 + 16, table + s * 16);
+    }
+    let stride = menu_model_stride(rel, stat_ids)?;
+    let (mut out, mut skipped) = (Vec::new(), Vec::new());
+    for &(s, c) in donors {
+        let row = table + s * 16;
+        let need = align(
+            (u32_at(&old, table + c * 16 + 4)? & 0x0fffffff) as usize,
+            32,
+        );
+        if need > stride {
+            rel[row..row + 16].copy_from_slice(&old[row..row + 16]);
+            skipped.push(s);
+        } else {
+            out.push(row);
+        }
+    }
+    Ok((out, skipped))
+}
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn name_box_labels() {
+        let spec = |s: &str| label_for_hue(Recolour::new(s).unwrap().hue());
+        for (preset, label) in [
+            ("red", 1),
+            ("orange", 1),
+            ("yellow", 3),
+            ("green", 4),
+            ("cyan", 2),
+            ("blue", 2),
+            ("purple", 5),
+            ("pink", 5),
+        ] {
+            assert_eq!(
+                spec(&format!("hue={preset},keeplum=0.5")),
+                Some(label),
+                "{preset}"
+            );
+            assert_eq!(spec(preset), Some(label), "{preset}");
+        }
+        assert_eq!(spec("hue=0.000,keeplum=0.5"), Some(1));
+        assert_eq!(spec("hue=0.317,sat=1.1"), Some(4));
+        assert_eq!(spec("hue=0.97"), Some(1));
+        assert_eq!(spec("hue=0.7"), Some(5));
+        assert_eq!(spec("keeplum=0.5"), None);
+        assert_eq!(
+            [30, 32, 42, 47, 48, 0].map(colour_label),
+            [3, 5, 1, 6, 0, 0]
+        );
+        assert_eq!(label_name(5), "purple");
+    }
+    #[test]
+    fn menu_models_refuse_non_retail() {
+        let mut rel = vec![0u8; 0x100 + 0x60 + MENU_MODELS + 54 * 16];
+        // a REL header with six sections; section 5 (.data) at 0x100
+        put_u32(&mut rel, 0xc, 6).unwrap();
+        put_u32(&mut rel, 0x10, 0x40).unwrap();
+        put_u32(&mut rel, 0x40 + 5 * 8, 0x100).unwrap();
+        put_u32(&mut rel, 0x40 + 5 * 8 + 4, (MENU_MODELS + 54 * 16) as u32).unwrap();
+        let table = 0x100 + MENU_MODELS;
+        for k in 0..54 {
+            let row = table + k * 16;
+            put_u32(&mut rel, row, 0x40b).unwrap();
+            put_u32(&mut rel, row + 4, 0x40001000).unwrap();
+            put_u32(&mut rel, row + 8, 0x800 * (k as u32 + 1)).unwrap();
+            put_u32(&mut rel, row + 12, 0x100).unwrap();
+        }
+        assert_eq!(rel_header(&rel).unwrap().sections[5].0, 0x100);
+        let ids: Vec<i16> = (0..54).collect();
+        let (rows, skipped) = patch_menu_models(&mut rel, &[(30, 2), (32, 2)], &ids).unwrap();
+        assert_eq!(rows, vec![table + 30 * 16, table + 32 * 16]);
+        assert!(skipped.is_empty());
+        assert_eq!(
+            rel[table + 30 * 16..table + 31 * 16],
+            rel[table + 32..table + 48]
+        );
+        assert!(
+            patch_menu_models(&mut rel, &[(31, 2)], &ids)
+                .err()
+                .unwrap()
+                .message
+                .contains("share files")
+        );
+        // Preview stride: rows 0..52 only. Make charID 3's model the largest (0x2001 -> 0x2020)
+        // and let no stat row 0..52 name charID 3: a clone of 3 on slot 53 does not fit.
+        let mut rel2 = rel.clone();
+        for k in 0..54 {
+            put_u32(&mut rel2, table + k * 16 + 8, 0x800 * (k as u32 + 1)).unwrap();
+        }
+        put_u32(&mut rel2, table + 3 * 16 + 4, 0x40002001).unwrap();
+        let mut ids: Vec<i16> = (0..54).collect();
+        assert_eq!(menu_model_stride(&rel2, &ids).unwrap(), 0x2020);
+        ids[3] = 4;
+        assert_eq!(menu_model_stride(&rel2, &ids).unwrap(), 0x1000);
+        let before = rel2.clone();
+        let (rows, skipped) = patch_menu_models(&mut rel2, &[(53, 3)], &ids).unwrap();
+        assert!(rows.is_empty());
+        assert_eq!(skipped, vec![53]);
+        assert_eq!(rel2, before);
+        // A donor inside rows 0..52 is scanned, so its new size counts and it fits.
+        let (rows, skipped) = patch_menu_models(&mut rel2, &[(5, 3)], &ids).unwrap();
+        assert_eq!((rows.len(), skipped.len()), (1, 0));
+    }
 }

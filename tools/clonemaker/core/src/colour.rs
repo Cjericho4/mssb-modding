@@ -48,7 +48,8 @@ pub fn hsv_to_rgb([h, s, v]: [f64; 3]) -> [f64; 3] {
 fn hsv(c: [u8; 3]) -> [f64; 3] {
     rgb_to_hsv(c.map(|x| x as f64 / 255.))
 }
-fn hue_distance(a: f64, b: f64) -> f64 {
+/// Distance between two hues (0..1 turns) on the colour circle, 0..0.5.
+pub fn hue_distance(a: f64, b: f64) -> f64 {
     ((a - b + 0.5).rem_euclid(1.) - 0.5).abs()
 }
 /// Recognize the face/hand skin range excluded from detected clothing regions.
@@ -658,6 +659,10 @@ impl Recolour {
             return false;
         }
         hue_distance(h, self.band_from) <= self.band_width
+    }
+    /// The target hue (0..1 turns), or `None` when the spec sets none.
+    pub fn hue(&self) -> Option<f64> {
+        self.hue.map(|h| h.rem_euclid(1.))
     }
     /// Describe the selected regions for the clone log.
     pub fn describe(&self) -> String {
