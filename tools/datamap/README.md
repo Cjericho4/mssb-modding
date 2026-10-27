@@ -116,7 +116,9 @@ py tools/datamap/export_gltf.py --disc orig/GYQE01 --character mario --all-anima
 py tools/datamap/test_export_gltf.py
 ```
 
-The self-contained glTF includes body triangles, normals and UVs from the `.gpc` geo palette,
+The self-contained glTF includes body triangles, normals and UVs from the `.gpc` geo palette
+(each display list's vertex layout comes from its vertex descriptor, display state 2; every one
+of the 54 characters exports),
 its embedded body textures as PNGs, skin weights from its SK1, SK2 and accumulator lists,
 inverse bind matrices from the full rest transforms, rigid geometry parented to its bone,
 and a small marker cube per bone. Each draw group uses its primary texture. By default it has

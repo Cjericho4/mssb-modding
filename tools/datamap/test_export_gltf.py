@@ -76,12 +76,14 @@ class CurveTests(unittest.TestCase):
         struct.pack_into(">5IBBHI", body, 0x3C, 0x20, 0, 0xC0, 0xA0, 0x60, 1, 0, 0, 0)
         struct.pack_into(">IHBB", body, 0x5C, 0x30, 3, 0x3E, 3)
         struct.pack_into(">9h", body, 0x6C, 0, 0, 0, 16384, 0, 0, 0, 16384, 0)
-        struct.pack_into(">IIH", body, 0x9C, 0, 0x6C, 1)
+        struct.pack_into(">IIH", body, 0x9C, 0, 0x6C, 2)
         display = bytes([0x90, 0, 3]) + b"".join(
             struct.pack(">3H", index, index, index) for index in range(3))
         display += bytes(32-len(display))
-        struct.pack_into(">BBHIII", body, 0xA8, 1, 0, 0, 0x15110002, 0x80, len(display))
-        body[0xBC:0xBC+len(display)] = display
+        # vertex descriptor 0xC3C: POS, NRM and TEX0 as 16-bit indices
+        struct.pack_into(">BBHIII", body, 0xA8, 2, 0, 0, 0xC3C, 0, 0)
+        struct.pack_into(">BBHIII", body, 0xB8, 1, 0, 0, 0x15110002, 0xE4, len(display))
+        body[0x120:0x120+len(display)] = display
         struct.pack_into(">IHBB", body, 0xDC, 0xA8, 3, 0x3E, 3)
         struct.pack_into(">9h", body, 0xE4, *(0, 0, 16384)*3)
         struct.pack_into(">IHBBII", body, 0xFC, 0xD0, 3, 0x3E, 2, 0, 0)
@@ -102,7 +104,12 @@ class CurveTests(unittest.TestCase):
         self.assertEqual(gltf.gx_triangles(0x80, [0, 1, 2, 3]),
                          [(0, 1, 2), (0, 2, 3)])
         compact = bytes([0xA0, 0, 3, 0, 0, 1, 0, 2, 0]) + bytes(7)
-        self.assertEqual(gltf.infer_vertex_stride(compact, 0, len(compact), 3)[0], 2)
+        self.assertEqual(gltf.vertex_layout(0x28), [1, 1, 0, 0, 0, 0])
+        self.assertEqual(gltf.vertex_layout(0x2CBC), [2, 2, 1, 0, 2, 1])
+        self.assertEqual(gltf.decode_display_list(compact, 0, len(compact), [1, 1, 0, 0, 0, 0], 3),
+                         ([(0, 0, None), (1, 0, None), (2, 0, None)], [(0, 1, 2)]))
+        with self.assertRaises(ValueError):
+            gltf.vertex_layout(0x2D)  # a direct (not indexed) attribute
 
     def test_cmpr_texture_to_embedded_png(self):
         import base64

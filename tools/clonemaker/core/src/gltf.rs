@@ -1401,21 +1401,37 @@ fn gx_triangles(op: u8, v: &[usize]) -> Result<Vec<[usize; 3]>> {
 /// Position, normal and TEX0 indices of each vertex in a display list.
 type Record = (usize, Option<usize>, Option<usize>);
 
-/// Read GX FIFO position, normal and TEX0 indices (`decode_display_list`).
+/// Byte widths of POS, NRM, CLR0, CLR1, TEX0 and TEX1 in a display list's vertices
+/// (`vertex_layout`). Display state 2 holds the list's vertex descriptor: 2-bit fields from bit
+/// 0, the first (matrix index) unused, then POS, NRM, CLR0, CLR1, TEX0, TEX1; 0 none, 2 index8,
+/// 3 index16. Every retail body (54 characters, 938 lists) uses only these.
+fn vertex_layout(vcd: u32) -> Result<[usize; 6]> {
+    let field = |k: u32| (vcd >> (2 * k)) & 3;
+    if field(0) != 0 || vcd >> 14 != 0 || (0..16).any(|k| field(k) == 1) || field(1) == 0 {
+        return Err(bad(format!("unsupported vertex descriptor 0x{vcd:X}")));
+    }
+    Ok(std::array::from_fn(|i| match field(i as u32 + 1) {
+        0 => 0,
+        2 => 1,
+        _ => 2,
+    }))
+}
+
+/// Read GX FIFO position, normal and TEX0 indices laid out as `widths` (`decode_display_list`).
 fn decode_display_list(
     data: &[u8],
     offset: usize,
     size: usize,
-    stride: usize,
+    widths: &[usize; 6],
     position_count: usize,
-) -> Result<(Vec<Record>, Vec<[usize; 3]>, usize)> {
+) -> Result<(Vec<Record>, Vec<[usize; 3]>)> {
     let r = Reader(data);
     r.check(offset, size)?;
     let end = offset + size;
+    let stride: usize = widths.iter().sum();
     let mut cursor = offset;
     let mut vertices = Vec::new();
     let mut triangles = Vec::new();
-    let mut groups = 0;
     while cursor < end {
         let op = data[cursor];
         match op {
@@ -1438,28 +1454,24 @@ fn decode_display_list(
                 }
                 let first = vertices.len();
                 for i in 0..count {
-                    let address = cursor + 3 + i * stride;
-                    let record = if stride == 2 {
-                        // compact GX index8 position plus one other attribute
-                        (data[address] as usize, None, None)
-                    } else {
-                        (
-                            r.u16(address)? as usize,
-                            Some(r.u16(address + 2)? as usize),
-                            Some(r.u16(address + 4)? as usize),
-                        )
-                    };
-                    if record.0 >= position_count {
-                        return Err(bad(format!(
-                            "GX position index {} >= {position_count}",
-                            record.0
-                        )));
+                    let mut address = cursor + 3 + i * stride;
+                    let mut indices = [None; 6];
+                    for (index, &width) in indices.iter_mut().zip(widths) {
+                        *index = match width {
+                            0 => None,
+                            1 => Some(data[address] as usize),
+                            _ => Some(r.u16(address)? as usize),
+                        };
+                        address += width;
                     }
-                    vertices.push(record);
+                    let pos = indices[0].unwrap_or_default();
+                    if pos >= position_count {
+                        return Err(bad(format!("GX position index {pos} >= {position_count}")));
+                    }
+                    vertices.push((pos, indices[1], indices[4]));
                 }
                 let ids: Vec<usize> = (first..first + count).collect();
                 triangles.extend(gx_triangles(op, &ids)?);
-                groups += 1;
                 cursor += 3 + count * stride;
             }
             _ => {
@@ -1469,35 +1481,10 @@ fn decode_display_list(
             }
         }
     }
-    if groups == 0 {
+    if triangles.is_empty() {
         return Err(bad("display list has no triangles"));
     }
-    Ok((vertices, triangles, groups))
-}
-
-/// Choose the layout that exactly parses this list; small lists can have padding
-/// (`infer_vertex_stride`): the most primitive groups, then the smallest stride.
-fn infer_vertex_stride(
-    data: &[u8],
-    offset: usize,
-    size: usize,
-    position_count: usize,
-) -> Result<(usize, Vec<Record>, Vec<[usize; 3]>)> {
-    // (groups, stride, records, triangles)
-    type Candidate = (usize, usize, Vec<Record>, Vec<[usize; 3]>);
-    let mut best: Option<Candidate> = None;
-    for stride in [2, 6, 7] {
-        if let Ok((records, triangles, groups)) =
-            decode_display_list(data, offset, size, stride, position_count)
-            && !triangles.is_empty()
-            && best.as_ref().is_none_or(|b| groups > b.0)
-        {
-            best = Some((groups, stride, records, triangles));
-        }
-    }
-    let (_, stride, records, triangles) =
-        best.ok_or_else(|| bad(format!("cannot decode GX list at 0x{offset:X} ({size} B)")))?;
-    Ok((stride, records, triangles))
+    Ok((vertices, triangles))
 }
 
 /// One geometry descriptor: its index, draw groups, vertex strides and position count.
@@ -1592,20 +1579,29 @@ fn geometry_descriptors(body: &[u8]) -> Result<Vec<Descriptor>> {
         let mut groups = Vec::new();
         let mut formats = Vec::new();
         let mut texture_id = None;
+        let mut vcd = None;
         for j in 0..num_states {
             let s = layout + states + j * 16;
             let (state_id, setting) = (r.u8(s)?, r.u32(s + 4)?);
             let (primitive, size) = (r.us(s + 8)?, r.us(s + 12)?);
-            // State 1 / 0x1511 selects the primary texture. 0x1500 is an
-            // additional TEV stage that the simple glTF material omits.
-            if state_id == 1 && setting >> 16 == 0x1511 {
-                texture_id = Some((setting & 0xFFFF) as usize);
+            // State 1 binds texture (low 13 bits) to texture map (bits 13-15). 0x1511 on map 0
+            // is the primary texture; map 1 (0x2000, mostly 0x1500 settings) is an additional
+            // TEV stage that the simple glTF material omits (King Boo's 0x1511200A is one).
+            if state_id == 1 && setting >> 16 == 0x1511 && setting & 0xE000 == 0 {
+                texture_id = Some((setting & 0x1FFF) as usize);
+            }
+            if state_id == 2 {
+                vcd = Some(setting);
             }
             if primitive == 0 || size == 0 {
                 continue;
             }
-            let (stride, records, triangles) =
-                infer_vertex_stride(body, layout + primitive, size, total)?;
+            let widths = vertex_layout(
+                vcd.ok_or_else(|| bad("display list before its vertex descriptor"))?,
+            )?;
+            let (records, triangles) =
+                decode_display_list(body, layout + primitive, size, &widths, total)?;
+            let stride = widths.iter().sum();
             if !formats.contains(&stride) {
                 formats.push(stride);
             }
@@ -2044,11 +2040,16 @@ mod tests {
             [[0, 1, 2], [0, 2, 3]]
         );
         let compact = [0xA0, 0, 3, 0, 0, 1, 0, 2, 0, 0, 0, 0, 0, 0, 0, 0];
+        let layout = vertex_layout(0x28).unwrap();
+        assert_eq!(layout, [1, 1, 0, 0, 0, 0]);
+        assert_eq!(vertex_layout(0x2CBC).unwrap(), [2, 2, 1, 0, 2, 1]);
+        assert!(vertex_layout(0x2D).is_err());
         assert_eq!(
-            infer_vertex_stride(&compact, 0, compact.len(), 3)
-                .unwrap()
-                .0,
-            2
+            decode_display_list(&compact, 0, compact.len(), &layout, 3).unwrap(),
+            (
+                vec![(0, Some(0), None), (1, Some(0), None), (2, Some(0), None)],
+                vec![[0, 1, 2]]
+            )
         );
         assert_eq!(animation_name(2, 2), "t2_s02_id77_BatterSwingBat");
         assert_eq!(animation_name(15, 2), "t15_s02_id107_WinningCelebration");

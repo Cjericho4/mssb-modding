@@ -180,6 +180,7 @@ def main():
     scratch = ROOT / ".scratch"
     scratch.mkdir(exist_ok=True)
     failures = 0
+    both_failed = 0
     worst = 0.0
     with tempfile.TemporaryDirectory(dir=scratch) as tmp:
         tmp = Path(tmp)
@@ -199,6 +200,7 @@ def main():
             if a.returncode or b.returncode:
                 both = bool(a.returncode) and bool(b.returncode)
                 failures += not both
+                both_failed += both
                 print("%-4d %-16s %-6s %-11s reference: %s / port: %s" % (
                     c, label, "same" if both else "FAIL", "-",
                     (a.stderr.strip().splitlines() or ["ok"])[-1], (b.stderr.strip().splitlines() or ["ok"])[-1]))
@@ -213,7 +215,8 @@ def main():
             print("%-4d %-16s %-6s %-11.3g %s%s" % (c, label, "ok", stats.max_diff, stats.summary,
                                                     ", buffer byte-identical" if stats.bytes_equal else ""))
         shutil.rmtree(tmp / "painted", ignore_errors=True)
-    print("%d cases, %d failed, largest float difference %g" % (len(cases), failures, worst))
+    print("%d cases, %d failed, %d refused by both, largest float difference %g" % (
+        len(cases), failures, both_failed, worst))
     sys.exit(1 if failures else 0)
 
 

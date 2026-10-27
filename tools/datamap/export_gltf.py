@@ -574,15 +574,28 @@ def gx_triangles(op, vertices):
     raise ValueError("unsupported GX primitive 0x%02X" % op)
 
 
-def decode_display_list(data, offset, size, stride, position_count):
-    """Read GX FIFO position, normal and TEX0 indices."""
+def vertex_layout(vcd):
+    """Byte widths of POS, NRM, CLR0, CLR1, TEX0 and TEX1 in a display list's vertices.
+
+    Display state 2 holds the list's vertex descriptor: 2-bit fields from bit 0, the first
+    (matrix index) unused, then POS, NRM, CLR0, CLR1, TEX0, TEX1; 0 none, 2 index8, 3 index16.
+    Every retail body (54 characters, 938 lists) uses only these.
+    """
+    fields = [(vcd >> (2 * k)) & 3 for k in range(16)]
+    if fields[0] or any(fields[7:]) or 1 in fields or not fields[1]:
+        raise ValueError("unsupported vertex descriptor 0x%X" % vcd)
+    return [{0: 0, 2: 1, 3: 2}[field] for field in fields[1:7]]
+
+
+def decode_display_list(data, offset, size, widths, position_count):
+    """Read GX FIFO position, normal and TEX0 indices laid out as `widths` (vertex_layout)."""
     reader = animations.Reader(data)
     reader.check(offset, size)
     end = offset + size
+    stride = sum(widths)
     cursor = offset
     vertices = []
     triangles = []
-    groups = 0
     while cursor < end:
         op = data[cursor]
         if op == 0:  # 32-byte display-list padding
@@ -601,39 +614,22 @@ def decode_display_list(data, offset, size, stride, position_count):
             first = len(vertices)
             for i in range(count):
                 address = cursor + 3 + i * stride
-                if stride == 2:  # compact GX index8 position plus one other attribute
-                    pos = data[address]
-                    normal = texcoord = None
-                else:
-                    pos, normal, texcoord = reader.unpack("3H", address)
+                indices = []
+                for width in widths:
+                    indices.append(None if not width else data[address] if width == 1
+                                   else reader.unpack("H", address)[0])
+                    address += width
+                pos, normal, texcoord = indices[0], indices[1], indices[4]
                 if pos >= position_count:
                     raise ValueError("GX position index %d >= %d" % (pos, position_count))
                 vertices.append((pos, normal, texcoord))
             triangles.extend(gx_triangles(op, list(range(first, first+count))))
-            groups += 1
             cursor += 3 + count * stride
         else:
             raise ValueError("unsupported GX command 0x%02X at 0x%X" % (op, cursor))
-    if not groups:
+    if not triangles:
         raise ValueError("display list has no triangles")
-    return vertices, triangles, groups
-
-
-def infer_vertex_stride(data, offset, size, position_count):
-    """Choose the layout that exactly parses this list; small lists can have padding."""
-    valid = []
-    for stride in (2, 6, 7):
-        try:
-            indices, triangles, groups = decode_display_list(
-                data, offset, size, stride, position_count)
-            if triangles:
-                valid.append((groups, -stride, stride, indices, triangles))
-        except ValueError:
-            pass
-    if not valid:
-        raise ValueError("cannot decode GX list at 0x%X (%d B)" % (offset, size))
-    _, _, stride, indices, triangles = max(valid)
-    return stride, indices, triangles
+    return vertices, triangles
 
 
 def geometry_descriptors(body):
@@ -691,18 +687,24 @@ def geometry_descriptors(body):
         groups = []
         formats = set()
         texture_id = None
+        vcd = None
         for j in range(num_states):
             state_id, pad, pad16, setting, primitive, size = reader.unpack(
                 "BBHIII", layout + states + j*16)
-            # State 1 / 0x1511 selects the primary texture. 0x1500 is an
-            # additional TEV stage that the simple glTF material omits.
-            if state_id == 1 and setting >> 16 == 0x1511:
-                texture_id = setting & 0xFFFF
+            # State 1 binds texture (low 13 bits) to texture map (bits 13-15). 0x1511 on map 0
+            # is the primary texture; map 1 (0x2000, mostly 0x1500 settings) is an additional
+            # TEV stage that the simple glTF material omits (King Boo's 0x1511200A is one).
+            if state_id == 1 and setting >> 16 == 0x1511 and not setting & 0xE000:
+                texture_id = setting & 0x1FFF
+            if state_id == 2:
+                vcd = setting
             if not primitive or not size:
                 continue
-            stride, records, faces = infer_vertex_stride(
-                body, layout + primitive, size, total)
-            formats.add(stride)
+            if vcd is None:
+                raise ValueError("display list before its vertex descriptor")
+            widths = vertex_layout(vcd)
+            records, faces = decode_display_list(body, layout + primitive, size, widths, total)
+            formats.add(sum(widths))
             for pos_id, normal_id, tex_id in records:
                 if normal_id is not None and normal_id >= len(normals):
                     raise ValueError("GX normal index exceeds normal array")
@@ -710,12 +712,11 @@ def geometry_descriptors(body):
                     raise ValueError("GX TEX0 index exceeds texture coordinate array")
             groups.append({"positions": [vertices[p] for p, _, _ in records],
                            "normals": [normals[n] for _, n, _ in records]
-                           if stride != 2 else [],
+                           if widths[1] else [],
                            "uvs": [texcoords[t] for _, _, t in records]
-                           if stride != 2 else [],
+                           if widths[4] else [],
                            "source_ids": [p for p, _, _ in records],
-                           "triangles": faces, "texture_id": texture_id,
-                           "stride": stride})
+                           "triangles": faces, "texture_id": texture_id})
         if groups:
             yield i, groups, sorted(formats), total
 
