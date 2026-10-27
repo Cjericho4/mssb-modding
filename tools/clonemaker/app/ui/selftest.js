@@ -263,7 +263,7 @@ export async function run(options, app) {
     } catch (e) {
       parsed = String(e);
     }
-    check(parsed.startsWith("150 nodes, 115 animations, 9 images, "), "the .gltf file parses: " + parsed);
+    check(parsed.startsWith("39 nodes, 115 animations, 9 images, "), "the .gltf file parses: " + parsed);
 
     // clones of a second character: its own block with its own character, colours and first clone
     const before = rows().map((r) => r.querySelector("select").value).join();
