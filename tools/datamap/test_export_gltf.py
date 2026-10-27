@@ -84,9 +84,10 @@ class CurveTests(unittest.TestCase):
         body[0xBC:0xBC+len(display)] = display
         descriptors = list(gltf.geometry_descriptors(body))
         self.assertEqual(len(descriptors), 1)
-        number, positions, faces, strides = descriptors[0]
+        number, positions, faces, strides, source_ids, total = descriptors[0]
         self.assertEqual((number, len(positions), faces, strides),
                          (0, 3, [(0, 1, 2)], [6]))
+        self.assertEqual((source_ids, total), ([0, 1, 2], 3))
         self.assertEqual(positions[1], [1, 0, 0])
         self.assertEqual(gltf.gx_triangles(0x98, [0, 1, 2, 3]),
                          [(0, 1, 2), (2, 1, 3)])
@@ -109,6 +110,37 @@ class CurveTests(unittest.TestCase):
         rounded = buf.add([0, 0.2], 5126, "SCALAR")
         self.assertEqual(buf.accessors[rounded]["max"],
                          [0.20000000298023224])
+
+    def test_skin_lists_and_depth_first_joint_order(self):
+        body = bytearray(768)
+        struct.pack_into(">I", body, 12, 0x20)
+        struct.pack_into(">HHHBxIII", body, 0x20, 1, 1, 1, 11,
+                         0x24, 0x64, 0xD8)
+        struct.pack_into(">IIHHB", body, 0x20+0x24+0x30, 0, 0, 0, 1, 0)
+        struct.pack_into(">IIIHHHB", body, 0x20+0x64+0x60,
+                         0, 0x1E0, 12, 1, 2, 1, 0)
+        body[0x20+0x1E0:0x20+0x1E2] = bytes([100, 100])
+        struct.pack_into(">IIIIHH", body, 0x20+0xD8+0x30,
+                         0, 0x1E4, 0, 0x1E8, 0, 1)
+        struct.pack_into(">H", body, 0x20+0x1E4, 1)
+        body[0x20+0x1E8] = 55
+        layout = {"root_index": 0, "bones": [
+            {"parent_index": None, "child_index": 2, "next_index": None},
+            {"parent_index": 0, "child_index": None, "next_index": None},
+            {"parent_index": 0, "child_index": None, "next_index": 1}]}
+        self.assertEqual(gltf.runtime_bone_order(layout), [0, 2, 1])
+        weights = gltf.skin_weights(body, layout, 2)
+        self.assertEqual(weights[0][0][:1], (0,))
+        self.assertEqual(weights[1][0][:3], (1, 2, 0))
+        self.assertAlmostEqual(sum(weights[1][1]), 1)
+        self.assertAlmostEqual(weights[1][1][2], 55/255)
+
+        poses = [{"translation": translation, "rotation": [0, 0, 0, 1],
+                  "scale": [1, 1, 1], "scale_quaternion": [0, 0, 0, 1]}
+                 for translation in ([1, 0, 0], [0, 2, 0], [0, 0, 3])]
+        matrices = gltf.inverse_bind_matrices(layout, poses)
+        self.assertEqual([m[2][3] for m in matrices], [0, -3, 0])
+        self.assertEqual([m[1][3] for m in matrices], [0, 0, -2])
 
 
 if __name__ == "__main__":

@@ -74,7 +74,7 @@ class Buffer:
 
     def add(self, values, component, shape, target=None):
         fmt, size, code = {5126: ("f", 4, 5126), 5123: ("H", 2, 5123)}[component]
-        count_per = {"SCALAR": 1, "VEC3": 3, "VEC4": 4}[shape]
+        count_per = {"SCALAR": 1, "VEC3": 3, "VEC4": 4, "MAT4": 16}[shape]
         if len(values) % count_per:
             raise ValueError("accessor component count mismatch")
         while len(self.data) % 4:
@@ -91,9 +91,10 @@ class Buffer:
         # Bounds describe the stored f32 values, not their higher-precision Python inputs.
         chunks = [stored[i:i+count_per] for i in range(0, len(stored), count_per)]
         accessor = {"bufferView": view_id, "componentType": code,
-                    "count": len(chunks), "type": shape,
-                    "min": [min(v[i] for v in chunks) for i in range(count_per)],
-                    "max": [max(v[i] for v in chunks) for i in range(count_per)]}
+                    "count": len(chunks), "type": shape}
+        if shape != "MAT4":
+            accessor["min"] = [min(v[i] for v in chunks) for i in range(count_per)]
+            accessor["max"] = [max(v[i] for v in chunks) for i in range(count_per)]
         accessor_id = len(self.accessors)
         self.accessors.append(accessor)
         return accessor_id
@@ -156,6 +157,147 @@ def skeleton(body, character):
             doc["nodes"][handles[parent][3]]["children"].append(handles[i][0])
     buffer.finish(doc)
     return doc, buffer, layout, handles, poses
+
+
+def runtime_bone_order(layout):
+    """The game's bone pointer array is filled by a depth-first tree walk."""
+    bones = layout["bones"]
+    order = []
+    seen = set()
+
+    def visit(index):
+        while index is not None:
+            if index in seen:
+                raise ValueError("cycle in bone tree")
+            seen.add(index)
+            order.append(index)
+            visit(bones[index]["child_index"])
+            index = bones[index]["next_index"]
+
+    visit(layout["root_index"])
+    if len(order) != len(bones):
+        raise ValueError("bone tree does not contain every bone")
+    return order
+
+
+def matmul(a, b):
+    return [[sum(a[r][k] * b[k][c] for k in range(4)) for c in range(4)]
+            for r in range(4)]
+
+
+def translation_matrix(v):
+    m = [[1.0, 0.0, 0.0, v[0]], [0.0, 1.0, 0.0, v[1]],
+         [0.0, 0.0, 1.0, v[2]], [0.0, 0.0, 0.0, 1.0]]
+    return m
+
+
+def rotation_matrix(q):
+    x, y, z, w = q
+    return [[1-2*(y*y+z*z), 2*(x*y-z*w), 2*(x*z+y*w), 0.0],
+            [2*(x*y+z*w), 1-2*(x*x+z*z), 2*(y*z-x*w), 0.0],
+            [2*(x*z-y*w), 2*(y*z+x*w), 1-2*(x*x+y*y), 0.0],
+            [0.0, 0.0, 0.0, 1.0]]
+
+
+def scale_matrix(v):
+    return [[v[0], 0.0, 0.0, 0.0], [0.0, v[1], 0.0, 0.0],
+            [0.0, 0.0, v[2], 0.0], [0.0, 0.0, 0.0, 1.0]]
+
+
+def inverse_affine(m):
+    a, b, c = m[0][:3]
+    d, e, f = m[1][:3]
+    g, h, i = m[2][:3]
+    cof = [[e*i-f*h, c*h-b*i, b*f-c*e],
+           [f*g-d*i, a*i-c*g, c*d-a*f],
+           [d*h-e*g, b*g-a*h, a*e-b*d]]
+    det = a*cof[0][0] + b*cof[1][0] + c*cof[2][0]
+    if abs(det) < 1e-12:
+        raise ValueError("singular bone rest transform")
+    inv = [[x/det for x in row] for row in cof]
+    offset = [-sum(inv[r][k]*m[k][3] for k in range(3)) for r in range(3)]
+    return [inv[r]+[offset[r]] for r in range(3)] + [[0.0, 0.0, 0.0, 1.0]]
+
+
+def inverse_bind_matrices(layout, poses):
+    """Inverse of each joint's complete rest transform, including scale axis."""
+    order = runtime_bone_order(layout)
+    worlds = {}
+    for index in order:
+        pose = poses[index]
+        local = translation_matrix(pose["translation"])
+        for part in (rotation_matrix(pose["rotation"]),
+                     rotation_matrix(pose["scale_quaternion"]),
+                     scale_matrix(pose["scale"]),
+                     rotation_matrix(inverse(pose["scale_quaternion"]))):
+            local = matmul(local, part)
+        parent = layout["bones"][index]["parent_index"]
+        worlds[index] = matmul(worlds[parent], local) if parent is not None else local
+    return [inverse_affine(worlds[index]) for index in order]
+
+
+def skin_weights(body, layout, vertex_count):
+    """Decode SK1, SK2 and accumulator influences for the skin position array."""
+    reader = animations.Reader(body)
+    skin, = reader.unpack("I", 12)
+    if not skin:
+        raise ValueError("actor has no skin section")
+    n1, n2, na, shift = reader.unpack("HHHB", skin)
+    if max(n1, n2, na) > 1024:
+        raise ValueError("invalid skin list count")
+    p1, p2, pa = reader.unpack("III", skin+8)
+    reader.check(skin+p1, n1*0x40)
+    reader.check(skin+p2, n2*0x74)
+    reader.check(skin+pa, na*0x44)
+    influences = {}
+
+    def vertices(dst, offset, count):
+        if (dst+offset) % 12:
+            raise ValueError("unaligned skin destination")
+        start = (dst+offset)//12
+        if start+count > vertex_count:
+            raise ValueError("skin destination exceeds position array")
+        return range(start, start+count)
+
+    for i in range(n1):
+        src, dst, bone, count, offset = reader.unpack("IIHHB", skin+p1+i*0x40+0x30)
+        for index in vertices(dst, offset, count):
+            if index in influences:
+                raise ValueError("overlapping primary skin lists")
+            influences[index] = [(bone, 255)]
+    for i in range(n2):
+        src, weights, dst, bone0, bone1, count, offset = reader.unpack(
+            "IIIHHHB", skin+p2+i*0x74+0x60)
+        reader.check(skin+weights, 2*count)
+        for j, index in enumerate(vertices(dst, offset, count)):
+            if index in influences:
+                raise ValueError("overlapping primary skin lists")
+            w0, w1 = reader.unpack("BB", skin+weights+2*j)
+            influences[index] = [(bone0, w0), (bone1, w1)]
+    for i in range(na):
+        src, indices, dst, weights, bone, count = reader.unpack(
+            "IIIIHH", skin+pa+i*0x44+0x30)
+        reader.check(skin+indices, count*2)
+        reader.check(skin+weights, count)
+        for j in range(count):
+            index, = reader.unpack("H", skin+indices+2*j)
+            weight, = reader.unpack("B", skin+weights+j)
+            if index >= vertex_count:
+                raise ValueError("accumulator vertex index exceeds position array")
+            influences.setdefault(index, []).append((bone, weight))
+    order = runtime_bone_order(layout)
+    if any(bone >= len(order) for values in influences.values() for bone, _ in values):
+        raise ValueError("skin joint index exceeds bone count")
+    if any(len(values) > 8 for values in influences.values()):
+        raise ValueError("more than eight skin influences")
+    result = {}
+    for index, values in influences.items():
+        total = sum(weight for _, weight in values)
+        if not total:
+            raise ValueError("zero skin weight")
+        result[index] = ((tuple(bone for bone, _ in values) + (0,)*8)[:8],
+                         (tuple(weight/total for _, weight in values) + (0.0,)*8)[:8])
+    return result
 
 
 def lerp(a, b, u):
@@ -454,6 +596,7 @@ def geometry_descriptors(body):
         if num_states > 1024:
             raise ValueError("invalid display state count")
         positions = []
+        source_indices = []
         triangles = []
         formats = set()
         for j in range(num_states):
@@ -466,20 +609,21 @@ def geometry_descriptors(body):
             formats.add(stride)
             base = len(positions)
             positions.extend(vertices[k] for k in ids)
+            source_indices.extend(ids)
             triangles.extend((base+a, base+b, base+c) for a,b,c in faces)
         if triangles:
-            yield i, positions, triangles, sorted(formats)
+            yield i, positions, triangles, sorted(formats), source_indices, total
 
 
-def add_geometry(doc, buffer, body, layout, handles):
-    """Attach static skin geometry at scene root and rigid geometry below its bone."""
+def add_geometry(doc, buffer, body, layout, handles, poses):
+    """Attach skinned geometry at scene root and rigid geometry below its bone."""
     skin_id = layout["skin_file_id"]
     rigid = {}
     for i, bone in enumerate(layout["bones"]):
         if bone["geometry_id"] != 0xFFFF:
             rigid.setdefault(bone["geometry_id"], i)
     counts = []
-    for descriptor_id, positions, triangles, strides in geometry_descriptors(body):
+    for descriptor_id, positions, triangles, strides, source_ids, total in geometry_descriptors(body):
         flat = [x for point in positions for x in point]
         faces = [i for triangle in triangles for i in triangle]
         if len(positions) > 65535:
@@ -487,15 +631,44 @@ def add_geometry(doc, buffer, body, layout, handles):
         pos_accessor = buffer.add(flat, 5126, "VEC3", 34962)
         face_accessor = buffer.add(faces, 5123, "SCALAR", 34963)
         mesh_id = len(doc["meshes"])
+        attributes = {"POSITION": pos_accessor}
+        if descriptor_id == skin_id:
+            influences = skin_weights(body, layout, total)
+            missing = set(source_ids) - influences.keys()
+            if missing:
+                raise ValueError("display list references %d unweighted skin vertices: %s" %
+                                 (len(missing), sorted(missing)[:10]))
+            for group in range(1 + any(any(influences[index][1][4:])
+                                       for index in source_ids)):
+                start = group * 4
+                joints = [joint for index in source_ids
+                          for joint in influences[index][0][start:start+4]]
+                weights = [weight for index in source_ids
+                           for weight in influences[index][1][start:start+4]]
+                attributes["JOINTS_%d" % group] = buffer.add(joints, 5123, "VEC4", 34962)
+                attributes["WEIGHTS_%d" % group] = buffer.add(weights, 5126, "VEC4", 34962)
         doc["meshes"].append({
             "name": "geo_%d" % descriptor_id,
-            "primitives": [{"attributes": {"POSITION": pos_accessor},
+            "primitives": [{"attributes": attributes,
                             "indices": face_accessor, "mode": 4, "material": 0}]})
         node_id = len(doc["nodes"])
         doc["nodes"].append({"name": "geo_%d" % descriptor_id, "mesh": mesh_id,
                              "extras": {"descriptor": descriptor_id,
                                         "vertex_strides": strides}})
         if descriptor_id == skin_id:
+            if "skins" not in doc:
+                matrices = inverse_bind_matrices(layout, poses)
+                gltf_matrices = [value for matrix in matrices
+                                 for column in range(4) for value in
+                                 (matrix[0][column], matrix[1][column],
+                                  matrix[2][column], matrix[3][column])]
+                ibm = buffer.add(gltf_matrices, 5126, "MAT4")
+                order = runtime_bone_order(layout)
+                doc["skins"] = [{"name": "actor skin",
+                                 "inverseBindMatrices": ibm,
+                                 "joints": [handles[index][3] for index in order],
+                                 "skeleton": handles[layout["root_index"]][0]}]
+            doc["nodes"][node_id]["skin"] = 0
             doc["scenes"][0]["nodes"].append(node_id)
         elif descriptor_id in rigid:
             doc["nodes"][handles[rigid[descriptor_id]][3]]["children"].append(node_id)
@@ -537,7 +710,7 @@ def main():
     body = catalog.data(catalog.find("subfile.%d" % (args.character * 19)))
     doc, buffer, layout, handles, poses = skeleton(body, args.character)
     if not args.no_mesh:
-        counts = add_geometry(doc, buffer, body, layout, handles)
+        counts = add_geometry(doc, buffer, body, layout, handles, poses)
         print("Geometry: " + ", ".join("%d: %d vertices, %d triangles" % row
                                        for row in counts))
     if not args.skeleton_only:
