@@ -155,6 +155,191 @@ def skeleton(body, character):
     return doc, buffer, layout, handles, poses
 
 
+def lerp(a, b, u):
+    return [(1-u)*x + u*y for x, y in zip(a, b)]
+
+
+def ease_time(u, a, b):
+    """The retail ease remap, including its discontinuous coefficient."""
+    if u == 0 or u == 1 or a + b == 0:
+        return u
+    total = a + b
+    if total > 1:
+        a /= total
+        b /= total
+    coefficient = 0.5 - 1 / total
+    if u < a:
+        return u*u*coefficient/a
+    if u < 1-b:
+        return coefficient*(2*u-a)
+    return 1-(1-u)**2*coefficient/b
+
+
+def bezier(a, b, out_offset, in_offset, u):
+    return [(1-u)**3*x + 3*u*(1-u)**2*(x+out) +
+            3*u*u*(1-u)*(y+inside) + u**3*y
+            for x, y, out, inside in zip(a, b, out_offset, in_offset)]
+
+
+def hermite(a, b, out_tangent, in_tangent, u):
+    return [(2*u**3-3*u*u+1)*x + (3*u*u-2*u**3)*y +
+            (u**3-2*u*u+u)*out + (u**3-u*u)*inside
+            for x, y, out, inside in zip(a, b, out_tangent, in_tangent)]
+
+
+def slerp(a, b, u):
+    dot = sum(x*y for x, y in zip(a, b))
+    if 1 + dot <= 1e-6:
+        perp = [-b[1], b[0], -b[3], b[2]]
+        return [math.sin((1-u)*math.pi/2)*x + math.sin(u*math.pi/2)*y
+                for x, y in zip(a, perp)]
+    if 1 - dot <= 1e-6:
+        return lerp(a, b, u)
+    angle = math.acos(max(-1, min(1, dot)))
+    divisor = math.sin(angle)
+    return [(math.sin((1-u)*angle)*x + math.sin(u*angle)*y)/divisor
+            for x, y in zip(a, b)]
+
+
+def squad(a, out_control, in_control, b, u):
+    return slerp(slerp(a, b, u), slerp(out_control, in_control, u), 2*u*(1-u))
+
+
+def key_pair(track, time):
+    keys = track["keyframes"]
+    if not keys:
+        raise ValueError("track has no keys")
+    if len(keys) == 1 or time <= keys[0]["time"]:
+        return keys[0], keys[0], 0.0
+    for i in range(len(keys)-1):
+        current, following = keys[i], keys[i+1]
+        if time < following["time"]:
+            span = following["time"]-current["time"]
+            return current, following, ((time-current["time"])/span if span else 0.0)
+    return keys[-1], keys[-1], 0.0
+
+
+def sample_vector(track, channel, mode, current, following, u):
+    a = current["channels"][channel]
+    b = following["channels"][channel]
+    if mode == 0 or current is following:
+        return a
+    if channel == "euler" and mode == 1:
+        if mode == 3:
+            raise ValueError("Euler Hermite is unsupported by the game")
+        # Retail wraps before lerp or Bezier interpolation.
+        a, b = list(a), list(b)
+        for i in range(3):
+            if a[i]-b[i] > 180:
+                a[i] -= 360
+            elif a[i]-b[i] < -180:
+                b[i] -= 360
+    if mode == 1:
+        return lerp(a, b, u)
+    out = current["auxiliary"][channel]["out"]
+    inside = following["auxiliary"][channel]["in"]
+    if mode == 2:
+        return bezier(a, b, out, inside, u)
+    if mode == 3:
+        ease_in, ease_out = animations.segment_ease(current, following, channel)
+        return hermite(a, b, out, inside, ease_time(u, ease_in, ease_out))
+    raise ValueError("unsupported %s interpolation mode %d" % (channel, mode))
+
+
+def sample_track(track, time):
+    """Sample a bone track at raw ANIM time; return only its animated channels."""
+    current, following, u = key_pair(track, time)
+    if current is following:
+        return dict(current["channels"])
+    channels = current["channels"]
+    result = {}
+    for name, shift, mask in (("scale", 2, 3), ("euler", 4, 7),
+                              ("translation", 0, 3)):
+        if name in channels:
+            mode = (track["interpolation"] >> shift) & mask
+            result[name] = sample_vector(track, name, mode, current, following, u)
+    if "scale_quaternion" in channels:
+        # The scale axis follows the scale channel's time; retail scale-quat
+        # tracks use scale mode 1. No fixed s16 decode is applied here.
+        mode = track["scale_interpolation"]
+        result["scale_quaternion"] = (channels["scale_quaternion"] if mode == 0 else
+            slerp(channels["scale_quaternion"],
+                  following["channels"]["scale_quaternion"], u))
+    if "quaternion" in channels:
+        mode = track["rotation_interpolation"]
+        a, b = channels["quaternion"], following["channels"]["quaternion"]
+        if mode == 0:
+            result["quaternion"] = a
+        elif mode == 6:
+            result["quaternion"] = slerp(a, b, u)
+        elif mode in (4, 5):
+            if mode == 5:
+                ease_in, ease_out = animations.segment_ease(current, following, "quaternion")
+                u = ease_time(u, ease_in, ease_out)
+            result["quaternion"] = squad(
+                a, current["auxiliary"]["quaternion"]["out"],
+                following["auxiliary"]["quaternion"]["in"], b, u)
+        else:
+            raise ValueError("unsupported quaternion interpolation mode %d" % mode)
+    return result
+
+
+def add_animation(doc, buffer, bank, sequence_id, layout, handles, poses):
+    if not 0 <= sequence_id < bank["num_sequences"]:
+        raise ValueError("sequence %d is outside bank" % sequence_id)
+    sequence = bank["sequences"][sequence_id]
+    duration = max((t["duration"] for t in sequence["tracks"]), default=0)
+    if not math.isfinite(duration) or duration < 0:
+        raise ValueError("invalid animation duration")
+    frames = list(range(math.floor(duration)+1))
+    if not frames or frames[-1] != duration:
+        frames.append(duration)
+    seconds = [t/30 for t in frames]
+    time_accessor = buffer.add(seconds, 5126, "SCALAR")
+    animation = {"name": "bank%d_sequence%d" % (bank["bank_id"], sequence_id),
+                 "samplers": [], "channels": [],
+                 "extras": {"raw_duration": duration, "sample_rate_hz": 30}}
+    bone_by_id = {}
+    for index, bone in enumerate(layout["bones"]):
+        bone_by_id.setdefault(bone["bone_id"], index)
+
+    def channel(node, path, values):
+        width = 4 if path == "rotation" else 3
+        flattened = [x for value in values for x in value]
+        output = buffer.add(flattened, 5126, "VEC4" if width == 4 else "VEC3")
+        sampler = len(animation["samplers"])
+        animation["samplers"].append({"input": time_accessor, "output": output,
+                                      "interpolation": "LINEAR"})
+        animation["channels"].append({"sampler": sampler,
+                                      "target": {"node": node, "path": path}})
+
+    for track in sequence["tracks"]:
+        index = bone_by_id.get(track["bone_id"])
+        if index is None:
+            continue  # Aux tracks such as 0xFFFF have no actor bone.
+        samples = [sample_track(track, t) for t in frames]
+        if not samples:
+            continue
+        main, axis, scaled, leaf = handles[index]
+        rest = poses[index]
+        names = samples[0]
+        if "translation" in names:
+            channel(main, "translation", [s["translation"] for s in samples])
+        if "quaternion" in names or "euler" in names:
+            rotations = [unit(s["quaternion"]) if "quaternion" in s
+                         else euler_xyz(s["euler"]) for s in samples]
+            channel(main, "rotation", rotations)
+        if "scale" in names:
+            channel(scaled, "scale", [s["scale"] for s in samples])
+        if "scale_quaternion" in names:
+            axes = [unit(s["scale_quaternion"]) for s in samples]
+            channel(axis, "rotation", axes)
+            channel(leaf, "rotation", [inverse(q) for q in axes])
+    doc["animations"] = [animation]
+    buffer.finish(doc)
+    return animation
+
+
 def character_id(value):
     if value.isdecimal():
         number = int(value)
@@ -170,11 +355,21 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--disc", required=True, help="extracted game directory or ISO")
     parser.add_argument("--character", required=True, type=character_id)
+    parser.add_argument("--bank", type=int, default=2, help="disc subfile track (default: 2 batting)")
+    parser.add_argument("--sequence", type=int, default=2, help="bank sequence (default: 2 swing)")
+    parser.add_argument("--skeleton-only", action="store_true")
     parser.add_argument("--out", type=Path, required=True)
     args = parser.parse_args()
+    if not 2 <= args.bank <= 18:
+        parser.error("--bank must be 2..18")
     _, catalog = mssb_files.open_catalog(args.disc)
     body = catalog.data(catalog.find("subfile.%d" % (args.character * 19)))
-    doc, _, layout, _, _ = skeleton(body, args.character)
+    doc, buffer, layout, handles, poses = skeleton(body, args.character)
+    if not args.skeleton_only:
+        bank_data = catalog.data(catalog.find("subfile.%d" % (args.character * 19 + args.bank)))
+        bank = animations.parse_bank(bank_data, keyframes=True)
+        clip = add_animation(doc, buffer, bank, args.sequence, layout, handles, poses)
+        print("Sampled %d channels at 30 fps" % len(clip["channels"]))
     args.out.write_text(json.dumps(doc, separators=(",", ":"), allow_nan=False) + "\n",
                         encoding="utf-8")
     print("Exported character %d: %d bones, %d nodes -> %s" %
