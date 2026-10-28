@@ -107,12 +107,57 @@ class CurveTests(unittest.TestCase):
         self.assertEqual(gltf.gx_triangles(0xA0, [0, 1, 2, 3]),
                          [(0, 2, 1), (0, 3, 2)])
         compact = bytes([0xA0, 0, 3, 0, 0, 1, 0, 2, 0]) + bytes(7)
-        self.assertEqual(gltf.vertex_layout(0x28), [1, 1, 0, 0, 0, 0])
-        self.assertEqual(gltf.vertex_layout(0x2CBC), [2, 2, 1, 0, 2, 1])
-        self.assertEqual(gltf.decode_display_list(compact, 0, len(compact), [1, 1, 0, 0, 0, 0], 3),
+        self.assertEqual(gltf.vertex_layout(0x28), [1, 1, 0, 0, 0, 0, 0])
+        self.assertEqual(gltf.vertex_layout(0x2CBC), [2, 2, 1, 0, 2, 1, 0])
+        self.assertEqual(gltf.vertex_layout(0x2AC3C), [2, 2, 0, 0, 2, 1, 2])
+        self.assertEqual(gltf.decode_display_list(compact, 0, len(compact), [1, 1, 0, 0, 0, 0, 0], 3),
                          ([(0, 0, None), (1, 0, None), (2, 0, None)], [(0, 2, 1)]))
         with self.assertRaises(ValueError):
             gltf.vertex_layout(0x2D)  # a direct (not indexed) attribute
+
+    def test_subitem_choice_script_and_morph(self):
+        # the gameplay ID of a clip picks the script row (fn_8001BE50)
+        self.assertEqual(gltf.clip_action(2, 2), (0, 2))
+        self.assertEqual(gltf.clip_action(3, 0), (1, 0))
+        self.assertEqual(gltf.clip_action(4, 44), (2, 44))
+        self.assertEqual(gltf.clip_action(6, 1), (4, 1))
+        self.assertEqual(gltf.clip_action(5, 0), (3, 0))
+        self.assertEqual(gltf.clip_action(15, 2), (5, 2))
+        self.assertEqual(gltf.clip_action(7, 1), (2, 0))
+        # glove on the non-throwing hand while fielding, bare hands by stance otherwise
+        stats = bytearray(0xA0)
+        self.assertEqual(gltf.attachment_slots(stats, 2), (2, 1))
+        self.assertEqual(gltf.attachment_slots(stats, 0), (4, 5))
+        stats[0x26] = stats[0x27] = 1
+        self.assertEqual(gltf.attachment_slots(stats, 3), (4, 3))
+        self.assertEqual(gltf.attachment_slots(stats, 1), (0, 1))
+        item = bytearray(0x110)
+        struct.pack_into(">4I", item, 0, 0, 0x20, 0x80, 0xE0)
+        # geo palette: one descriptor whose positions are two s16 vertices (shift 10)
+        struct.pack_into(">5I", item, 0x20, 0x005BBC61, 0, 0, 1, 0x14)
+        struct.pack_into(">II", item, 0x34, 0x20, 0)
+        struct.pack_into(">I", item, 0x40, 0x10)
+        struct.pack_into(">IHBB", item, 0x50, 0x20, 2, 0x3A, 3)
+        struct.pack_into(">6h", item, 0x60, 1, 2, 3, 4, 5, 6)
+        # morph block: one group of two shapes, one position target (vertex 1)
+        struct.pack_into(">HHHHII", item, 0x80, 4, 1, 1, 0, 0x14, 0x20)
+        struct.pack_into(">HHII", item, 0x94, 2, 1, 0x18, 0x30)
+        struct.pack_into(">HBB", item, 0xA0, 0, 1, 0x32)
+        struct.pack_into(">IBBBBIII", item, 0xB0, 1, 0, 1, 3, 2, 0x48, 0x50, 0x56)
+        struct.pack_into(">4H", item, 0xC8, 1, 1, 0, 0)
+        struct.pack_into(">6h", item, 0xD0, 7, 8, 9, 10, 11, 12)
+        # event script: one row of two actions, -1 (none) then entry 0 showing shape 1
+        struct.pack_into(">7I", item, 0xE0, 1, 0x14, 0x18, 1, 2, 0x1C, 0x24)
+        struct.pack_into(">HHHBB", item, 0xFC, 10, 1, 0, 100, 1)
+        struct.pack_into(">bb", item, 0x104, -1, 0)
+        item = bytes(item)
+        self.assertEqual([gltf.morph_shape(item, 0, i) for i in (0, 1, 2)], [0, 1, 0])
+        self.assertEqual(gltf.morph_shape(item, 1, 0), 0)
+        morphed = gltf.apply_morph(item, 1)
+        self.assertEqual(struct.unpack_from(">6h", morphed, 0x60), (1, 2, 3, 10, 11, 12))
+        self.assertEqual(morphed[:0x60] + morphed[0x6C:], item[:0x60] + item[0x6C:])
+        with self.assertRaises(ValueError):
+            gltf.apply_morph(item, 2)
 
     def test_cmpr_texture_to_embedded_png(self):
         import base64

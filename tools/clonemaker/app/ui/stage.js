@@ -1,6 +1,6 @@
-// The stage's 3D model: the selected clone as the game draws it (the character's in-match body with
-// the preview's recoloured or painted pictures) playing the fielder's stand-still loop. The model comes once
-// per character (`stage_model`, a .glb without pictures); a new colour only swaps its pictures.
+// The stage's 3D model: the selected clone as the game draws it (the character's in-match body, glove and
+// hand, with the preview's recoloured or painted pictures) playing the fielder's stand-still loop. The model
+// comes once per character (`stage_model`, a .glb without pictures); a new colour only swaps its pictures.
 // No WebGL, or a model that fails: the page keeps its silhouette (`.stage[data-stage]`).
 import * as THREE from "./vendor/three.module.js";
 import { GLTFLoader } from "./vendor/GLTFLoader.js";

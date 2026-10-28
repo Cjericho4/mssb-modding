@@ -652,16 +652,19 @@ def gx_triangles(op, vertices):
 
 
 def vertex_layout(vcd):
-    """Byte widths of POS, NRM, CLR0, CLR1, TEX0 and TEX1 in a display list's vertices.
+    """Byte widths of POS, NRM, CLR0, CLR1, TEX0 and TEX1 in a display list's vertices, then
+    the summed width of TEX2..TEX7 (read past, unused).
 
     Display state 2 holds the list's vertex descriptor: 2-bit fields from bit 0, the first
-    (matrix index) unused, then POS, NRM, CLR0, CLR1, TEX0, TEX1; 0 none, 2 index8, 3 index16.
-    Every retail body (54 characters, 938 lists) uses only these.
+    (matrix index) unused, then POS, NRM, CLR0, CLR1, TEX0..TEX7; 0 none, 2 index8, 3 index16.
+    Every retail body (54 characters, 938 lists) stops at TEX1; Wario's and Waluigi's hands
+    (sub-items) also carry TEX2/TEX3.
     """
     fields = [(vcd >> (2 * k)) & 3 for k in range(16)]
-    if fields[0] or any(fields[7:]) or 1 in fields or not fields[1]:
+    if fields[0] or 1 in fields or not fields[1]:
         raise ValueError("unsupported vertex descriptor 0x%X" % vcd)
-    return [{0: 0, 2: 1, 3: 2}[field] for field in fields[1:7]]
+    widths = [{0: 0, 2: 1, 3: 2}[field] for field in fields[1:]]
+    return widths[:6] + [sum(widths[6:])]
 
 
 def decode_display_list(data, offset, size, widths, position_count):
@@ -692,7 +695,7 @@ def decode_display_list(data, offset, size, widths, position_count):
             for i in range(count):
                 address = cursor + 3 + i * stride
                 indices = []
-                for width in widths:
+                for width in widths[:6]:
                     indices.append(None if not width else data[address] if width == 1
                                    else reader.unpack("H", address)[0])
                     address += width
@@ -709,10 +712,12 @@ def decode_display_list(data, offset, size, widths, position_count):
     return vertices, triangles
 
 
-def geometry_descriptors(body):
-    """Read unrelocated .gpc geo palette offsets (palette and layout relative)."""
+def geometry_descriptors(body, geo=None):
+    """Read unrelocated .gpc geo palette offsets (palette and layout relative). `geo` is the
+    palette's offset; a body names it in root word 8."""
     reader = animations.Reader(body)
-    geo, = reader.unpack("I", 8)
+    if geo is None:
+        geo, = reader.unpack("I", 8)
     version, user_size, user, count, descriptors = reader.unpack("5I", geo)
     if version != 0x005BBC61 or count > 1024:
         raise ValueError("invalid geo palette")
@@ -877,12 +882,124 @@ def transform_normal(m, n):
     return [x/length for x in v] if length else v
 
 
-def add_geometry(doc, buffer, body, layout, handles, poses, textures_dir=None):
-    """Add every display piece as a mesh on the one skin.
+# Hands and gloves are separate per-character models, "sub-items" (mssb-dtk .agent docs:
+# character_modding_report.md §3). Disc file subitem.(c*6 + slot) (lbl_800F5D98) is one rigid
+# piece with root words {actor layout, geo palette, morph block, event script}, drawn with the
+# body's textures. The game copies the piece's display object onto body bone 19 (obj0) or 25
+# (obj1) (lbl_803CB7B4, attachSubItemBone / fn_80011CA8), so it draws in that bone's frame and the
+# sub-item's own bones are unused. Slots: 0/4 hand on 19, 1/5 hand on 25, 2 glove on 19, 3 glove
+# on 25 (Monty, the Magikoopas and Petey have hands there). They differ only in their scripts.
+SUBITEM_BONES = (19, 25)
+
+
+def clip_action(track, sequence_id):
+    """The (category, index) fn_8001BE50 passes to the sub-item scripts for a clip: category 0
+    batting, 1 running, 2 fielding, 3 pitching, 4 pitcher idle, 5 bank 15. A clip without a
+    gameplay ID counts as the fielder standing still."""
+    base = BANK_GAMEPLAY_BASE.get(track)
+    if base is None:
+        return 2, 0
+    gameplay_id = base + sequence_id
+    for start, category in ((105, 5), (75, 0), (63, 3), (61, 4), (45, 1), (0, 2)):
+        if gameplay_id >= start:
+            return category, gameplay_id - start
+    raise ValueError("negative gameplay ID")
+
+
+def attachment_slots(stats_row, category):
+    """The sub-item slots fn_80011CA8 puts on bones 19 and 25: the glove on the non-throwing
+    hand (stats byte 0x26) while fielding or pitching, else bare hands by batting stance (0x27)."""
+    if 2 <= category <= 4:
+        return (4, 3) if stats_row[0x26] else (2, 1)
+    return (0, 1) if stats_row[0x27] else (4, 5)
+
+
+def morph_shape(item, category, index):
+    """The hand shape a sub-item shows as an action starts: its event script (root word 12)
+    picks entry rows[category][index] (fn_80025EEC), whose first key names a shape. Without a
+    script or an entry the game's default keys show shape 0."""
+    reader = animations.Reader(item)
+    script, = reader.unpack("I", 12)
+    if not script:
+        return 0
+    count, entries, rows, row_count = reader.unpack("4I", script)
+    if category >= row_count or index >= reader.unpack("I", script + 16 + 4*category)[0]:
+        return 0
+    row, = reader.unpack("I", script + rows + 4*category)
+    entry, = reader.unpack("b", script + row + index)
+    if not 0 <= entry < count:
+        return 0
+    offset, = reader.unpack("I", script + entries + 4*entry)
+    duration, keys = reader.unpack("HH", script + offset)
+    return reader.unpack("B", script + offset + 7)[0] if keys else 0
+
+
+def apply_morph(item, shape):
+    """The sub-item with morph `shape` copied over the positions it replaces, as fn_80024FA4
+    does at a key: each target's runs {u16 start, u16 count} take consecutive vertices from the
+    shape's absolute s16 positions. Only position targets exist in retail."""
+    reader = animations.Reader(item)
+    geo, morph = reader.unpack("I", 4)[0], reader.unpack("I", 8)[0]
+    if not morph:
+        return item
+    out = bytearray(item)
+    groups, arrays = reader.unpack("HH", morph + 2)
+    group_table, array_table = reader.unpack("II", morph + 8)
+    descriptors, = reader.unpack("I", geo + 16)
+    for g in range(groups):
+        shapes, targets, stride, first = reader.unpack("HHII", morph + group_table + 12*g)
+        if shape >= shapes:
+            raise ValueError("morph shape %d >= %d" % (shape, shapes))
+        for t in range(targets):
+            target = morph + first + t*stride
+            count, descriptor, kind, components, size, runs = reader.unpack("IBBBBI", target)
+            if not any(reader.unpack("HBB", morph + array_table + 16*a)[:2] == (descriptor, kind)
+                       for a in range(arrays)):
+                continue  # no array is bound to this target
+            if kind != 1:
+                raise ValueError("unsupported morph array kind %d" % kind)
+            layout = geo + reader.unpack("I", geo + descriptors + 8*descriptor)[0]
+            array, total, quant, width = reader.unpack("IHBB", layout + reader.unpack("I", layout)[0])
+            if components * size != width * 2:
+                raise ValueError("morph element size differs from its position array")
+            source = morph + reader.unpack("I", target + 12 + 4*shape)[0]
+            step = components * size
+            done = 0
+            while True:
+                start, length = reader.unpack("HH", morph + runs)
+                runs += 4
+                if not length:
+                    break
+                if start + length > total or done + length > count:
+                    raise ValueError("morph run outside its arrays")
+                reader.check(source + done*step, length*step)
+                out[layout + array + start*step:layout + array + (start+length)*step] = \
+                    item[source + done*step:source + (done+length)*step]
+                done += length
+    return bytes(out)
+
+
+def attachments(stats_row, load_item, action):
+    """The two sub-items the game attaches for `action` ((category, index), clip_action), with
+    their first morph shape applied: [{bone_id, slot, shape, data}]. `load_item(slot)` reads the
+    character's subitem file."""
+    category, index = action
+    result = []
+    for bone_id, slot in zip(SUBITEM_BONES, attachment_slots(stats_row, category)):
+        item = load_item(slot)
+        shape = morph_shape(item, category, index)
+        result.append({"bone_id": bone_id, "slot": slot, "shape": shape,
+                       "data": apply_morph(item, shape)})
+    return result
+
+
+def add_geometry(doc, buffer, body, layout, handles, poses, textures_dir=None, attached=()):
+    """Add every display piece as a mesh on the one skin, then the `attached` sub-items.
 
     The skin is in the game's bind space and is only turned upright. A rigid piece (geometry
     drawn by one bone) is placed at its bone's rest transform and weighted 1.0 to that bone, so
-    it follows the bone exactly while Blender sees only ordinary skinned meshes."""
+    it follows the bone exactly while Blender sees only ordinary skinned meshes. A sub-item is a
+    rigid piece of its wrist bone."""
     skin_id = layout["skin_file_id"]
     plain_material = add_textures(doc, body, textures_dir)
     rigid = {}
@@ -891,15 +1008,22 @@ def add_geometry(doc, buffer, body, layout, handles, poses, textures_dir=None):
             rigid.setdefault(bone["geometry_id"], i)
     order = runtime_bone_order(layout)
     worlds = rest_worlds(layout, poses)
+    pieces = [(None, piece) for piece in geometry_descriptors(body)]
+    for item in attached:
+        bones = [i for i, bone in enumerate(layout["bones"]) if bone["bone_id"] == item["bone_id"]]
+        if bones:  # the game skips a missing bone
+            geo, = animations.Reader(item["data"]).unpack("I", 4)
+            pieces += [(dict(item, bone_index=bones[0]), piece)
+                       for piece in geometry_descriptors(item["data"], geo)]
     counts = []
-    for descriptor_id, groups, strides, total in geometry_descriptors(body):
+    for item, (descriptor_id, groups, strides, total) in pieces:
         mesh_id = len(doc["meshes"])
         primitives = []
-        skinned = descriptor_id == skin_id
+        skinned = item is None and descriptor_id == skin_id
         if skinned:
             influences = skin_weights(body, layout, total)
-        elif descriptor_id in rigid:
-            bone_index = rigid[descriptor_id]
+        elif item is not None or descriptor_id in rigid:
+            bone_index = rigid[descriptor_id] if item is None else item["bone_index"]
             place = matmul(worlds[bone_index],
                            scale_matrix(poses[bone_index].get("fold") or [1.0, 1.0, 1.0]))
             joint = order.index(bone_index)
@@ -962,9 +1086,12 @@ def add_geometry(doc, buffer, body, layout, handles, poses, textures_dir=None):
                                  (material, plain_material))
             primitives.append({"attributes": attributes, "indices": face_accessor,
                                "mode": 4, "material": material})
-        doc["meshes"].append({"name": "geo_%d" % descriptor_id,
-                              "primitives": primitives})
+        name = "geo_%d" % descriptor_id
         extras = {"descriptor": descriptor_id, "vertex_strides": strides}
+        if item is not None:
+            name = "subitem_%d" % item["slot"]
+            extras.update({"subitem_slot": item["slot"], "morph_shape": item["shape"]})
+        doc["meshes"].append({"name": name, "primitives": primitives})
         if not skinned:
             extras["rigid_bone_id"] = layout["bones"][bone_index]["bone_id"]
         if "skins" not in doc:
@@ -979,9 +1106,8 @@ def add_geometry(doc, buffer, body, layout, handles, poses, textures_dir=None):
                              "joints": [handles[index][3] for index in order],
                              "skeleton": handles[layout["root_index"]][0]}]
         doc["scenes"][0]["nodes"].append(len(doc["nodes"]))
-        doc["nodes"].append({"name": "geo_%d" % descriptor_id, "mesh": mesh_id,
-                             "skin": 0, "extras": extras})
-        counts.append((descriptor_id,
+        doc["nodes"].append({"name": name, "mesh": mesh_id, "skin": 0, "extras": extras})
+        counts.append((name,
                        sum(len(group["positions"]) for group in groups),
                        sum(len(group["triangles"]) for group in groups)))
     buffer.finish(doc)
@@ -1024,6 +1150,8 @@ def main():
                         help="no body; a small cube marks each joint instead")
     parser.add_argument("--textures", type=Path,
                         help="preview painted PNGs from Clone Maker's Export Textures folder")
+    parser.add_argument("--no-attachments", action="store_true",
+                        help="leave out the hands and glove the game attaches to the wrists")
     parser.add_argument("--out", type=Path, required=True)
     args = parser.parse_args()
     if args.textures and not args.textures.is_dir():
@@ -1037,15 +1165,18 @@ def main():
     _, catalog = mssb_files.open_catalog(args.disc)
     body = catalog.data(catalog.find("subfile.%d" % (args.character * 19)))
     clips = []  # (bank, sequence id, name)
+    action = (2, 0)  # the first clip's (clip_action), or the fielder standing still
     if not args.skeleton_only:
         if args.all_animations:
             for track in args.banks or DEFAULT_ANIMATION_BANKS:
                 bank_data = catalog.data(catalog.find(
                     "subfile.%d" % (args.character * 19 + track)))
                 bank = animations.parse_bank(bank_data, keyframes=True)
-                clips += [(bank, sequence_id, animation_name(track, sequence_id))
-                          for sequence_id, sequence in enumerate(bank["sequences"])
-                          if sequence["tracks"]]
+                for sequence_id, sequence in enumerate(bank["sequences"]):
+                    if sequence["tracks"]:
+                        if not clips:
+                            action = clip_action(track, sequence_id)
+                        clips.append((bank, sequence_id, animation_name(track, sequence_id)))
         else:
             bank_data = catalog.data(catalog.find(
                 "subfile.%d" % (args.character * 19 + args.bank)))
@@ -1053,14 +1184,22 @@ def main():
             if not 0 <= args.sequence < bank["num_sequences"]:
                 raise ValueError("sequence %d is outside bank" % args.sequence)
             clips.append((bank, args.sequence, animation_name(args.bank, args.sequence)))
+            action = clip_action(args.bank, args.sequence)
     layout = animations.parse_layout(body)
     scale_axes = scale_axis_bones(layout, [bank["sequences"][sequence_id]["tracks"]
                                            for bank, sequence_id, _ in clips])
     doc, buffer, layout, handles, poses = skeleton(body, args.character, scale_axes,
                                                    markers=args.no_mesh)
     if not args.no_mesh:
-        counts = add_geometry(doc, buffer, body, layout, handles, poses, args.textures)
-        print("Geometry: " + ", ".join("%d: %d vertices, %d triangles" % row
+        attached = []
+        if not args.no_attachments:
+            stats = catalog.data(catalog.find("stats.0"))
+            attached = attachments(
+                stats[args.character*0xA0:(args.character+1)*0xA0],
+                lambda slot: catalog.data(catalog.find("subitem.%d" % (args.character*6 + slot))),
+                action)
+        counts = add_geometry(doc, buffer, body, layout, handles, poses, args.textures, attached)
+        print("Geometry: " + ", ".join("%s: %d vertices, %d triangles" % row
                                        for row in counts))
     for bank, sequence_id, name in clips:
         add_animation(doc, buffer, bank, sequence_id, layout, handles, poses, name)

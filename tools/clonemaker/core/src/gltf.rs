@@ -8,6 +8,7 @@
 //! tracks 2..=18 of the same table. Textures reuse the Clone Maker decoder (`texture.rs`).
 use crate::api::png_bytes;
 use crate::binary::Dol;
+use crate::constants::ADDR_SUBITEM_FILES;
 use crate::custom_textures;
 use crate::disc::Disc;
 use crate::texture::{Gpc, decode_texture};
@@ -1513,19 +1514,24 @@ fn gx_triangles(op: u8, v: &[usize]) -> Result<Vec<[usize; 3]>> {
 /// Position, normal and TEX0 indices of each vertex in a display list.
 type Record = (usize, Option<usize>, Option<usize>);
 
-/// Byte widths of POS, NRM, CLR0, CLR1, TEX0 and TEX1 in a display list's vertices
-/// (`vertex_layout`). Display state 2 holds the list's vertex descriptor: 2-bit fields from bit
-/// 0, the first (matrix index) unused, then POS, NRM, CLR0, CLR1, TEX0, TEX1; 0 none, 2 index8,
-/// 3 index16. Every retail body (54 characters, 938 lists) uses only these.
-fn vertex_layout(vcd: u32) -> Result<[usize; 6]> {
+/// Byte widths of POS, NRM, CLR0, CLR1, TEX0 and TEX1 in a display list's vertices, then the
+/// summed width of TEX2..TEX7 (read past, unused) (`vertex_layout`). Display state 2 holds the
+/// list's vertex descriptor: 2-bit fields from bit 0, the first (matrix index) unused, then POS,
+/// NRM, CLR0, CLR1, TEX0..TEX7; 0 none, 2 index8, 3 index16. Every retail body (54 characters,
+/// 938 lists) stops at TEX1; Wario's and Waluigi's hands (sub-items) also carry TEX2/TEX3.
+fn vertex_layout(vcd: u32) -> Result<[usize; 7]> {
     let field = |k: u32| (vcd >> (2 * k)) & 3;
-    if field(0) != 0 || vcd >> 14 != 0 || (0..16).any(|k| field(k) == 1) || field(1) == 0 {
+    if field(0) != 0 || (0..16).any(|k| field(k) == 1) || field(1) == 0 {
         return Err(bad(format!("unsupported vertex descriptor 0x{vcd:X}")));
     }
-    Ok(std::array::from_fn(|i| match field(i as u32 + 1) {
+    let width = |k: u32| match field(k) {
         0 => 0,
         2 => 1,
         _ => 2,
+    };
+    Ok(std::array::from_fn(|i| match i {
+        6 => (7..16).map(width).sum(),
+        _ => width(i as u32 + 1),
     }))
 }
 
@@ -1534,7 +1540,7 @@ fn decode_display_list(
     data: &[u8],
     offset: usize,
     size: usize,
-    widths: &[usize; 6],
+    widths: &[usize; 7],
     position_count: usize,
 ) -> Result<(Vec<Record>, Vec<[usize; 3]>)> {
     let r = Reader(data);
@@ -1622,9 +1628,13 @@ fn attribute(
 }
 
 /// Read unrelocated .gpc geo palette offsets (palette and layout relative) (`geometry_descriptors`).
-fn geometry_descriptors(body: &[u8]) -> Result<Vec<Descriptor>> {
+/// `geo` is the palette's offset; a body names it in root word 8.
+fn geometry_descriptors(body: &[u8], geo: Option<usize>) -> Result<Vec<Descriptor>> {
     let r = Reader(body);
-    let geo = r.us(8)?;
+    let geo = match geo {
+        Some(geo) => geo,
+        None => r.us(8)?,
+    };
     let (version, count, descriptors) = (r.u32(geo)?, r.us(geo + 12)?, r.us(geo + 16)?);
     if version != GEO_VERSION || count > 1024 {
         return Err(bad("invalid geo palette"));
@@ -1848,10 +1858,189 @@ fn transform_normal(m: &Mat, n: &[f64; 3]) -> Result<[f64; 3]> {
     })
 }
 
-/// Add every display piece as a mesh on the one skin (`add_geometry`). The skin is in the
-/// game's bind space and is only turned upright. A rigid piece (geometry drawn by one bone) is
-/// placed at its bone's rest transform and weighted 1.0 to that bone, so it follows the bone
-/// exactly while Blender sees only ordinary skinned meshes.
+// ------------------------------------------------------------------ hands and gloves
+
+// Hands and gloves are separate per-character models, "sub-items" (mssb-dtk .agent docs:
+// character_modding_report.md §3). Disc file subitem.(c*6 + slot) (lbl_800F5D98) is one rigid
+// piece with root words {actor layout, geo palette, morph block, event script}, drawn with the
+// body's textures. The game copies the piece's display object onto body bone 19 (obj0) or 25
+// (obj1) (lbl_803CB7B4, attachSubItemBone / fn_80011CA8), so it draws in that bone's frame and the
+// sub-item's own bones are unused. Slots: 0/4 hand on 19, 1/5 hand on 25, 2 glove on 19, 3 glove
+// on 25 (Monty, the Magikoopas and Petey have hands there). They differ only in their scripts.
+// (copied from tools/datamap/export_gltf.py)
+
+/// The body bones the two attached sub-items draw with (`SUBITEM_BONES`).
+const SUBITEM_BONES: [u16; 2] = [19, 25];
+/// `stats.0` (54 × 0xA0 CharacterStats) in ZZZZ.dat.
+const STATS_OFFSET: u64 = 0x6CF_8800;
+
+/// The (category, index) fn_8001BE50 passes to the sub-item scripts for a clip (`clip_action`):
+/// category 0 batting, 1 running, 2 fielding, 3 pitching, 4 pitcher idle, 5 bank 15. A clip
+/// without a gameplay ID counts as the fielder standing still.
+fn clip_action(track: usize, sequence: usize) -> (usize, usize) {
+    let Some(base) = bank_gameplay_base(track) else {
+        return (2, 0);
+    };
+    let id = base as usize + sequence;
+    let (start, category) = [(105, 5), (75, 0), (63, 3), (61, 4), (45, 1), (0, 2)]
+        .into_iter()
+        .find(|&(start, _)| id >= start)
+        .unwrap_or((0, 2));
+    (category, id - start)
+}
+
+/// The sub-item slots fn_80011CA8 puts on bones 19 and 25 (`attachment_slots`): the glove on the
+/// non-throwing hand (stats byte 0x26) while fielding or pitching, else bare hands by batting
+/// stance (0x27).
+fn attachment_slots(stats: &[u8], category: usize) -> [usize; 2] {
+    if (2..=4).contains(&category) {
+        if stats[0x26] != 0 { [4, 3] } else { [2, 1] }
+    } else if stats[0x27] != 0 {
+        [0, 1]
+    } else {
+        [4, 5]
+    }
+}
+
+/// The hand shape a sub-item shows as an action starts (`morph_shape`): its event script (root
+/// word 12) picks entry rows[category][index] (fn_80025EEC), whose first key names a shape.
+/// Without a script or an entry the game's default keys show shape 0.
+fn morph_shape(item: &[u8], category: usize, index: usize) -> Result<usize> {
+    let r = Reader(item);
+    let script = r.us(12)?;
+    if script == 0 {
+        return Ok(0);
+    }
+    let (count, entries, rows, row_count) = (
+        r.us(script)?,
+        r.us(script + 4)?,
+        r.us(script + 8)?,
+        r.us(script + 12)?,
+    );
+    if category >= row_count || index >= r.us(script + 16 + 4 * category)? {
+        return Ok(0);
+    }
+    let row = r.us(script + rows + 4 * category)?;
+    let entry = r.u8(script + row + index)? as i8;
+    if entry < 0 || entry as usize >= count {
+        return Ok(0);
+    }
+    let offset = script + r.us(script + entries + 4 * entry as usize)?;
+    Ok(if r.u16(offset + 2)? != 0 {
+        r.u8(offset + 7)? as usize
+    } else {
+        0
+    })
+}
+
+/// The sub-item with morph `shape` copied over the positions it replaces, as fn_80024FA4 does at
+/// a key (`apply_morph`): each target's runs {u16 start, u16 count} take consecutive vertices
+/// from the shape's absolute s16 positions. Only position targets exist in retail.
+fn apply_morph(item: &[u8], shape: usize) -> Result<Vec<u8>> {
+    let r = Reader(item);
+    let (geo, morph) = (r.us(4)?, r.us(8)?);
+    let mut out = item.to_vec();
+    if morph == 0 {
+        return Ok(out);
+    }
+    let (groups, arrays) = (r.u16(morph + 2)? as usize, r.u16(morph + 4)? as usize);
+    let (group_table, array_table) = (r.us(morph + 8)?, r.us(morph + 12)?);
+    let descriptors = r.us(geo + 16)?;
+    for g in 0..groups {
+        let at = morph + group_table + 12 * g;
+        let (shapes, targets) = (r.u16(at)? as usize, r.u16(at + 2)? as usize);
+        let (stride, first) = (r.us(at + 4)?, r.us(at + 8)?);
+        if shape >= shapes {
+            return Err(bad(format!("morph shape {shape} >= {shapes}")));
+        }
+        for t in 0..targets {
+            let target = morph + first + t * stride;
+            let count = r.us(target)?;
+            let (descriptor, kind) = (r.u8(target + 4)?, r.u8(target + 5)?);
+            let step = r.u8(target + 6)? as usize * r.u8(target + 7)? as usize;
+            let mut runs = r.us(target + 8)?;
+            let mut bound = false;
+            for a in 0..arrays {
+                let at = morph + array_table + 16 * a;
+                bound |= r.u16(at)? == descriptor as u16 && r.u8(at + 2)? == kind;
+            }
+            if !bound {
+                continue; // no array is bound to this target
+            }
+            if kind != 1 {
+                return Err(bad(format!("unsupported morph array kind {kind}")));
+            }
+            let layout = geo + r.us(geo + descriptors + 8 * descriptor as usize)?;
+            let pos = layout + r.us(layout)?;
+            let array = layout + r.us(pos)?;
+            let (total, width) = (r.u16(pos + 4)? as usize, r.u8(pos + 7)? as usize);
+            if step != width * 2 {
+                return Err(bad("morph element size differs from its position array"));
+            }
+            let source = morph + r.us(target + 12 + 4 * shape)?;
+            let mut done = 0;
+            loop {
+                let (start, length) = (
+                    r.u16(morph + runs)? as usize,
+                    r.u16(morph + runs + 2)? as usize,
+                );
+                runs += 4;
+                if length == 0 {
+                    break;
+                }
+                if start + length > total || done + length > count {
+                    return Err(bad("morph run outside its arrays"));
+                }
+                r.check(source + done * step, length * step)?;
+                out[array + start * step..array + (start + length) * step]
+                    .copy_from_slice(&item[source + done * step..source + (done + length) * step]);
+                done += length;
+            }
+        }
+    }
+    Ok(out)
+}
+
+/// One attached sub-item: its wrist bone, disc slot, first morph shape and morphed file.
+struct Attachment {
+    bone_id: u16,
+    slot: usize,
+    shape: usize,
+    data: Vec<u8>,
+}
+
+/// The two sub-items the game attaches to charID `c` for `action` ((category, index),
+/// `clip_action`), with their first morph shape applied (`attachments`).
+fn attachments(
+    disc: &Disc,
+    dol: &Dol,
+    c: usize,
+    action: (usize, usize),
+) -> Result<Vec<Attachment>> {
+    let stats = disc.read("ZZZZ.dat", STATS_OFFSET + c as u64 * 0xA0, 0xA0)?;
+    let (category, index) = action;
+    let mut result = Vec::new();
+    for (bone_id, slot) in SUBITEM_BONES
+        .into_iter()
+        .zip(attachment_slots(&stats, category))
+    {
+        let item = disc.load("ZZZZ.dat", dol.desc(ADDR_SUBITEM_FILES, c * 6 + slot)?, 0)?;
+        let shape = morph_shape(&item, category, index)?;
+        result.push(Attachment {
+            bone_id,
+            slot,
+            shape,
+            data: apply_morph(&item, shape)?,
+        });
+    }
+    Ok(result)
+}
+
+/// Add every display piece as a mesh on the one skin, then the `attached` sub-items
+/// (`add_geometry`). The skin is in the game's bind space and is only turned upright. A rigid
+/// piece (geometry drawn by one bone) is placed at its bone's rest transform and weighted 1.0 to
+/// that bone, so it follows the bone exactly while Blender sees only ordinary skinned meshes. A
+/// sub-item is a rigid piece of its wrist bone.
 fn add_geometry(
     doc: &mut Doc,
     body: &[u8],
@@ -1859,6 +2048,7 @@ fn add_geometry(
     handles: &[Handles],
     poses: &[Pose],
     painted: Option<&Path>,
+    attached: &[Attachment],
 ) -> Result<()> {
     let skin_id = layout.skin_file_id as usize;
     let plain = add_textures(doc, body, painted)?;
@@ -1870,15 +2060,34 @@ fn add_geometry(
     }
     let order = runtime_bone_order(layout)?;
     let worlds = rest_worlds(layout, poses)?;
-    for (descriptor, groups, strides, total) in geometry_descriptors(body)? {
+    // (attached sub-item and its bone index, or None for the body's own pieces)
+    let mut pieces: Vec<(Option<(&Attachment, usize)>, Descriptor)> =
+        geometry_descriptors(body, None)?
+            .into_iter()
+            .map(|piece| (None, piece))
+            .collect();
+    for item in attached {
+        // the game skips a missing bone
+        if let Some(bone) = layout.bones.iter().position(|b| b.bone_id == item.bone_id) {
+            let geo = Reader(&item.data).us(4)?;
+            for piece in geometry_descriptors(&item.data, Some(geo))? {
+                pieces.push((Some((item, bone)), piece));
+            }
+        }
+    }
+    for (item, (descriptor, groups, strides, total)) in pieces {
         let mesh = doc.meshes.len();
-        let skinned = descriptor == skin_id;
+        let skinned = item.is_none() && descriptor == skin_id;
         let mut influences = HashMap::new();
         // Rigid pieces: (bone, placement, joint, mirrored)
         let mut piece = None;
+        let owner = match item {
+            Some((_, bone)) => Some(bone),
+            None => rigid.get(&descriptor).copied(),
+        };
         if skinned {
             influences = skin_weights(body, layout, total)?;
-        } else if let Some(&bone) = rigid.get(&descriptor) {
+        } else if let Some(bone) = owner {
             let fold = poses[bone].fold.clone().unwrap_or_else(|| vec![1.0; 3]);
             let place = matmul(&worlds[&bone], &scale_matrix(&fold));
             let joint = order
@@ -2011,9 +2220,15 @@ fn add_geometry(
             primitives.push(json!({"attributes": attributes, "indices": indices,
                 "mode": 4, "material": material}));
         }
-        doc.meshes
-            .push(json!({"name": format!("geo_{descriptor}"), "primitives": primitives}));
+        let mut name = format!("geo_{descriptor}");
         let mut extras = json!({"descriptor": descriptor, "vertex_strides": strides});
+        if let Some((item, _)) = item {
+            name = format!("subitem_{}", item.slot);
+            extras["subitem_slot"] = json!(item.slot);
+            extras["morph_shape"] = json!(item.shape);
+        }
+        doc.meshes
+            .push(json!({"name": name, "primitives": primitives}));
         if let Some((bone, ..)) = piece {
             extras["rigid_bone_id"] = json!(layout.bones[bone].bone_id);
         }
@@ -2032,8 +2247,7 @@ fn add_geometry(
         }
         doc.scene.push(doc.nodes.len());
         doc.nodes
-            .push(json!({"name": format!("geo_{descriptor}"), "mesh": mesh,
-            "skin": 0, "extras": extras}));
+            .push(json!({"name": name, "mesh": mesh, "skin": 0, "extras": extras}));
     }
     Ok(())
 }
@@ -2053,11 +2267,13 @@ pub struct Export {
 /// Export charID `c` from a clean game: textured body, skeleton and either the normal swing or
 /// every non-empty sequence of `DEFAULT_ANIMATION_BANKS`. `painted` is a folder of
 /// `tNN_WxH.png` pictures (Clone Maker's "Export Textures") used instead of those textures.
+/// `attachments` adds the hands or glove the game attaches for the first clip.
 pub fn export(
     disc: &Disc,
     dol: &Dol,
     c: usize,
     all_animations: bool,
+    attachments: bool,
     painted: Option<&Path>,
 ) -> Result<Export> {
     if c >= 54 {
@@ -2069,7 +2285,8 @@ pub fn export(
     } else {
         vec![(DEFAULT_CLIP.0, Some(DEFAULT_CLIP.1))]
     };
-    let (mut out, buffer, bones, animations) = document(disc, dol, c, &body, &clips, painted)?;
+    let (mut out, buffer, bones, animations) =
+        document(disc, dol, c, &body, &clips, attachments, painted)?;
     out["buffers"] = json!([{"byteLength": buffer.len(),
         "uri": format!("data:application/octet-stream;base64,{}",
             base64::engine::general_purpose::STANDARD.encode(&buffer))}]);
@@ -2081,11 +2298,11 @@ pub fn export(
 }
 
 /// The window's 3D stage: charID `c` built from `body` (its in-match body, which may differ from
-/// the export's, see `Disc::effective_body`) playing the fielder's stand-still loop, as a binary glTF
-/// (.glb) without pictures. Each textured material keeps its picture's archive index and
+/// the export's, see `Disc::effective_body`) with its glove and bare hand, playing the fielder's
+/// stand-still loop, as a binary glTF (.glb) without pictures. Each textured material keeps its picture's archive index and
 /// sampler in `extras` instead, and the window fills in the (recoloured) pictures itself.
 pub fn stage_model(disc: &Disc, dol: &Dol, c: usize, body: &[u8]) -> Result<Vec<u8>> {
-    let (mut out, mut buffer, ..) = document(disc, dol, c, body, &[STAGE_CLIP], None)?;
+    let (mut out, mut buffer, ..) = document(disc, dol, c, body, &[STAGE_CLIP], true, None)?;
     let samplers = out["samplers"].take();
     for m in out["materials"].as_array_mut().into_iter().flatten() {
         let pbr = &mut m["pbrMetallicRoughness"];
@@ -2123,14 +2340,16 @@ pub fn stage_model(disc: &Disc, dol: &Dol, c: usize, body: &[u8]) -> Result<Vec<
 /// The stage's clip: the fielder standing still, `t4_s00_id0_FielderStandStill`.
 const STAGE_CLIP: (usize, Option<usize>) = (4, Some(0));
 
-/// The glTF of charID `c`'s `body` with `clips` ((track, one sequence or every non-empty one)):
-/// its JSON without `buffers`, the buffer's bytes, the bone count and the animation count.
+/// The glTF of charID `c`'s `body` with `clips` ((track, one sequence or every non-empty one))
+/// and, with `attachments`, the sub-items the game attaches for the first clip: its JSON without
+/// `buffers`, the buffer's bytes, the bone count and the animation count.
 fn document(
     disc: &Disc,
     dol: &Dol,
     c: usize,
     body: &[u8],
     clips: &[(usize, Option<usize>)],
+    attachments: bool,
     painted: Option<&Path>,
 ) -> Result<(Value, Vec<u8>, usize, usize)> {
     let mut banks = Vec::new();
@@ -2161,7 +2380,17 @@ fn document(
     let layout = parse_layout(body)?;
     let tracks: Vec<&[Track]> = sequences.iter().map(|&(_, _, t)| t).collect();
     let (mut doc, handles, poses) = skeleton(body, &layout, &scale_axis_bones(&layout, &tracks))?;
-    add_geometry(&mut doc, body, &layout, &handles, &poses, painted)?;
+    let attached = if attachments {
+        let action = sequences
+            .first()
+            .map_or((2, 0), |&(track, s, _)| clip_action(track, s));
+        self::attachments(disc, dol, c, action)?
+    } else {
+        Vec::new()
+    };
+    add_geometry(
+        &mut doc, body, &layout, &handles, &poses, painted, &attached,
+    )?;
     for (track, s, sequence) in sequences {
         add_animation(
             &mut doc,
@@ -2323,6 +2552,57 @@ mod tests {
     }
 
     #[test]
+    fn subitem_choice_script_and_morph() {
+        // the gameplay ID of a clip picks the script row (fn_8001BE50)
+        assert_eq!(clip_action(2, 2), (0, 2));
+        assert_eq!(clip_action(3, 0), (1, 0));
+        assert_eq!(clip_action(4, 44), (2, 44));
+        assert_eq!(clip_action(6, 1), (4, 1));
+        assert_eq!(clip_action(5, 0), (3, 0));
+        assert_eq!(clip_action(15, 2), (5, 2));
+        assert_eq!(clip_action(7, 1), (2, 0));
+        // glove on the non-throwing hand while fielding, bare hands by stance otherwise
+        let mut stats = [0u8; 0xA0];
+        assert_eq!(attachment_slots(&stats, 2), [2, 1]);
+        assert_eq!(attachment_slots(&stats, 0), [4, 5]);
+        (stats[0x26], stats[0x27]) = (1, 1);
+        assert_eq!(attachment_slots(&stats, 3), [4, 3]);
+        assert_eq!(attachment_slots(&stats, 1), [0, 1]);
+        let mut item = vec![0u8; 0x110];
+        let mut put = |at: usize, bytes: &[u8]| item[at..at + bytes.len()].copy_from_slice(bytes);
+        let words = |w: &[u32]| w.iter().flat_map(|x| x.to_be_bytes()).collect::<Vec<_>>();
+        let halves = |h: &[i16]| h.iter().flat_map(|x| x.to_be_bytes()).collect::<Vec<_>>();
+        put(0, &words(&[0, 0x20, 0x80, 0xE0]));
+        // geo palette: one descriptor whose positions are two s16 vertices (shift 10)
+        put(0x20, &words(&[0x005B_BC61, 0, 0, 1, 0x14]));
+        put(0x34, &words(&[0x20, 0]));
+        put(0x40, &words(&[0x10]));
+        put(0x50, &words(&[0x20, 0x0002_3A03]));
+        put(0x60, &halves(&[1, 2, 3, 4, 5, 6]));
+        // morph block: one group of two shapes, one position target (vertex 1)
+        put(0x80, &halves(&[4, 1, 1, 0]));
+        put(0x88, &words(&[0x14, 0x20]));
+        put(0x94, &halves(&[2, 1]));
+        put(0x98, &words(&[0x18, 0x30]));
+        put(0xA0, &[0, 0, 1, 0x32]);
+        put(0xB0, &words(&[1, 0x0001_0302, 0x48, 0x50, 0x56]));
+        put(0xC8, &halves(&[1, 1, 0, 0]));
+        put(0xD0, &halves(&[7, 8, 9, 10, 11, 12]));
+        // event script: one row of two actions, -1 (none) then entry 0 showing shape 1
+        put(0xE0, &words(&[1, 0x14, 0x18, 1, 2, 0x1C, 0x24]));
+        put(0xFC, &[0, 10, 0, 1, 0, 0, 100, 1]);
+        put(0x104, &[0xFF, 0]);
+        let shapes: Vec<_> = (0..3).map(|i| morph_shape(&item, 0, i).unwrap()).collect();
+        assert_eq!(shapes, [0, 1, 0]);
+        assert_eq!(morph_shape(&item, 1, 0).unwrap(), 0);
+        let morphed = apply_morph(&item, 1).unwrap();
+        assert_eq!(morphed[0x60..0x6C], halves(&[1, 2, 3, 10, 11, 12]));
+        assert_eq!(morphed[..0x60], item[..0x60]);
+        assert_eq!(morphed[0x6C..], item[0x6C..]);
+        assert!(apply_morph(&item, 2).is_err());
+    }
+
+    #[test]
     fn gx_primitives_and_names() {
         // GX winds front faces clockwise; glTF triangles are counter-clockwise.
         assert_eq!(
@@ -2339,8 +2619,9 @@ mod tests {
         );
         let compact = [0xA0, 0, 3, 0, 0, 1, 0, 2, 0, 0, 0, 0, 0, 0, 0, 0];
         let layout = vertex_layout(0x28).unwrap();
-        assert_eq!(layout, [1, 1, 0, 0, 0, 0]);
-        assert_eq!(vertex_layout(0x2CBC).unwrap(), [2, 2, 1, 0, 2, 1]);
+        assert_eq!(layout, [1, 1, 0, 0, 0, 0, 0]);
+        assert_eq!(vertex_layout(0x2CBC).unwrap(), [2, 2, 1, 0, 2, 1, 0]);
+        assert_eq!(vertex_layout(0x2AC3C).unwrap(), [2, 2, 0, 0, 2, 1, 2]);
         assert!(vertex_layout(0x2D).is_err());
         assert_eq!(
             decode_display_list(&compact, 0, compact.len(), &layout, 3).unwrap(),

@@ -122,7 +122,13 @@ of the 54 characters exports),
 its embedded body textures as PNGs, skin weights from its SK1, SK2 and accumulator lists,
 inverse bind matrices from the full rest transforms, and every rigid display piece (a head,
 a hat, a crown) as its own mesh on the same skin, placed at its bone's rest transform and
-weighted 1.0 to that bone. Each draw group uses its primary texture. By default it has
+weighted 1.0 to that bone. The hands and glove are separate models in the game (sub-items,
+`subitem.N`); the export attaches the two the game attaches for the first clip, as rigid pieces
+`subitem_<slot>` of the wrist bones 19 and 25 with the body's textures: for a fielding or
+pitching clip the glove on the non-throwing hand and a bare throwing hand, otherwise both bare
+hands by batting stance, each in the hand shape (morph) of the clip's first frame. With
+`--all-animations` that is the batting pair. `--no-attachments` leaves them out.
+Each draw group uses its primary texture. By default it has
 one animation sampled every raw ANIM frame at 30 fps. `--all-animations` adds every nonempty
 sequence from normal-match tracks 2 (batting), 3 (running), 4 (fielding), 5 (pitching) and
 15 (extra); use `--banks` to choose other disc tracks. The Actions share the same skeleton

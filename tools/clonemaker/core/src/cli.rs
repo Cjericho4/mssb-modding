@@ -65,6 +65,8 @@ pub enum Command {
         character: String,
         /// Every animation of the normal-match banks instead of the swing only.
         all_animations: bool,
+        /// Leave out the hands and glove the game attaches to the wrists.
+        no_attachments: bool,
         /// Folder of painted `tNN_WxH.png` textures.
         textures: Option<PathBuf>,
         /// The .gltf file to write.
@@ -74,7 +76,7 @@ pub enum Command {
 /// Usage of the `export-gltf` command.
 pub const GLTF_USAGE: &str =
     "usage: mssb-clone export-gltf --game GAME --character NAME [--all-animations]
-                              [--textures FOLDER] --out FILE.gltf
+                              [--no-attachments] [--textures FOLDER] --out FILE.gltf
 
 Export a character's textured body, skeleton and animations to a .gltf file that
 Blender opens (File > Import > glTF 2.0).
@@ -83,6 +85,8 @@ Blender opens (File > Import > glTF 2.0).
   --character NAME    name or id, e.g. mario, dk, babymario, kingboo, 0
   --all-animations    every batting, running, fielding, pitching and extra
                       animation (default: only the normal swing)
+  --no-attachments    leave out the hands and glove the game attaches to the
+                      wrists (by default: those of the first animation)
   --textures FOLDER   use your painted tNN_WxH.png pictures from Export Textures
   --out FILE.gltf     the file to write
 ";
@@ -91,7 +95,7 @@ const GLTF_PREFIX: &str = "export-gltf: ";
 fn parse_gltf(argv: &[String]) -> Result<Command> {
     let usage = |m: String| Error::new(format!("{GLTF_PREFIX}{m}"));
     let (mut disc, mut character, mut textures, mut out) = (None, None, None, None);
-    let mut all_animations = false;
+    let (mut all_animations, mut no_attachments) = (false, false);
     let mut i = 0;
     while i < argv.len() {
         let (key, explicit) = argv[i]
@@ -100,6 +104,7 @@ fn parse_gltf(argv: &[String]) -> Result<Command> {
         match key {
             "-h" | "--help" => return Ok(Command::GltfHelp),
             "--all-animations" => all_animations = true,
+            "--no-attachments" => no_attachments = true,
             "--game" | "--disc" | "--character" | "--textures" | "--out" => {
                 let value = match explicit {
                     Some(v) => v,
@@ -146,6 +151,7 @@ fn parse_gltf(argv: &[String]) -> Result<Command> {
         disc: disc.unwrap(),
         character: character.unwrap(),
         all_animations,
+        no_attachments,
         textures,
         out: out.unwrap(),
     })
@@ -415,6 +421,7 @@ pub fn execute(command: Command, log: &mut dyn FnMut(&str)) -> Result<()> {
             disc,
             character,
             all_animations,
+            no_attachments,
             textures,
             out,
         } => {
@@ -429,7 +436,14 @@ pub fn execute(command: Command, log: &mut dyn FnMut(&str)) -> Result<()> {
             }
             let disc = read_only_disc(&disc)?;
             let dol = Dol::new(disc.system("main.dol")?)?;
-            let e = crate::gltf::export(&disc, &dol, c, all_animations, textures.as_deref())?;
+            let e = crate::gltf::export(
+                &disc,
+                &dol,
+                c,
+                all_animations,
+                !no_attachments,
+                textures.as_deref(),
+            )?;
             std::fs::write(&out, &e.json).map_err(|err| Error::from(err).at_path(&out))?;
             log(&format!(
                 "exported {}: {} bones, {} animation{} -> {}",
@@ -538,6 +552,7 @@ mod tests {
             disc,
             character,
             all_animations,
+            no_attachments,
             textures,
             out,
         } = parse(&argv(
@@ -548,11 +563,19 @@ mod tests {
             panic!()
         };
         assert_eq!(
-            (disc, character.as_str(), all_animations, textures, out),
+            (
+                disc,
+                character.as_str(),
+                all_animations,
+                no_attachments,
+                textures,
+                out
+            ),
             (
                 PathBuf::from("g.iso"),
                 "dk",
                 true,
+                false,
                 None,
                 PathBuf::from("dk.gltf")
             )

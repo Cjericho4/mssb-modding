@@ -1309,7 +1309,14 @@ impl Core {
             let game = lock.as_ref().ok_or_else(|| ApiError {
                 error: "Choose a game first.".into(),
             })?;
-            crate::gltf::export(&game.disc, &game.dol, source, all_animations, textures)?
+            crate::gltf::export(
+                &game.disc,
+                &game.dol,
+                source,
+                all_animations,
+                true,
+                textures,
+            )?
         };
         std::fs::write(path, &export.json).map_err(|e| Error::from(e).at_path(path))?;
         Ok(ExportedGltf {
@@ -1319,8 +1326,9 @@ impl Core {
             animations: export.animations,
         })
     }
-    /// The 3D stage's model of `source` (`gltf::stage_model`): its in-match body playing the
-    /// fielder's stand-still loop, as .glb bytes without pictures (they come with each `preview`).
+    /// The 3D stage's model of `source` (`gltf::stage_model`): its in-match body, glove and hand
+    /// playing the fielder's stand-still loop, as .glb bytes without pictures (they come with each
+    /// `preview`).
     pub fn stage_model(&self, source: usize) -> std::result::Result<Vec<u8>, ApiError> {
         check_id(source)?;
         let mut lock = self.game.lock().unwrap();

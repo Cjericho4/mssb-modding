@@ -289,7 +289,7 @@ export async function run(options, app) {
     } catch (e) {
       parsed = String(e);
     }
-    check(parsed.startsWith("39 nodes, 115 animations, 9 images, "), "the .gltf file parses: " + parsed);
+    check(parsed.startsWith("41 nodes, 115 animations, 9 images, "), "the .gltf file parses (body, skeleton, two hands): " + parsed);
 
     // clones of a second character: its own block with its own character, colours and first clone
     const before = rows().map((r) => r.querySelector("select").value).join();
@@ -369,7 +369,8 @@ export async function run(options, app) {
     const ms = [];
     await waitFor(() => box.dataset.stage === "ready", "Mario on the stage");
     for (const [id, name] of [[2, "Donkey Kong"], [4, "Peach"], [37, "King Boo"], [33, "Blue Magikoopa"], [7, "Baby Mario"],
-      [38, "Petey"], [9, "Bowser"], [22, "Red Pianta"], [27, "Hammer Bro"], [0, "Mario"]]) {
+      [38, "Petey"], [9, "Bowser"], [22, "Red Pianta"], [27, "Hammer Bro"], [6, "Yoshi"], [13, "Red Toad"],
+      [11, "Waluigi"], [0, "Mario"]]) {
       const t0 = performance.now();
       choose($("source"), id);
       await waitFor(() => caption().includes("of " + name), name + "'s preview");
