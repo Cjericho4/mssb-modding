@@ -10,7 +10,7 @@ const painted = () => new Promise((r) => requestAnimationFrame(() => setTimeout(
 
 const WIDGETS = ["pill", "btn-iso", "btn-dir", "game-path", "status", "source", "regions-box", "rows", "btn-add",
   "btn-export", "btn-blender", "blender", "blender-source", "blender-all", "blender-go", "blender-cancel", "btn-adv", "adv", "chk-ui", "chk-colour", "chk-stats", "keeplum", "chk-keep", "out-path", "btn-out", "btn-go",
-  "run-box", "progress-bar", "btn-cancel", "preview-chip", "preview-caption", "img-before", "img-after", "log"];
+  "roster", "clone-name", "btn-log", "log-drawer", "btn-enlarge", "preview-modal", "preview-close", "run-box", "progress-bar", "btn-cancel", "preview-chip", "preview-caption", "img-before", "img-after", "log"];
 
 export async function run(options, app) {
   const lines = [];
@@ -36,31 +36,7 @@ export async function run(options, app) {
     const failed = await invoke("selftest_mark", { name });
     if (failed) say(`no screenshot ${name}: ${failed}`);
   };
-  // Design proposals (v0.4.0, until one is picked): these screenshots are also taken in every
-  // theme and layout variant below, as <name>__<variant>.png. Each variant is undone afterwards.
-  const html = document.documentElement;
-  const advMove = () => $("card-save").querySelector(".body > .line").before($("btn-adv").parentElement, $("adv"));
-  const advBack = () => $("btn-group").after($("btn-adv").parentElement, $("adv"));
-  const VARIANTS = [
-    ["themeB", () => (html.dataset.theme = "b"), () => delete html.dataset.theme],
-    ["themeC", () => (html.dataset.theme = "c"), () => delete html.dataset.theme],
-    ["savebar", () => (html.dataset.layout = "savebar"), () => delete html.dataset.layout],
-    ["compact", () => (html.dataset.layout = "compact"), () => delete html.dataset.layout],
-    ["rows2", () => (html.dataset.layout = "rows2"), () => delete html.dataset.layout],
-    ["advsave", () => { html.dataset.layout = "advsave"; advMove(); }, () => { delete html.dataset.layout; advBack(); }],
-  ];
-  const VARIANT_SHOTS = new Set(["empty", "idle", "slots_narrow", "advanced", "many_rows", "blender", "two_characters",
-    "dialog_confirm", "dialog_narrow"]);
-  const shot = async (name) => {
-    await mark(name);
-    if (!VARIANT_SHOTS.has(name)) return;
-    for (const [variant, apply, undo] of VARIANTS) {
-      apply();
-      await mark(`${name}__${variant}`);
-      undo();
-    }
-    await painted();
-  };
+  const shot = mark;
   const sep = options.dir.includes("\\") ? "\\" : "/";
   const inDir = (name) => options.dir + sep + name;
   const rows = () => [...document.querySelectorAll("#rows .clone-row")];
@@ -72,7 +48,9 @@ export async function run(options, app) {
   const dialogButton = (text) => [...document.querySelectorAll("#dialog-buttons button")].find((b) => b.textContent === text);
   const dialogOpen = (text) => !$("dialog").hidden && $("dialog-text").textContent.includes(text);
   const logHas = (text) => $("log").textContent.includes(text);
-  const stacked = () => $("card-preview").getBoundingClientRect().top >= $("card-save").getBoundingClientRect().bottom;
+  const fits = () => document.documentElement.scrollWidth <= innerWidth;
+  const chips = () => document.querySelector(".rail").getBoundingClientRect().bottom
+    <= document.querySelector(".stage").getBoundingClientRect().top;
 
   try {
     check(WIDGETS.every((id) => $(id)), "every widget is on the page: missing " + WIDGETS.filter((id) => !$(id)).join(", "));
@@ -85,12 +63,12 @@ export async function run(options, app) {
     check($("btn-go").disabled && $("source").disabled && $("btn-export").disabled && $("btn-blender").disabled && !$("btn-iso").disabled, "inputs wait for a game");
     await shot("empty");
 
-    // narrow window: the preview goes under the form; wide again: two columns
-    await resizeTo(1000, 700);
-    check(stacked(), "narrow window stacks the preview under the form");
+    // The roster becomes chips above the stage at the minimum supported width.
+    await resizeTo(640, 560);
+    check(chips() && fits(), "640 px window uses chips without horizontal overflow");
+    await resizeTo(900, 700);
+    check(fits(), "900 px window has no horizontal overflow");
     await resizeTo(1320, 780);
-    if (innerWidth >= 1200) check(!stacked(), "wide window shows the preview beside the form");
-    else say(`screen too small for the two-column check (window ${innerWidth} px wide)`);
 
     // a game that can't be used
     await app.startLoad(inDir("game.rvz"));
@@ -108,7 +86,7 @@ export async function run(options, app) {
 
     // a 1366 x 768 screen at 125 %
     await resizeTo(1093, 614);
-    check(stacked(), "1093 px wide is stacked");
+    check(fits(), "1093 px wide has no horizontal overflow");
     await shot("small_top");
 
     // resizing: time from each new size to the next painted frame
@@ -143,8 +121,29 @@ export async function run(options, app) {
     check($("out-path").value.endsWith(" - Clones.iso"), "default output: " + $("out-path").value);
     await waitFor(() => !$("img-after").hidden && caption().startsWith("All 9 textures of Mario"), "the first preview");
     check(document.querySelectorAll("#regions-box input").length === 2, "Mario's two colour regions");
+    // The roster, stage and single visible editor follow keyboard selection together.
+    const entries = () => [...document.querySelectorAll("#roster .entry")];
+    check(entries().length === 4 && entries().filter((e) => e.tabIndex === 0).length === 1,
+      "the roster has one tab stop for clone selection");
+    entries()[0].focus();
+    entries()[0].dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowDown", bubbles: true }));
+    check(entries()[1].getAttribute("aria-pressed") === "true" && document.activeElement === entries()[1]
+      && !rows()[1].hidden && rows()[0].hidden && $("clone-name").textContent === rows()[1].querySelector("select").selectedOptions[0].textContent.replace(/^[★×] /, ""),
+      "Down selects the next clone, its stage and its editor");
+    entries()[1].dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowUp", bubbles: true }));
+    check(!rows()[0].hidden && rows()[1].hidden, "Up selects the previous clone");
+    $("btn-enlarge").click();
+    check(!$("preview-modal").hidden && document.activeElement === $("preview-close") && document.querySelector("main").inert,
+      "Enlarge opens a focused modal with an inert background");
+    $("preview-close").click();
+    check($("preview-modal").hidden && !document.querySelector("main").inert, "Close restores the studio");
+    $("btn-log").click();
+    check(!$("log-drawer").hidden && $("btn-log").ariaExpanded === "true", "Log opens its drawer");
+    $("btn-log").click();
+    await waitFor(() => caption().startsWith("All 9 textures of Mario"), "the selected preview again");
     await shot("idle");
     await resizeTo(640, 560);
+    app.state.groups[0].rows[0].entry.click();
     const slotFont = getComputedStyle(firstSlot);
     const measure = document.createElement("canvas").getContext("2d");
     measure.font = slotFont.font;
@@ -205,7 +204,8 @@ export async function run(options, app) {
     choose(animSelect(), 1);
 
     // colours and preview pick
-    choose(rows()[1].querySelectorAll("select")[1], "pink");
+    app.state.groups[0].rows[1].entry.click();
+    rows()[1].querySelector('.sw[data-colour="pink"]').click();
     await waitFor(() => caption().includes("in Pink"), "the preview follows the recoloured row");
     check(rows()[1].querySelector("input").checked, "recolouring a row previews it");
     check(rows()[1].querySelector(".swatch").style.background !== "", "the swatch shows the colour");

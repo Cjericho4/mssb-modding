@@ -8,43 +8,41 @@
 </head>
 <body>
 <header class="top">
-  <svg class="mark" viewBox="0 0 32 32" aria-hidden="true">
-    <defs><clipPath id="ball"><circle cx="16" cy="16" r="11"/></clipPath></defs>
-    <rect class="bg" width="32" height="32" rx="7"/>
-    <circle class="ball" cx="16" cy="16" r="11"/>
-    <g class="seams" clip-path="url(#ball)" fill="none" stroke-width="2.2">
-      <circle cx="1.5" cy="16" r="10.5"/><circle cx="30.5" cy="16" r="10.5"/>
-    </g>
-  </svg>
-  <div class="brand">
-    <h1>MSSB Clone Maker</h1>
-    <p>Mario Superstar Baseball · USA</p>
-  </div>
-  <p class="blurb">Make recoloured copies of a character.</p>
-  <button id="feedback" class="headbtn quiet boxed" title="Report a bug or suggest an idea on GitHub">Feedback</button>
-  <button id="update" class="headbtn update" hidden></button>
-  <div class="pill" id="pill"><i></i><span>No game yet</span></div>
+  <span class="app">MSSB Clone Maker</span>
+  <div class="game"><div class="pill" id="pill" role="status"><i></i><span>No game yet</span></div><input id="game-path" readonly tabindex="-1" aria-label="Game path"></div>
+  <button id="btn-iso" class="tbtn">Choose your game (.iso)…</button>
+  <button id="btn-dir" class="tbtn">or a folder…</button>
+  <button id="feedback" class="tbtn" title="Report a bug or suggest an idea on GitHub">Feedback</button>
+  <button id="update" class="tbtn" hidden></button>
 </header>
-
-<main class="page">
-  <section class="card" id="card-game">
-    <header><span class="chip red step">01</span><h2>Your game</h2></header>
-    <div class="body">
-      <div class="line">
-        <button id="btn-iso">Choose your game (.iso)…</button>
-        <button id="btn-dir" class="quiet">or a folder…</button>
-        <input id="game-path" class="path grow" readonly tabindex="-1" placeholder=" ">
-      </div>
-      <p id="status" class="status">No game chosen yet.</p>
+<nav class="rail" aria-label="Clones">
+  <div id="roster"></div>
+  <button id="btn-group" class="another">+ Clone another character</button>
+</nav>
+<main class="main">
+  <p id="status" class="status" role="status">No game chosen yet.</p>
+  <section class="stage" aria-label="Selected clone">
+    <div id="ghost-name" class="ghostname" aria-hidden="true">Your studio</div>
+    <svg class="fig" viewBox="0 0 100 100" aria-hidden="true">
+      <path d="M10 100c2-26 18-40 40-40s38 14 40 40z" fill="var(--clone)"/>
+      <path d="M10 100c2-26 18-40 40-40s38 14 40 40z" fill="#000" opacity=".12"/>
+      <path d="M36 100l4-38h20l4 38z" fill="#fff" opacity=".18"/>
+      <circle cx="50" cy="42" r="20" fill="#ecc69d"/>
+      <path d="M29 39c0-15 10-24 21-24s21 9 21 24z" fill="var(--clone)"/>
+      <path d="M48 35h34c2 0 2 4 0 4H48z" fill="var(--clone)"/>
+      <path d="M48 35h34c2 0 2 4 0 4H48z" fill="#000" opacity=".2"/>
+      <circle cx="50" cy="27" r="6.5" fill="#fff"/>
+    </svg>
+    <div class="label"><h1 id="clone-name">Make it your own</h1><p id="clone-subtitle">Choose your game to start creating clones.</p></div>
+    <div id="card-preview" class="tex">
+      <span id="preview-chip" class="offscreen">Mario</span>
+      <figure><figcaption>Before</figcaption><div class="pic"><img id="img-before" alt="Original character textures" hidden><span>No preview yet</span></div></figure>
+      <figure><figcaption>After</figcaption><div class="pic"><img id="img-after" alt="Selected clone textures" hidden></div></figure>
+      <button id="btn-enlarge">Enlarge</button>
     </div>
   </section>
-
-  <section class="card" id="card-clones">
-    <header><span class="chip red step">02</span><h2>Clones</h2></header>
-    <div class="body">
-      <div id="groups"></div>
-      <button id="btn-group" class="add-group" title="Add clones of a different character to the same game">+ Clone another character</button>
-      <div class="line end"><button id="btn-adv" class="quiet" aria-controls="adv" aria-expanded="false">Advanced options  ▸</button></div>
+  <p id="preview-caption" class="offscreen" role="status">All of the character's textures, before and after.</p>
+  <div id="groups" class="inspector"></div>
       <div id="adv" hidden>
         <hr>
         <label class="check"><input type="checkbox" id="chk-ui" checked><span id="chk-ui-text"></span></label>
@@ -58,49 +56,15 @@
         <p class="muted">Higher keeps the light and dark areas of the original; lower is brighter and flatter.</p>
         <label class="check spaced"><input type="checkbox" id="chk-keep"><span>Keep the working folder (for troubleshooting)</span></label>
       </div>
-    </div>
-  </section>
-
-  <section class="card" id="card-save">
-    <header><span class="chip red step">03</span><h2>Save the new game as</h2></header>
-    <div class="body">
-      <div class="line">
-        <input id="out-path" class="path grow" spellcheck="false">
-        <button id="btn-out">Save as…</button>
-        <button id="btn-go" class="primary">Create patched game</button>
-      </div>
-      <div id="run-box" hidden>
-        <p id="progress-label" class="muted"></p>
-        <div class="line">
-          <div class="progress grow"><div id="progress-bar"></div></div>
-          <button id="btn-cancel">Cancel</button>
-        </div>
-      </div>
-    </div>
-  </section>
-
-  <section class="card" id="card-preview">
-    <header><h2>Preview</h2><span id="preview-chip" class="chip neutral right">Mario</span></header>
-    <div class="body">
-      <p id="preview-caption" class="muted caption">All of the character's textures, before and after.</p>
-      <div class="pics">
-        <figure>
-          <h3 class="label">Before</h3>
-          <div class="pic"><img id="img-before" alt="" hidden><span>No preview yet</span></div>
-        </figure>
-        <figure>
-          <h3 class="label">After</h3>
-          <div class="pic"><img id="img-after" alt="" hidden></div>
-        </figure>
-        <div class="log-box">
-          <h3 class="kicker">Log</h3>
-          <div id="log" class="mono"></div>
-        </div>
-      </div>
-    </div>
-  </section>
+  <section id="log-drawer" class="drawer" hidden aria-label="Log"><h2>Log</h2><div id="log" tabindex="0"></div></section>
 </main>
-
+<footer class="bar" id="card-save">
+  <button id="btn-adv" aria-controls="adv" aria-expanded="false">Advanced options  ▸</button>
+  <button id="btn-log" aria-controls="log-drawer" aria-expanded="false">Log</button>
+  <div class="out"><input id="out-path" spellcheck="false" aria-label="Save the new game as"><button id="btn-out">Save as…</button></div>
+  <button id="btn-go" class="go primary">Create Patched Game</button>
+  <div id="run-box" hidden><div class="grow"><p id="progress-label" role="status"></p><div class="progress"><div id="progress-bar"></div></div></div><button id="btn-cancel">Cancel</button></div>
+</footer>
 <div id="dialog" class="modal" hidden>
   <div class="dialog" role="dialog" aria-modal="true" aria-labelledby="dialog-title" aria-describedby="dialog-text">
     <header><span id="dialog-chip" class="chip"></span><h2 id="dialog-title"></h2></header>
@@ -122,31 +86,26 @@
   </div>
 </div>
 
-<input type="color" id="picker" class="offscreen" tabindex="-1">
-<script src="app.js"></script>
-<template id="group-tpl">
-  <div class="group">
-    <div class="line group-head">
-      <span class="label">Character to clone</span>
-      <select class="source" aria-label="Character to clone"></select>
-      <span class="grow"></span>
-      <button class="export quiet boxed" title="Save the character's textures as PNG pictures to paint your own">Export Textures</button>
-      <button class="blender quiet boxed" title="Save the character as a 3D model with its skeleton and animations, for Blender">Export 3D Model</button>
-      <button class="icon remove drop" title="Remove this character and its clones" aria-label="Remove this character and its clones">×</button>
-    </div>
-    <div class="regions">
-      <h3 class="label">Colours to change</h3>
-      <div class="regions-box"></div>
-      <p class="regions-hint muted">Choose your game first.</p>
-    </div>
-    <div class="clone-row head">
-      <h3 class="label">Preview</h3><h3 class="label slot-head" title="★ Recommended extra colour; × used by another character; other slots replace a character on the select screen">Slot it takes over<small class="slot-legend">★ recommended · × in use</small></h3><h3 class="label">Colour</h3>
-      <span></span><h3 class="label" title="Whose animations each clone plays">Animations</h3><h3 class="label">Own textures</h3>
-    </div>
-    <p class="no-game-hint muted">Choose your game in step 01 first. Then pick the colours, slots and animations of each clone here.</p>
-    <div class="rows"></div>
-    <div class="line"><button class="add quiet">+ Add a clone</button></div>
+
+<div id="preview-modal" class="modal" hidden>
+  <div class="dialog preview-dialog" role="dialog" aria-modal="true" aria-labelledby="preview-title">
+    <header><h2 id="preview-title">Texture preview</h2><button id="preview-close">Close</button></header>
+    <p id="large-caption"></p>
+    <div class="large-pics"><figure><figcaption>Before</figcaption><img id="large-before" alt="Original character textures"></figure><figure><figcaption>After</figcaption><img id="large-after" alt="Selected clone textures"></figure></div>
   </div>
+</div>
+<input type="color" id="picker" class="offscreen" tabindex="-1" aria-label="Custom colour">
+<template id="group-tpl">
+  <section class="group">
+    <p class="no-game-hint muted">Choose your game first. Then pick the colours, slots and animations of each clone here.</p>
+    <div class="rows"></div>
+    <section class="basebox">
+      <h2><span class="base-name">Mario</span><small>the character these clones copy</small></h2>
+      <div class="regions"><span class="hint">Colours to change</span><div class="regions-box"></div><p class="regions-hint muted">Choose your game first.</p></div>
+      <div class="rowbtns"><label class="source-label"><select class="source" aria-label="Character to clone"></select></label><button class="export">Export Textures</button><button class="blender">Export 3D Model</button><button class="drop danger">Remove Mario and its clones</button></div>
+    </section>
+  </section>
 </template>
+<script src="app.js"></script>
 </body>
 </html>

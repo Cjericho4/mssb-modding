@@ -27,6 +27,8 @@ const state = {
   groups: [],          // one block per cloned character, see newGroup()
   rowSeq: 0,
   previewRow: null,
+  selectedGroup: null,
+  inputsEnabled: false,
   previewSeq: 0,
   previewTimer: null,
   previewed: new Set(), // sources whose textures have been loaded once
@@ -80,10 +82,12 @@ function log(line) {
 
 /** Inputs that wait for a game and are locked while one is being made. */
 function setEnabled(on) {
+  state.inputsEnabled = on;
   const inputs = ["btn-group", "chk-ui", "chk-colour", "chk-stats", "keeplum", "chk-keep", "out-path", "btn-out", "btn-go"]
     .map($)
-    .concat([...document.querySelectorAll("#groups input, #groups select, #groups button")]);
+    .concat([...document.querySelectorAll("#groups input, #groups select, #groups button, #roster button")]);
   for (const w of inputs) w.disabled = !on;
+  for (const r of allRows()) for (const b of r.swatches.children) b.disabled = !on || Boolean(r.textures);
   $("btn-iso").disabled = $("btn-dir").disabled = state.busy;
   if (on && !$("chk-ui").checked) $("chk-colour").disabled = true;  // the colour word only matters with source menus
 }
@@ -94,7 +98,10 @@ function updateSourceLabels() {
     g.ui.export.title = `Save ${sourceName(g.source)}'s textures as PNG pictures to paint your own`;
     g.ui.blender.title = `Save ${sourceName(g.source)} as a 3D model with its skeleton and animations, for Blender`;
     g.ui.drop.hidden = !many;
+    g.ui.drop.textContent = `Remove ${sourceName(g.source)} and its clones`;
+    g.ui.root.querySelector(".base-name").textContent = sourceName(g.source);
   }
+  renderRoster();
   // With several characters, say "each clone ... it copies" and name them, so nobody reads it as one character.
   const names = state.groups.map((g) => sourceName(g.source)).join(", ");
   $("chk-ui-text").textContent = many
@@ -108,15 +115,35 @@ function updateSourceLabels() {
  *  when the last one closes, focus goes back where it was. */
 let modalReturn = null;
 function setModal(box, open) {
-  box.hidden = !open;
-  const anyOpen = !$("dialog").hidden || !$("blender").hidden;
-  for (const part of document.querySelectorAll("body > header, body > main")) part.inert = anyOpen;
   if (open && !modalReturn) modalReturn = document.activeElement;
+  box.hidden = !open;
+  const anyOpen = [...document.querySelectorAll(".modal")].some((m) => !m.hidden);
+  for (const part of document.querySelectorAll("body > header, body > main, body > nav, body > footer")) part.inert = anyOpen;
   if (!anyOpen && modalReturn) {
     modalReturn.focus?.({ preventScroll: true });
     modalReturn = null;
   }
 }
+
+document.addEventListener("keydown", (e) => {
+  const box = [...document.querySelectorAll(".modal")].find((m) => !m.hidden);
+  if (!box) return;
+  if (e.key === "Escape" && box.id === "preview-modal") {
+    setModal(box, false);
+    e.preventDefault();
+  }
+  if (e.key !== "Tab") return;
+  const controls = [...box.querySelectorAll("button, select, input, a[href], [tabindex='0']")]
+    .filter((c) => !c.disabled && c.getClientRects().length);
+  const first = controls[0], last = controls[controls.length - 1];
+  if (e.shiftKey && document.activeElement === first) {
+    last?.focus();
+    e.preventDefault();
+  } else if (!e.shiftKey && document.activeElement === last) {
+    first?.focus();
+    e.preventDefault();
+  }
+});
 
 /** buttons: [[text, value, primary]]; resolves with the value of the button pressed (Escape: the first). */
 function showDialog(title, message, chip, tone, buttons) {
@@ -196,12 +223,23 @@ async function startLoad(path) {
 function newGroup(source) {
   const root = $("group-tpl").content.firstElementChild.cloneNode(true);
   const q = (c) => root.querySelector("." + c);
+  const roster = el("div", { className: "roster-group" });
+  const heading = el("button", { className: "base" });
+  const entries = el("div", { className: "entries" });
+  const add = el("button", { className: "add addc", textContent: "+ Add another clone", title: "Add another clone" });
+  roster.append(heading, entries, add);
   const g = {
     source, rows: [], ticks: null, info: null, animChoices: [], infoSource: null, infoSeq: 0,
-    ui: { root, source: q("source"), regionsBox: q("regions-box"), regionsHint: q("regions-hint"),
-      noGame: q("no-game-hint"), rows: q("rows"), add: q("add"), export: q("export"), blender: q("blender"), drop: q("drop") },
+    ui: { root, roster, heading, entries, source: q("source"), regionsBox: q("regions-box"), regionsHint: q("regions-hint"),
+      noGame: q("no-game-hint"), rows: q("rows"), add, export: q("export"), blender: q("blender"), drop: q("drop") },
   };
-  g.ui.source.replaceChildren(...state.sources.map((s) => el("option", { value: s.id, textContent: s.name })));
+  heading.addEventListener("click", () => {
+    state.selectedGroup = g;
+    state.previewRow = null;
+    if (g.rows.length) selectPreviewRow(g.rows[0], true);
+    else renderRoster();
+  });
+  g.ui.source.replaceChildren(...state.sources.map((s) => el("option", { value: s.id, textContent: "Change to… " + s.name })));
   g.ui.source.value = String(source);
   g.ui.source.addEventListener("change", () => sourceChanged(g));
   g.ui.add.addEventListener("click", () => serial(() => addRow(g)));
@@ -210,6 +248,7 @@ function newGroup(source) {
   g.ui.drop.addEventListener("click", () => removeGroup(g));
   state.groups.push(g);
   $("groups").append(root);
+  $("roster").append(roster);
   setGroupIds();
   updateSourceLabels();
   return g;
@@ -226,6 +265,8 @@ function setGroupIds() {
 function dropGroup(g) {
   state.groups.splice(state.groups.indexOf(g), 1);
   g.ui.root.remove();
+  g.ui.roster.remove();
+  if (state.selectedGroup === g) state.selectedGroup = state.groups[0];
   setGroupIds();
   updateSourceLabels();
 }
@@ -243,6 +284,9 @@ async function addGroup() {
   const g = newGroup(free.id);
   setEnabled(false);
   await loadSource(g, true);
+  state.selectedGroup = g;
+  if (!g.rows.length) state.previewRow = null;
+  renderRoster();
   g.ui.root.scrollIntoView({ block: "nearest" });
 }
 
@@ -251,6 +295,8 @@ function removeGroup(g) {
   const previewed = g.rows.some((r) => r.id === state.previewRow);
   dropGroup(g);
   if (previewed) selectPreviewRow(state.groups[0].rows[0], true);
+  renderRoster();
+  (state.groups[0].rows[0]?.entry || state.groups[0].ui.add).focus();
 }
 
 /** Fetch a block's source slots and colour regions, then fit its rows (reset: the default rows). */
@@ -290,7 +336,7 @@ function showRegions(g, regions, note) {
     chk.addEventListener("change", () => regionsChanged(g, r.index, chk));
     const swatch = el("i");
     swatch.style.background = r.swatch;
-    box.append(el("div", { className: "region" }, [swatch, el("label", { className: "check" }, [chk, el("span", { textContent: r.label })])]));
+    box.append(el("div", { className: "region" }, [el("label", { className: "check" }, [chk, swatch, el("span", { textContent: r.label })])]));
   }
   g.ui.regionsHint.textContent = note;
   g.ui.regionsHint.hidden = Boolean(regions && regions.length);
@@ -332,7 +378,11 @@ async function rebuildRows(g, reset) {
       }
     }
   }
-  while (g.rows.length > wanted.length) g.rows.pop().el.remove();
+  while (g.rows.length > wanted.length) {
+    const row = g.rows.pop();
+    row.el.remove();
+    row.entry.remove();
+  }
   g.rows.forEach((row, i) => {
     fillSlots(row);
     setRow(row, wanted[i].slot, wanted[i].colour);
@@ -364,6 +414,7 @@ function fillSlots(row) {
 /** Refresh every block's slot lists after a slot or character changed somewhere. */
 function refreshSlots() {
   for (const g of state.groups) if (g.info) for (const r of g.rows) fillSlots(r);
+  renderRoster();
 }
 
 /** The row's "Animations" dropdown: the source's own, exact bone matches, then a group of
@@ -380,6 +431,7 @@ function setRowAnims(row, anims) {
   row.anims = anims;
   row.animSelect.value = String(anims ?? own);
   const chosen = choices.find((c) => c.id === (anims ?? own));
+  renderRoster();
   row.animSelect.title = chosen && chosen.note
     ? `Animations from ${chosen.label}. Some bones differ:\n${chosen.note}`
     : "Whose animations this clone plays (only characters whose bones fit are listed)";
@@ -399,6 +451,7 @@ function setRow(row, slot, colour) {
   row.slotSelect.value = String(slot);
   fillColours(row);
   row.swatch.style.background = colourSwatch(colour);
+  renderRoster();
 }
 
 async function addRow(g, slot = null, colour = null) {
@@ -424,7 +477,46 @@ async function addRow(g, slot = null, colour = null) {
   row.texturesClear = el("button", { className: "icon clear", textContent: "×", title: "Stop using these textures", ariaLabel: "Stop using these textures" });
   row.texturesBox = el("div", { className: "textures" }, [row.texturesPick, row.texturesClear]);
   row.remove = el("button", { className: "icon remove", textContent: "×", title: "Remove this clone", ariaLabel: "Remove this clone" });
-  row.el = el("div", { className: "clone-row" }, [row.radio, row.slotSelect, row.colourSelect, row.swatch, row.animSelect, row.texturesBox, row.remove]);
+  row.remove.textContent = "Remove clone";
+  row.remove.className = "remove danger";
+  row.radio.hidden = true; // selection lives in the roster; kept for the self-test and preview state
+  row.colourSelect.hidden = true;
+  row.swatch.hidden = true;
+  row.swatches = el("div", { className: "swatches", role: "group", ariaLabel: "Colour presets" });
+  for (const c of [...PRESETS, "custom"]) {
+    const b = el("button", { className: "sw" + (c === "custom" ? " custom" : ""), title: c === "custom" ? "Custom…" : colourLabel(c), ariaLabel: c === "custom" ? "Custom colour" : colourLabel(c) });
+    if (c !== "custom") b.style.setProperty("--s", colourSwatch(c));
+    b.dataset.colour = c;
+    b.addEventListener("click", () => {
+      row.colourSelect.value = c;
+      colourChanged(row);
+    });
+    row.swatches.append(b);
+  }
+  const field = (label, controls) => {
+    const title = el("span", { className: "lab", textContent: label });
+    return el("div", { className: "field" }, [title, ...controls]);
+  };
+  row.colourTitle = el("span", { className: "picked" });
+  const colourField = field("Colour ", [row.swatches]);
+  colourField.firstElementChild.append(row.colourTitle);
+  row.el = el("div", { className: "clone-row" }, [row.radio,
+    field("Slot it takes over", [row.slotSelect, el("span", { className: "slot-legend hint", textContent: "★ recommended · × in use" })]),
+    colourField, row.colourSelect, row.swatch,
+    field("Animations", [row.animSelect]),
+    field("Own textures", [el("div", { className: "texbox" }, [row.texturesBox, row.remove])])]);
+  row.entry = el("button", { className: "entry", tabIndex: -1 });
+  row.entry.addEventListener("click", () => selectPreviewRow(row, true));
+  row.entry.addEventListener("keydown", (e) => {
+    const rows = allRows(), index = rows.indexOf(row);
+    const next = e.key === "ArrowDown" ? rows[(index + 1) % rows.length]
+      : e.key === "ArrowUp" ? rows[(index + rows.length - 1) % rows.length]
+      : e.key === "Home" ? rows[0] : e.key === "End" ? rows[rows.length - 1] : null;
+    if (!next) return;
+    e.preventDefault();
+    selectPreviewRow(next, true);
+    next.entry.focus();
+  });
   row.radio.addEventListener("change", () => selectPreviewRow(row, true));
   row.slotSelect.addEventListener("change", () => {
     row.slot = Number(row.slotSelect.value);
@@ -454,26 +546,82 @@ async function addRow(g, slot = null, colour = null) {
 
 function removeRow(row) {
   const g = row.group;
+  const focused = row.el.contains(document.activeElement) || row.entry === document.activeElement;
   row.el.remove();
+  row.entry.remove();
   g.rows.splice(g.rows.indexOf(row), 1);
   if (state.previewRow === row.id) {
-    const next = g.rows[0] || allRows()[0];
+    const next = g.rows[0];
+    state.previewRow = null;
+    state.selectedGroup = g;
     if (next) selectPreviewRow(next);
   }
   updateAddLabel(g);
   refreshSlots();
+  if (focused) (g.rows[0]?.entry || g.ui.add).focus();
   schedulePreview();
 }
 
 function updateAddLabel(g) {
   g.ui.add.textContent = g.rows.length ? "+ Add another clone" : "+ Add a clone";
+  renderRoster();
 }
 
 function selectPreviewRow(row, refresh = false) {
   if (!row) return;
+  if (state.previewRow !== row.id) ++state.previewSeq;
   state.previewRow = row.id;
+  state.selectedGroup = row.group;
   row.radio.checked = true;
+  renderRoster();
   if (refresh) schedulePreview();
+}
+
+/** The roster selects the same row used by the texture preview and its editor. */
+function renderRoster() {
+  const rows = allRows(), selected = rows.find((r) => r.id === state.previewRow);
+  const activeGroup = selected?.group || state.selectedGroup || state.groups[0];
+  for (const g of state.groups) {
+    g.ui.root.hidden = g !== activeGroup;
+    g.ui.heading.replaceChildren(el("span", { textContent: sourceName(g.source) }), el("small", { textContent: String(g.rows.length) }));
+    for (const r of g.rows) {
+      const on = r === selected;
+      const name = r.slotSelect.selectedOptions[0]?.textContent.replace(/^[★×] /, "") || "Clone";
+      const conflict = rows.some((other) => other !== r && other.slot === r.slot) || state.groups.some((other) => other.source === r.slot);
+      const moves = sourceName(r.anims ?? g.source);
+      const subtitle = conflict ? "× Slot used twice" : r.textures ? "Own textures" : `${colourLabel(r.colour)} · ${moves}'s moves`;
+      r.entry.classList.toggle("on", on);
+      r.entry.tabIndex = on || (!selected && r === rows[0]) ? 0 : -1;
+      r.entry.setAttribute("aria-pressed", String(on));
+      r.entry.setAttribute("aria-label", `${name}, ${subtitle}`);
+      const dot = el("i", { className: "dot" + (r.textures || isCustom(r.colour) ? " custom" : "") });
+      dot.style.setProperty("--c", colourSwatch(r.colour));
+      r.entry.replaceChildren(dot, el("span", {}, [el("b", { textContent: name }), el("small", { className: conflict ? "warn" : "", textContent: subtitle })]));
+      if (r.entry.parentElement !== g.ui.entries) g.ui.entries.append(r.entry);
+      r.el.hidden = !on;
+      r.radio.checked = on;
+      r.colourTitle.textContent = r.textures ? "· Own textures" : "· " + colourLabel(r.colour);
+      for (const b of r.swatches.children) {
+        const picked = b.dataset.colour === r.colour || (b.dataset.colour === "custom" && isCustom(r.colour));
+        b.classList.toggle("on", picked);
+        b.setAttribute("aria-pressed", String(picked));
+        b.disabled = Boolean(r.textures) || !state.inputsEnabled;
+      }
+      if (on) {
+        document.documentElement.style.setProperty("--clone", colourSwatch(r.colour));
+        $("clone-name").textContent = $("ghost-name").textContent = name;
+        $("clone-subtitle").textContent = `${sourceName(g.source)}, ${r.textures ? "with your own textures" : "recoloured " + colourLabel(r.colour).toLowerCase()}`;
+      }
+    }
+  }
+  if (!selected) {
+    ++state.previewSeq; // discard a preview for a removed row
+    $("clone-name").textContent = state.game ? "Add a clone" : "Make it your own";
+    $("ghost-name").textContent = activeGroup ? sourceName(activeGroup.source) : "Your studio";
+    $("clone-subtitle").textContent = state.game ? "Choose a slot and make it yours." : "Choose your game to start creating clones.";
+    $("img-before").hidden = $("img-after").hidden = true;
+    $("img-before").nextElementSibling.hidden = false;
+  }
 }
 
 /** "Custom…" opens the system colour picker (only the hue is used); cancelling keeps the colour. */
@@ -514,7 +662,7 @@ async function exportTextures(g = state.groups[0], folder = null) {
   log(`exported ${res.count} textures of ${name} to ${res.folder}`);
   await showInfo("Textures exported", `Saved ${res.count} pictures of ${name} to\n${res.folder}\n\n`
     + "Paint over them in any paint program, keeping each picture's size and file name. Then press "
-    + "\"My textures…\" on a clone row and pick that folder. README.txt in the folder has the details.");
+    + "\"My textures…\" in the clone editor and pick that folder. README.txt in the folder has the details.");
   return res;
 }
 
@@ -613,6 +761,7 @@ function setRowTextures(row, folder) {
   row.texturesClear.hidden = !row.textures;
   // Painted rows keep the source's colours, so the colour choice does not apply.
   row.colourSelect.style.visibility = row.swatch.style.visibility = row.textures ? "hidden" : "";
+  renderRoster();
   if (row.radio.checked) schedulePreview(true);
 }
 
@@ -671,6 +820,7 @@ function toggleAdvanced() {
   adv.hidden = !adv.hidden;
   $("btn-adv").textContent = "Advanced options  " + (adv.hidden ? "▸" : "▾");
   $("btn-adv").ariaExpanded = String(!adv.hidden);
+  if (!adv.hidden) adv.scrollIntoView({ block: "nearest" });
   fitHeight();
 }
 
@@ -738,6 +888,8 @@ async function create() {
   $("progress-label").textContent = "Starting…";
   $("btn-cancel").disabled = false;
   $("run-box").hidden = false;
+  $("card-save").classList.add("busy");
+  $("btn-cancel").focus();
   log("---- creating " + job.output);
   log("the full log is also saved to " + withSuffix(job.output, ".log"));
   try {
@@ -759,7 +911,9 @@ function cancel() {
 function finish() {
   state.busy = false;
   $("run-box").hidden = true;
+  $("card-save").classList.remove("busy");
   setEnabled(state.game !== null);
+  if (document.activeElement === $("btn-cancel")) $("btn-go").focus();
 }
 
 function listenToJob() {
@@ -797,6 +951,21 @@ async function main() {
   $("btn-dir").addEventListener("click", chooseFolder);
   $("btn-group").addEventListener("click", addGroup);
   $("btn-adv").addEventListener("click", toggleAdvanced);
+  $("btn-log").addEventListener("click", () => {
+    $("log-drawer").hidden = !$("log-drawer").hidden;
+    $("btn-log").ariaExpanded = String(!$("log-drawer").hidden);
+    if (!$("log-drawer").hidden) $("log-drawer").scrollIntoView({ block: "nearest" });
+  });
+  $("btn-enlarge").addEventListener("click", () => {
+    for (const part of ["before", "after"]) {
+      $("large-" + part).src = $("img-" + part).src;
+      $("large-" + part).hidden = $("img-" + part).hidden;
+    }
+    $("large-caption").textContent = $("preview-caption").textContent;
+    setModal($("preview-modal"), true);
+    $("preview-close").focus();
+  });
+  $("preview-close").addEventListener("click", () => setModal($("preview-modal"), false));
   $("chk-ui").addEventListener("change", () => { $("chk-colour").disabled = !$("chk-ui").checked || state.busy || !state.game; });
   $("keeplum").addEventListener("input", () => {
     $("keeplum-value").textContent = Number($("keeplum").value).toFixed(2);
