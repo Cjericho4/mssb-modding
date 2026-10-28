@@ -45,11 +45,17 @@ export function create(stage) {
         const plain = [];
         root.traverse((o) => o.isMesh && o.material.userData.texture === undefined && plain.push(o));
         for (const o of plain) o.removeFromParent();
-        mixer.update(0);
-        root.updateMatrixWorld(true);
+        // frame the whole loop, not just its first pose (King Boo bobs below it)
+        const box = new THREE.Box3(), length = gltf.animations[0]?.duration || 0;
+        for (let i = 0; i <= 8; i++) {
+          mixer.setTime((length * i) / 8);
+          root.updateMatrixWorld(true);
+          box.union(new THREE.Box3().setFromObject(root, true));
+        }
+        mixer.setTime(0);
         const materials = new Set();
         root.traverse((o) => o.material && materials.add(o.material));
-        return { root, mixer, materials: [...materials], box: new THREE.Box3().setFromObject(root, true) };
+        return { root, mixer, materials: [...materials], box };
       });
       models.set(source, model);
       model.catch(() => models.delete(source));
