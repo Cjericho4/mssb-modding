@@ -10,7 +10,8 @@ const dialog = window.__TAURI__.dialog;
 const APP_TITLE = "MSSB Clone Maker";
 const PRESETS = ["red", "orange", "yellow", "green", "cyan", "blue", "purple", "pink"];
 const NEW_ROW_COLOURS = ["blue", "green", "purple", "yellow", "orange", "cyan", "pink", "red"];
-const GREEN = "#22c55e", RED = "#ef4444", GREY = "#8f8fa3", GOLD = "#f5bb00";
+// status colours: the theme's tokens (theme.css)
+const GREEN = "var(--ok)", RED = "var(--danger)", GREY = "var(--muted)", GOLD = "var(--warn)";
 const MAX_REGIONS = 6;
 
 const $ = (id) => document.getElementById(id);
@@ -103,6 +104,20 @@ function updateSourceLabels() {
 }
 
 // ---------------------------------------------------------------- dialogs
+/** Shows or hides a dialog. While one is open the page behind it can't be clicked or tabbed to;
+ *  when the last one closes, focus goes back where it was. */
+let modalReturn = null;
+function setModal(box, open) {
+  box.hidden = !open;
+  const anyOpen = !$("dialog").hidden || !$("blender").hidden;
+  for (const part of document.querySelectorAll("body > header, body > main")) part.inert = anyOpen;
+  if (open && !modalReturn) modalReturn = document.activeElement;
+  if (!anyOpen && modalReturn) {
+    modalReturn.focus?.({ preventScroll: true });
+    modalReturn = null;
+  }
+}
+
 /** buttons: [[text, value, primary]]; resolves with the value of the button pressed (Escape: the first). */
 function showDialog(title, message, chip, tone, buttons) {
   return new Promise((resolve) => {
@@ -115,7 +130,7 @@ function showDialog(title, message, chip, tone, buttons) {
     const cancel = buttons.length > 1 ? buttons[0][1] : true;
     let primary;
     const close = (v) => {
-      box.hidden = true;
+      setModal(box, false);
       document.removeEventListener("keydown", keys, true);
       resolve(v);
     };
@@ -133,7 +148,7 @@ function showDialog(title, message, chip, tone, buttons) {
       row.append(b);
     }
     document.addEventListener("keydown", keys, true);
-    box.hidden = false;
+    setModal(box, true);
     primary.focus();
   });
 }
@@ -401,14 +416,14 @@ async function addRow(g, slot = null, colour = null) {
   }
   const row = { id: ++state.rowSeq, group: g };
   row.radio = el("input", { type: "radio", name: "preview-row", title: "Show this clone in the preview" });
-  row.slotSelect = el("select");
-  row.colourSelect = el("select");
+  row.slotSelect = el("select", { ariaLabel: "Slot it takes over" });
+  row.colourSelect = el("select", { ariaLabel: "Colour" });
   row.swatch = el("div", { className: "swatch" });
-  row.animSelect = el("select", { className: "anims" });
+  row.animSelect = el("select", { className: "anims", ariaLabel: "Animations" });
   row.texturesPick = el("button", { className: "pick" });
-  row.texturesClear = el("button", { className: "icon clear", textContent: "×", title: "Stop using these textures" });
+  row.texturesClear = el("button", { className: "icon clear", textContent: "×", title: "Stop using these textures", ariaLabel: "Stop using these textures" });
   row.texturesBox = el("div", { className: "textures" }, [row.texturesPick, row.texturesClear]);
-  row.remove = el("button", { className: "icon remove", textContent: "×", title: "Remove this clone" });
+  row.remove = el("button", { className: "icon remove", textContent: "×", title: "Remove this clone", ariaLabel: "Remove this clone" });
   row.el = el("div", { className: "clone-row" }, [row.radio, row.slotSelect, row.colourSelect, row.swatch, row.animSelect, row.texturesBox, row.remove]);
   row.radio.addEventListener("change", () => selectPreviewRow(row, true));
   row.slotSelect.addEventListener("change", () => {
@@ -512,7 +527,7 @@ async function exportBlender(g = state.groups[0], path = null) {
   const go = $("blender-go"), cancelButton = $("blender-cancel"), note = $("blender-note");
   const controls = [select, all, go, cancelButton];
   const reset = () => {
-    box.hidden = true;
+    setModal(box, false);
     for (const c of controls) c.disabled = false;
     go.textContent = "Save as…";
   };
@@ -520,7 +535,7 @@ async function exportBlender(g = state.groups[0], path = null) {
   select.value = String(g.source);
   all.checked = true;
   note.textContent = "A .gltf file with the textured body, the skeleton and the animations.";
-  box.hidden = false;
+  setModal(box, true);
   go.focus();
   const confirmed = await new Promise((resolve) => {
     const close = (v) => {
@@ -655,6 +670,7 @@ function toggleAdvanced() {
   const adv = $("adv");
   adv.hidden = !adv.hidden;
   $("btn-adv").textContent = "Advanced options  " + (adv.hidden ? "▸" : "▾");
+  $("btn-adv").ariaExpanded = String(!adv.hidden);
   fitHeight();
 }
 

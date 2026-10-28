@@ -10,9 +10,9 @@
 <header class="top">
   <svg class="mark" viewBox="0 0 32 32" aria-hidden="true">
     <defs><clipPath id="ball"><circle cx="16" cy="16" r="11"/></clipPath></defs>
-    <rect width="32" height="32" rx="7" fill="#e60012"/>
-    <circle cx="16" cy="16" r="11" fill="#f5f5f8"/>
-    <g clip-path="url(#ball)" fill="none" stroke="#e60012" stroke-width="2.2">
+    <rect class="bg" width="32" height="32" rx="7"/>
+    <circle class="ball" cx="16" cy="16" r="11"/>
+    <g class="seams" clip-path="url(#ball)" fill="none" stroke-width="2.2">
       <circle cx="1.5" cy="16" r="10.5"/><circle cx="30.5" cy="16" r="10.5"/>
     </g>
   </svg>
@@ -21,39 +21,38 @@
     <p>Mario Superstar Baseball · USA</p>
   </div>
   <p class="blurb">Make recoloured copies of a character.</p>
-  <button id="feedback" class="headbtn" title="Report a bug or suggest an idea on GitHub">Feedback</button>
+  <button id="feedback" class="headbtn quiet boxed" title="Report a bug or suggest an idea on GitHub">Feedback</button>
   <button id="update" class="headbtn update" hidden></button>
   <div class="pill" id="pill"><i></i><span>No game yet</span></div>
 </header>
 
 <main class="page">
   <section class="card" id="card-game">
-    <header><span class="chip red">01</span><h2>Your game</h2></header>
+    <header><span class="chip red step">01</span><h2>Your game</h2></header>
     <div class="body">
       <div class="line">
         <button id="btn-iso">Choose your game (.iso)…</button>
-        <button id="btn-dir">or a folder…</button>
-        <input id="game-path" class="path grow" readonly tabindex="-1">
+        <button id="btn-dir" class="quiet">or a folder…</button>
+        <input id="game-path" class="path grow" readonly tabindex="-1" placeholder=" ">
       </div>
       <p id="status" class="status">No game chosen yet.</p>
     </div>
   </section>
 
   <section class="card" id="card-clones">
-    <header><span class="chip red">02</span><h2>Clones</h2></header>
+    <header><span class="chip red step">02</span><h2>Clones</h2></header>
     <div class="body">
       <div id="groups"></div>
       <button id="btn-group" class="add-group" title="Add clones of a different character to the same game">+ Clone another character</button>
-      <div class="line end"><button id="btn-adv">Advanced options  ▸</button></div>
+      <div class="line end"><button id="btn-adv" class="quiet" aria-controls="adv" aria-expanded="false">Advanced options  ▸</button></div>
       <div id="adv" hidden>
         <hr>
-        <h3 class="kicker">Advanced</h3>
         <label class="check"><input type="checkbox" id="chk-ui" checked><span id="chk-ui-text"></span></label>
         <label class="check indent"><input type="checkbox" id="chk-colour"><span>Keep the donor's name-box colour (e.g. Purple Toad's purple)</span></label>
         <label class="check"><input type="checkbox" id="chk-stats" checked><span id="chk-stats-text"></span></label>
         <div class="shading">
           <h3 class="label">Keep shading</h3>
-          <input type="range" id="keeplum" min="0" max="1" step="0.01" value="0.5">
+          <input type="range" id="keeplum" aria-label="Keep shading" min="0" max="1" step="0.01" value="0.5">
           <output id="keeplum-value" class="mono">0.50</output>
         </div>
         <p class="muted">Higher keeps the light and dark areas of the original; lower is brighter and flatter.</p>
@@ -63,7 +62,7 @@
   </section>
 
   <section class="card" id="card-save">
-    <header><span class="chip red">03</span><h2>Save the new game as</h2></header>
+    <header><span class="chip red step">03</span><h2>Save the new game as</h2></header>
     <div class="body">
       <div class="line">
         <input id="out-path" class="path grow" spellcheck="false">
@@ -103,7 +102,7 @@
 </main>
 
 <div id="dialog" class="modal" hidden>
-  <div class="dialog" role="dialog" aria-modal="true" aria-labelledby="dialog-title">
+  <div class="dialog" role="dialog" aria-modal="true" aria-labelledby="dialog-title" aria-describedby="dialog-text">
     <header><span id="dialog-chip" class="chip"></span><h2 id="dialog-title"></h2></header>
     <p id="dialog-text"></p>
     <div class="line end" id="dialog-buttons"></div>
@@ -128,12 +127,12 @@
 <template id="group-tpl">
   <div class="group">
     <div class="line group-head">
-      <label class="label">Character to clone</label>
-      <select class="source"></select>
+      <span class="label">Character to clone</span>
+      <select class="source" aria-label="Character to clone"></select>
       <span class="grow"></span>
-      <button class="export" title="Save the character's textures as PNG pictures to paint your own">Export Textures</button>
-      <button class="blender" title="Save the character as a 3D model with its skeleton and animations, for Blender">Export 3D Model</button>
-      <button class="icon remove drop" title="Remove this character and its clones">×</button>
+      <button class="export quiet boxed" title="Save the character's textures as PNG pictures to paint your own">Export Textures</button>
+      <button class="blender quiet boxed" title="Save the character as a 3D model with its skeleton and animations, for Blender">Export 3D Model</button>
+      <button class="icon remove drop" title="Remove this character and its clones" aria-label="Remove this character and its clones">×</button>
     </div>
     <div class="regions">
       <h3 class="label">Colours to change</h3>
@@ -144,9 +143,9 @@
       <h3 class="label">Preview</h3><h3 class="label slot-head" title="★ Recommended extra colour; × used by another character; other slots replace a character on the select screen">Slot it takes over<small class="slot-legend">★ recommended · × in use</small></h3><h3 class="label">Colour</h3>
       <span></span><h3 class="label" title="Whose animations each clone plays">Animations</h3><h3 class="label">Own textures</h3>
     </div>
-    <p class="no-game-hint muted">Choose your game first.</p>
+    <p class="no-game-hint muted">Choose your game in step 01 first. Then pick the colours, slots and animations of each clone here.</p>
     <div class="rows"></div>
-    <div class="line"><button class="add">+ Add a clone</button></div>
+    <div class="line"><button class="add quiet">+ Add a clone</button></div>
   </div>
 </template>
 </body>
