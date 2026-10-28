@@ -2081,7 +2081,7 @@ pub fn export(
 }
 
 /// The window's 3D stage: charID `c` built from `body` (its in-match body, which may differ from
-/// the export's, see `Disc::effective_body`) playing the batter-idle loop, as a binary glTF
+/// the export's, see `Disc::effective_body`) playing the fielder's stand-still loop, as a binary glTF
 /// (.glb) without pictures. Each textured material keeps its picture's archive index and
 /// sampler in `extras` instead, and the window fills in the (recoloured) pictures itself.
 pub fn stage_model(disc: &Disc, dol: &Dol, c: usize, body: &[u8]) -> Result<Vec<u8>> {
@@ -2120,8 +2120,8 @@ pub fn stage_model(disc: &Disc, dol: &Dol, c: usize, body: &[u8]) -> Result<Vec<
     Ok(glb)
 }
 
-/// The stage's clip: the batter's idle loop, `t2_s00_id75_BatterIdle`.
-const STAGE_CLIP: (usize, Option<usize>) = (2, Some(0));
+/// The stage's clip: the fielder standing still, `t4_s00_id0_FielderStandStill`.
+const STAGE_CLIP: (usize, Option<usize>) = (4, Some(0));
 
 /// The glTF of charID `c`'s `body` with `clips` ((track, one sequence or every non-empty one)):
 /// its JSON without `buffers`, the buffer's bytes, the bone count and the animation count.

@@ -1320,7 +1320,7 @@ impl Core {
         })
     }
     /// The 3D stage's model of `source` (`gltf::stage_model`): its in-match body playing the
-    /// batter-idle loop, as .glb bytes without pictures (they come with each `preview`).
+    /// fielder's stand-still loop, as .glb bytes without pictures (they come with each `preview`).
     pub fn stage_model(&self, source: usize) -> std::result::Result<Vec<u8>, ApiError> {
         check_id(source)?;
         let mut lock = self.game.lock().unwrap();
