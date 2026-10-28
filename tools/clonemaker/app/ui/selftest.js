@@ -141,6 +141,7 @@ export async function run(options, app) {
     check(!$("log-drawer").hidden && $("btn-log").ariaExpanded === "true", "Log opens its drawer");
     $("btn-log").click();
     await waitFor(() => caption().startsWith("All 9 textures of Mario"), "the selected preview again");
+    await stage3d();
     await shot("idle");
     await resizeTo(640, 560);
     app.state.groups[0].rows[0].entry.click();
@@ -352,6 +353,48 @@ export async function run(options, app) {
     await waitFor(() => $("pill").textContent === "Cancelled", "the cancelled job");
     check(logHas("Cancelled. Nothing was saved.") && $("run-box").hidden, "cancel message, bar hidden");
 
+  }
+
+  /** The 3D stage: several characters (the right way up, their own pictures), colour changes timed,
+   * and the silhouette after a model that fails. Without WebGL only the silhouette is checked. */
+  async function stage3d() {
+    const model = await app.stage, box = document.querySelector(".stage");
+    const fig = () => getComputedStyle(box.querySelector("svg.fig")).display !== "none";
+    if (!model) {
+      check(box.dataset.stage === "fallback" && fig(), "without WebGL the stage keeps its silhouette");
+      say("3D stage: no WebGL, silhouette only");
+      await shot("stage_fallback");
+      return;
+    }
+    const ms = [];
+    await waitFor(() => box.dataset.stage === "ready", "Mario on the stage");
+    for (const [id, name] of [[2, "Donkey Kong"], [4, "Peach"], [37, "King Boo"], [33, "Blue Magikoopa"], [7, "Baby Mario"],
+      [38, "Petey"], [9, "Bowser"], [22, "Red Pianta"], [27, "Hammer Bro"], [0, "Mario"]]) {
+      const t0 = performance.now();
+      choose($("source"), id);
+      await waitFor(() => caption().includes("of " + name), name + "'s preview");
+      const drawn = await model.drawn;
+      check(drawn !== null && box.dataset.stage === "ready", name + " on the stage");
+      say(`3D stage: ${name} in ${Math.round(performance.now() - t0)} ms (model and pictures ${Math.round(drawn)} ms)`);
+      await shot("stage_" + name.toLowerCase().replaceAll(" ", "_"));
+    }
+    const row = app.state.groups[0].rows[0];
+    for (const colour of ["red", "green", "purple", "orange", "blue"]) {
+      const t0 = performance.now();
+      row.el.querySelector(`.sw[data-colour="${colour}"]`).click();
+      await waitFor(() => caption().includes("in " + colour[0].toUpperCase() + colour.slice(1)), "the " + colour + " preview");
+      check((await model.drawn) !== null, colour + " on the stage");
+      ms.push(performance.now() - t0);
+      if (colour === "red") await shot("stage_mario_red");
+    }
+    ms.sort((a, b) => a - b);
+    say(`3D stage: a colour change is drawn in ${ms.map(Math.round).join(", ")} ms (median ${Math.round(ms[2])})`);
+    check(ms[2] < 1000, "a colour change reaches the stage within a second");
+    const failed = await model.show(99, []);
+    check(failed === null && box.dataset.stage === "fallback" && fig(), "a model that fails leaves the silhouette");
+    await shot("stage_fallback");
+    choose($("source"), 0);
+    await waitFor(() => caption().startsWith("All 9 textures of Mario") && box.dataset.stage === "ready", "Mario back on the stage");
   }
 
   async function longDialog(name, w, h, times = 1) {

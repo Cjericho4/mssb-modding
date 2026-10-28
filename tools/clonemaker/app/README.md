@@ -11,6 +11,10 @@ defaults, error messages and layout) and talks to the core only through the comm
 - `ui/`: plain HTML/CSS/JS, no framework and no npm (`withGlobalTauri`). `theme.css` holds the
   night-arena palette as custom properties; the fonts are bundled with `@font-face` (OFL texts in
   `ui/fonts/`).
+- `ui/stage.js`: the stage's 3D model (three.js r186, `three@0.186.1` from npm, vendored in
+  `ui/vendor/` with its MIT `LICENSE`: `build/three.core.js`, `build/three.module.js` and
+  `examples/jsm/` `GLTFLoader.js`, `BufferGeometryUtils.js`, `SkeletonUtils.js`, whose `'three'` and
+  `'../utils/'` imports were pointed at the files next to them). Without WebGL the silhouette stays.
 - Its own crate and `Cargo.lock` (no workspace root), depending on `../core` by path.
 
 ## Build

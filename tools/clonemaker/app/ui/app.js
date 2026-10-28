@@ -45,6 +45,12 @@ const isCustom = (c) => c.startsWith("#");
 const colourLabel = (c) => (isCustom(c) ? "Custom " + c.toUpperCase() : c[0].toUpperCase() + c.slice(1));
 const sourceName = (id) => (state.sources.find((s) => s.id === id) || { name: "" }).name;
 const allRows = () => state.groups.flatMap((g) => g.rows);
+/** The 3D model on the stage (stage.js); null without WebGL, and then the silhouette stays. */
+const stage = import("./stage.js").then((m) => m.create(document.querySelector(".stage"))).catch((e) => {
+  console.warn("3D stage:", e);
+  document.querySelector(".stage").dataset.stage = "fallback";
+  return null;
+});
 const withSuffix = (path, suffix) => path.replace(/\.[^./\\]*$/, "") + suffix;
 const fileName = (path) => path.split(/[\\/]/).pop();
 
@@ -621,6 +627,7 @@ function renderRoster() {
     $("clone-subtitle").textContent = state.game ? "Choose a slot and make it yours." : "Choose your game to start creating clones.";
     $("img-before").hidden = $("img-after").hidden = true;
     $("img-before").nextElementSibling.hidden = false;
+    stage.then((s) => s?.clear());
   }
 }
 
@@ -801,9 +808,11 @@ async function requestPreview() {
   if (failure) {
     $("preview-caption").textContent = `No preview for ${sourceName(src)}: ${failure}`;
     before.hidden = after.hidden = true;
+    stage.then((s) => s?.clear("fallback"));
     return;
   }
   state.previewed.add(src);
+  stage.then((s) => s?.show(src, res.textures));
   before.src = "data:image/png;base64," + res.before_png;
   after.src = "data:image/png;base64," + res.after_png;
   before.hidden = after.hidden = false;
@@ -987,7 +996,7 @@ async function main() {
   $("feedback").addEventListener("click", () => invoke("open_feedback"));
   if (!options.selftest) checkForUpdate();
   if (options.selftest) {
-    await import("./selftest.js").then((m) => m.run(options, { state, startLoad, exportTextures, exportBlender, setRowTextures, showInfo }));
+    await import("./selftest.js").then((m) => m.run(options, { state, startLoad, exportTextures, exportBlender, setRowTextures, showInfo, stage }));
   }
 }
 

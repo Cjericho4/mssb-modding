@@ -478,7 +478,7 @@ pub struct SourcePreview {
     pub before_png: Vec<u8>,
     layout: Vec<(usize, usize, usize)>,
     height: usize,
-    after: HashMap<String, Vec<u8>>,
+    after: HashMap<String, (Vec<u8>, Vec<String>)>,
 }
 impl SourcePreview {
     /// Build the original atlas and detect regions for a selected source.
@@ -496,20 +496,33 @@ impl SourcePreview {
             height,
             after: HashMap::new(),
         };
-        pv.before_png = png_bytes(256, height, &pv.atlas(&pv.body)?)?;
+        pv.before_png = pv.pictures(&pv.body, false)?.0;
         Ok(pv)
     }
-    fn atlas(&self, g: &Gpc) -> Result<Vec<u8>> {
+    /// The atlas PNG of `g` and, with `each`, every texture as a base64 PNG in archive order
+    /// (the 3D stage's pictures).
+    pub fn pictures(&self, g: &Gpc, each: bool) -> Result<(Vec<u8>, Vec<String>)> {
+        let rgbs = (g.textures.iter())
+            .map(|t| decode_texture(&t.bytes(&g.data)?, t))
+            .collect::<Result<Vec<_>>>()?;
         let mut out = [0x10, 0x10, 0x1a].repeat(256 * self.height);
         for (i, x, y) in &self.layout {
-            let t = &g.textures[*i];
-            let rgb = decode_texture(&t.bytes(&g.data)?, t)?;
+            let (t, rgb) = (&g.textures[*i], &rgbs[*i]);
             for yy in 0..t.h {
                 let o = ((y + yy) * 256 + x) * 3;
                 out[o..o + t.w * 3].copy_from_slice(&rgb[yy * t.w * 3..(yy + 1) * t.w * 3]);
             }
         }
-        Ok(out)
+        let each = if each {
+            (g.textures.iter().zip(&rgbs))
+                .map(|(t, rgb)| {
+                    Ok(base64::engine::general_purpose::STANDARD.encode(png_bytes(t.w, t.h, rgb)?))
+                })
+                .collect::<Result<_>>()?
+        } else {
+            Vec::new()
+        };
+        Ok((png_bytes(256, self.height, &out)?, each))
     }
     /// Return a character body recoloured by the patcher's exact implementation.
     pub fn recoloured(&self, spec: &str) -> Result<Gpc> {
@@ -519,17 +532,18 @@ impl SourcePreview {
         rc.recolour_gpc(&mut g)?;
         Ok(g)
     }
-    /// Return the after atlas, caching recent spec strings for responsive row edits.
-    pub fn after_png(&mut self, spec: &str) -> Result<Vec<u8>> {
-        if let Some(png) = self.after.get(spec) {
-            return Ok(png.clone());
+    /// Return the after atlas and textures (`pictures`), caching recent spec strings for
+    /// responsive row edits.
+    pub fn after(&mut self, spec: &str) -> Result<(Vec<u8>, Vec<String>)> {
+        if let Some(after) = self.after.get(spec) {
+            return Ok(after.clone());
         }
         if self.after.len() > 32 {
             self.after.clear();
         }
-        let png = png_bytes(256, self.height, &self.atlas(&self.recoloured(spec)?)?)?;
-        self.after.insert(spec.into(), png.clone());
-        Ok(png)
+        let after = self.pictures(&self.recoloured(spec)?, true)?;
+        self.after.insert(spec.into(), after.clone());
+        Ok(after)
     }
 }
 impl Game {
@@ -1008,6 +1022,8 @@ pub struct Preview {
     pub before_png: String,
     /// Base64 PNG of recoloured textures.
     pub after_png: String,
+    /// The after side's textures, one base64 PNG each in archive order (the 3D stage's pictures).
+    pub textures: Vec<String>,
     /// Description of source, slot, colour and affected regions.
     pub caption: String,
 }
@@ -1176,10 +1192,11 @@ impl Core {
             let painted = Painted::load(folder, &pv.body, &pretty_name(request.source))?;
             let mut g = pv.body.clone();
             painted.paint(&pv.body, &pv.body, &mut g)?;
-            let after = png_bytes(256, pv.height, &pv.atlas(&g)?)?;
+            let (after, textures) = pv.pictures(&g, true)?;
             return Ok(Preview {
                 before_png,
                 after_png: base64::engine::general_purpose::STANDARD.encode(after),
+                textures,
                 caption: format!(
                     "All {} textures of {}, before and as {} with your textures ({} painted){moves}",
                     pv.body.textures.len(),
@@ -1193,10 +1210,11 @@ impl Core {
         let spec = colour_spec(&request.colour, request.keeplum, regions.as_deref())?;
         let mut rc = Recolour::new(&spec)?;
         rc.resolve(&pv.regions)?;
-        let after_png = base64::engine::general_purpose::STANDARD.encode(pv.after_png(&spec)?);
+        let (after, textures) = pv.after(&spec)?;
         Ok(Preview {
             before_png,
-            after_png,
+            after_png: base64::engine::general_purpose::STANDARD.encode(after),
+            textures,
             caption: format!(
                 "All {} textures of {}, before and as {} in {} (changes: {}){moves}",
                 pv.body.textures.len(),
@@ -1300,6 +1318,19 @@ impl Core {
             bones: export.bones,
             animations: export.animations,
         })
+    }
+    /// The 3D stage's model of `source` (`gltf::stage_model`): its in-match body playing the
+    /// batter-idle loop, as .glb bytes without pictures (they come with each `preview`).
+    pub fn stage_model(&self, source: usize) -> std::result::Result<Vec<u8>, ApiError> {
+        check_id(source)?;
+        let mut lock = self.game.lock().unwrap();
+        let game = lock.as_mut().ok_or_else(|| ApiError {
+            error: "Choose a game first.".into(),
+        })?;
+        let body = game.preview(source)?.body.data.clone();
+        Ok(crate::gltf::stage_model(
+            &game.disc, &game.dol, source, &body,
+        )?)
     }
     /// Start the job, sending progress/log/done/error events through a thread-safe callback.
     pub fn create(

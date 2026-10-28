@@ -57,6 +57,14 @@ async fn preview(app: AppHandle, request: PreviewRequest) -> Result<Preview, Api
     blocking(move |core| core.preview(&request), app).await
 }
 
+/// The 3D stage's model of `source` as .glb bytes (an ArrayBuffer on the page).
+#[tauri::command]
+async fn stage_model(app: AppHandle, source: usize) -> Result<tauri::ipc::Response, ApiError> {
+    blocking(move |core| core.stage_model(source), app)
+        .await
+        .map(tauri::ipc::Response::new)
+}
+
 #[tauri::command]
 fn default_output(core: State<Core>, game_path: PathBuf) -> PathBuf {
     core.default_output(&game_path)
@@ -181,6 +189,7 @@ fn main() {
             anim_choices,
             next_free_slot,
             preview,
+            stage_model,
             default_output,
             validate_job,
             create,

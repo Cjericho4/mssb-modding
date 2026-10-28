@@ -2069,8 +2069,72 @@ pub fn export(
     } else {
         vec![(DEFAULT_CLIP.0, Some(DEFAULT_CLIP.1))]
     };
+    let (mut out, buffer, bones, animations) = document(disc, dol, c, &body, &clips, painted)?;
+    out["buffers"] = json!([{"byteLength": buffer.len(),
+        "uri": format!("data:application/octet-stream;base64,{}",
+            base64::engine::general_purpose::STANDARD.encode(&buffer))}]);
+    Ok(Export {
+        json: out.to_string() + "\n",
+        bones,
+        animations,
+    })
+}
+
+/// The window's 3D stage: charID `c` built from `body` (its in-match body, which may differ from
+/// the export's, see `Disc::effective_body`) playing the batter-idle loop, as a binary glTF
+/// (.glb) without pictures. Each textured material keeps its picture's archive index and
+/// sampler in `extras` instead, and the window fills in the (recoloured) pictures itself.
+pub fn stage_model(disc: &Disc, dol: &Dol, c: usize, body: &[u8]) -> Result<Vec<u8>> {
+    let (mut out, mut buffer, ..) = document(disc, dol, c, body, &[STAGE_CLIP], None)?;
+    let samplers = out["samplers"].take();
+    for m in out["materials"].as_array_mut().into_iter().flatten() {
+        let pbr = &mut m["pbrMetallicRoughness"];
+        if let Some(t) = pbr
+            .as_object_mut()
+            .and_then(|p| p.remove("baseColorTexture"))
+        {
+            m["extras"] = json!({"texture": t["index"], "sampler": samplers[t["index"].as_u64().unwrap_or(0) as usize]});
+        }
+    }
+    for key in ["images", "textures", "samplers"] {
+        out.as_object_mut().map(|o| o.remove(key));
+    }
+    out["buffers"] = json!([{"byteLength": buffer.len()}]);
+    let mut text = out.to_string().into_bytes();
+    text.resize(text.len().next_multiple_of(4), b' ');
+    buffer.resize(buffer.len().next_multiple_of(4), 0);
+    let mut glb = Vec::with_capacity(28 + text.len() + buffer.len());
+    for word in [
+        0x4654_6C67,
+        2,
+        (28 + text.len() + buffer.len()) as u32,
+        text.len() as u32,
+        0x4E4F_534A,
+    ] {
+        glb.extend(u32::to_le_bytes(word));
+    }
+    glb.extend(text);
+    glb.extend((buffer.len() as u32).to_le_bytes());
+    glb.extend(0x004E_4942u32.to_le_bytes());
+    glb.extend(buffer);
+    Ok(glb)
+}
+
+/// The stage's clip: the batter's idle loop, `t2_s00_id75_BatterIdle`.
+const STAGE_CLIP: (usize, Option<usize>) = (2, Some(0));
+
+/// The glTF of charID `c`'s `body` with `clips` ((track, one sequence or every non-empty one)):
+/// its JSON without `buffers`, the buffer's bytes, the bone count and the animation count.
+fn document(
+    disc: &Disc,
+    dol: &Dol,
+    c: usize,
+    body: &[u8],
+    clips: &[(usize, Option<usize>)],
+    painted: Option<&Path>,
+) -> Result<(Value, Vec<u8>, usize, usize)> {
     let mut banks = Vec::new();
-    for (track, only) in clips {
+    for &(track, only) in clips {
         let bank = parse_bank(&disc.load_subfile(dol, c * 19 + track)?)
             .map_err(|e| bad(format!("animation track {track}: {}", e.message)))?;
         if let Some(o) = only
@@ -2094,10 +2158,10 @@ pub fn export(
                 .map(move |(s, sequence)| (*track, s, sequence.as_slice()))
         })
         .collect();
-    let layout = parse_layout(&body)?;
+    let layout = parse_layout(body)?;
     let tracks: Vec<&[Track]> = sequences.iter().map(|&(_, _, t)| t).collect();
-    let (mut doc, handles, poses) = skeleton(&body, &layout, &scale_axis_bones(&layout, &tracks))?;
-    add_geometry(&mut doc, &body, &layout, &handles, &poses, painted)?;
+    let (mut doc, handles, poses) = skeleton(body, &layout, &scale_axis_bones(&layout, &tracks))?;
+    add_geometry(&mut doc, body, &layout, &handles, &poses, painted)?;
     for (track, s, sequence) in sequences {
         add_animation(
             &mut doc,
@@ -2124,9 +2188,6 @@ pub fn export(
         "extras": {"character_id": c, "bone_count": layout.bones.len(),
                    "coordinate_system": "glTF +Y up, facing +Z; the game's actor space \
                        (head toward -Y) is turned 180 degrees about X at the root bones"},
-        "buffers": [{"byteLength": buffer.data.len(),
-            "uri": format!("data:application/octet-stream;base64,{}",
-                base64::engine::general_purpose::STANDARD.encode(&buffer.data))}],
         "bufferViews": buffer.views, "accessors": buffer.accessors,
     });
     if let Some(t) = textures {
@@ -2141,11 +2202,7 @@ pub fn export(
     if !animations.is_empty() {
         out["animations"] = json!(animations);
     }
-    Ok(Export {
-        json: out.to_string() + "\n",
-        bones: layout.bones.len(),
-        animations: count,
-    })
+    Ok((out, buffer.data, layout.bones.len(), count))
 }
 
 #[cfg(test)]

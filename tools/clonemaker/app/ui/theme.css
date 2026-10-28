@@ -241,3 +241,6 @@ h2, h3, p { margin-top: 0; }
 .stage .label { max-width: calc(100% - 220px); }
 .stage .label h1, .stage .label p { overflow-wrap: anywhere; }
 @media (max-width: 760px) { .base { width: auto; } }
+/* The 3D model (stage.js) replaces the silhouette once it is drawn; without WebGL the silhouette stays. */
+.stage canvas.model { position: absolute; inset: 0; width: 100%; height: 100%; }
+.stage:not([data-stage="ready"]) canvas.model, .stage[data-stage="ready"] svg.fig, .stage[data-stage="loading"] svg.fig { display: none; }
