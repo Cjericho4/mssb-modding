@@ -30,11 +30,36 @@ export async function run(options, app) {
     }
     return true;
   };
-  const shot = async (name) => {
+  const mark = async (name) => {
     await painted();
     await sleep(150);
     const failed = await invoke("selftest_mark", { name });
     if (failed) say(`no screenshot ${name}: ${failed}`);
+  };
+  // Design proposals (v0.4.0, until one is picked): these screenshots are also taken in every
+  // theme and layout variant below, as <name>__<variant>.png. Each variant is undone afterwards.
+  const html = document.documentElement;
+  const advMove = () => $("card-save").querySelector(".body > .line").before($("btn-adv").parentElement, $("adv"));
+  const advBack = () => $("btn-group").after($("btn-adv").parentElement, $("adv"));
+  const VARIANTS = [
+    ["themeB", () => (html.dataset.theme = "b"), () => delete html.dataset.theme],
+    ["themeC", () => (html.dataset.theme = "c"), () => delete html.dataset.theme],
+    ["savebar", () => (html.dataset.layout = "savebar"), () => delete html.dataset.layout],
+    ["compact", () => (html.dataset.layout = "compact"), () => delete html.dataset.layout],
+    ["rows2", () => (html.dataset.layout = "rows2"), () => delete html.dataset.layout],
+    ["advsave", () => { html.dataset.layout = "advsave"; advMove(); }, () => { delete html.dataset.layout; advBack(); }],
+  ];
+  const VARIANT_SHOTS = new Set(["empty", "idle", "slots_narrow", "advanced", "many_rows", "blender", "two_characters",
+    "dialog_confirm", "dialog_narrow"]);
+  const shot = async (name) => {
+    await mark(name);
+    if (!VARIANT_SHOTS.has(name)) return;
+    for (const [variant, apply, undo] of VARIANTS) {
+      apply();
+      await mark(`${name}__${variant}`);
+      undo();
+    }
+    await painted();
   };
   const sep = options.dir.includes("\\") ? "\\" : "/";
   const inDir = (name) => options.dir + sep + name;

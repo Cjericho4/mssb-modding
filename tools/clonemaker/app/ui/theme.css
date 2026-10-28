@@ -1,4 +1,6 @@
-/* The Clone Maker window: near-black panels, a red accent. Every colour is a token below.
+/* The Clone Maker window. Every colour is a token below, so a theme is one block of overrides:
+   A (default) "Night game": near-black panels, red accent;  B "Gold den": oxblood brown, gold;
+   C "Home whites": light, navy and red.  <html data-theme="b|c"> picks B or C.
    Type: uppercase tracked Rajdhani headings, Inter text, JetBrains Mono for paths and the log.
    Spacing steps: 4 8 12 16 24 px.  Sizes in CSS px (1 px at 96 dpi). */
 
@@ -9,7 +11,7 @@
 @font-face { font-family: "Inter"; font-weight: 600; src: url("fonts/Inter-SemiBold.ttf"); }
 @font-face { font-family: "JetBrains Mono"; font-weight: 400; src: url("fonts/JetBrainsMono-Regular.ttf"); }
 
-/* ---- colours ------------------------------------------------------------------------------
+/* ---- A: night game (default) ---------------------------------------------------------------
    Every text colour is at least 4.5:1 on --panel and --surface (WCAG AA). */
 :root {
   color-scheme: dark;
@@ -67,6 +69,99 @@
   --card-radius: 12px;
   --pad: 16px;
   --row-cols: 53px minmax(0, 1fr) 100px 26px 124px 108px 28px;
+}
+
+/* ---- B: gold den (oxblood brown, gold, cream; dark text on the gold fill) ------------------ */
+:root[data-theme="b"] {
+  --page: #140807;
+  --wash-top: rgb(216 180 24 / 0.10);
+  --wash-bottom: rgb(144 72 0 / 0.10);
+  --panel: #1e0e0c;
+  --pop: #261310;
+  --surface: #2c1713;
+  --field: #120707;
+  --line: #3e221b;
+  --line-strong: #6e4532;
+  --text: #f6ead0;
+  --muted: #cfb48c;
+  --faint: #b39877;
+  --dim: #6f5848;
+  --log-text: #dcc9a6;
+  --accent: #e0b520;
+  --accent-hover: #f2c83a;
+  --accent-press: #b98f0c;
+  --on-accent: #241008;
+  --accent-text: #f0c53a;
+  --accent-line: #6e5212;
+  --accent-tint: #33200f;
+  --accent-tint-strong: #47300f;
+  --accent-off: #3a2a14;
+  --on-accent-off: #b39877;
+  --chip-bg: #2b1c0b;
+  --pop-select: #4d3510;
+  --selection: #6e5212;
+  --focus: #9fd6e0;
+  --ok: #7fd69a;
+  --ok-bg: #16201a;
+  --ok-line: #2f6b44;
+  --danger: #ff8170;
+  --warn: #f2c83a;
+  --scrim: rgb(12 4 3 / 0.74);
+  --mark-bg: #e0b520;
+  --mark-ball: #f6ead0;
+  --mark-seam: #904800;
+  --chev: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 7'%3E%3Cpath d='M1 1l5 5 5-5' fill='none' stroke='%23cfb48c' stroke-width='1.6'/%3E%3C/svg%3E");
+  --chev-hover: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 7'%3E%3Cpath d='M1 1l5 5 5-5' fill='none' stroke='%23f6ead0' stroke-width='1.6'/%3E%3C/svg%3E");
+  --chev-off: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 7'%3E%3Cpath d='M1 1l5 5 5-5' fill='none' stroke='%236f5848' stroke-width='1.6'/%3E%3C/svg%3E");
+  --tick: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath d='M4.2 8.3l2.7 2.7 5.1-5.7' fill='none' stroke='%23241008' stroke-width='1.9' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+  --tick-off: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath d='M4.2 8.3l2.7 2.7 5.1-5.7' fill='none' stroke='%236f5848' stroke-width='1.9' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+}
+
+/* ---- C: home whites (a light theme: white jersey, navy lettering, red piping) ---------------- */
+:root[data-theme="c"] {
+  color-scheme: light;
+  --page: #e7ecf2;
+  --wash-top: rgb(27 58 107 / 0.10);
+  --wash-bottom: rgb(200 16 46 / 0.04);
+  --panel: #ffffff;
+  --pop: #ffffff;
+  --surface: #f1f4f8;
+  --field: #f7f9fb;
+  --line: #d3dbe5;
+  --line-strong: #9aa8ba;
+  --text: #14202d;
+  --muted: #4f5d6e;
+  --faint: #5f6b7a;
+  --dim: #a3adba;
+  --log-text: #2c3a4a;
+  --accent: #1b3a6b;
+  --accent-hover: #24508f;
+  --accent-press: #132a4f;
+  --on-accent: #ffffff;
+  --accent-text: #1b3a6b;
+  --accent-line: #8fa6c8;
+  --accent-tint: #e6edf7;
+  --accent-tint-strong: #d3e0f1;
+  --accent-off: #d5dce6;
+  --on-accent-off: #5f6b7a;
+  --chip-bg: #eaf0f8;
+  --pop-select: #d3e0f1;
+  --selection: #c9d8ee;
+  --focus: #c8102e;
+  --ok: #157a3c;
+  --ok-bg: #e8f5ec;
+  --ok-line: #9fd0b0;
+  --danger: #c8102e;
+  --warn: #9a6a00;
+  --scrim: rgb(20 32 45 / 0.45);
+  --shadow: 0 18px 48px rgb(20 32 45 / 0.25);
+  --mark-bg: #1b3a6b;
+  --mark-ball: #ffffff;
+  --mark-seam: #c8102e;
+  --chev: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 7'%3E%3Cpath d='M1 1l5 5 5-5' fill='none' stroke='%234f5d6e' stroke-width='1.6'/%3E%3C/svg%3E");
+  --chev-hover: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 7'%3E%3Cpath d='M1 1l5 5 5-5' fill='none' stroke='%2314202d' stroke-width='1.6'/%3E%3C/svg%3E");
+  --chev-off: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 7'%3E%3Cpath d='M1 1l5 5 5-5' fill='none' stroke='%23a3adba' stroke-width='1.6'/%3E%3C/svg%3E");
+  --tick-off: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath d='M4.2 8.3l2.7 2.7 5.1-5.7' fill='none' stroke='%23ffffff' stroke-width='1.9' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
 }
 
 *, *::before, *::after { box-sizing: border-box; }
@@ -541,3 +636,31 @@ figure .label { display: block; margin-bottom: 6px; }
 
 @media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
 
+/* ---- layout proposals (v0.4.0, screenshot-only until one is picked) ------------------------ */
+/* L1 save bar: step 03 stays pinned to the bottom of the window, so the main action is always in view */
+[data-layout~="savebar"] #card-save { position: sticky; bottom: 0; z-index: 2; border-color: var(--accent-line);
+  border-radius: var(--card-radius) var(--card-radius) 0 0; box-shadow: 0 -12px 32px rgb(0 0 0 / 0.35); }
+/* L2 compact game: once the game checks out, step 01 folds into one line (the path turns green) */
+[data-layout~="compact"] #card-game:has(.status.ok) { flex-direction: row; align-items: center; }
+[data-layout~="compact"] #card-game:has(.status.ok) > header { flex: none; border-bottom: 0; }
+[data-layout~="compact"] #card-game:has(.status.ok) > .body { padding: 8px var(--pad) 8px 0; }
+[data-layout~="compact"] #card-game:has(.status.ok) .status { display: none; }
+[data-layout~="compact"] #card-game:has(.status.ok) #game-path { border-color: var(--ok-line); color: var(--ok); }
+/* L3 two-line rows: slot and colour on top, animations and textures under them; a line between clones */
+[data-layout~="rows2"] { --row-cols: 20px minmax(0, 1fr) 110px 26px 28px; }
+[data-layout~="rows2"] .clone-row { grid-template-areas: "r s c w x" ". a t t t"; row-gap: 6px; margin: 0; padding: 8px 0;
+  border-bottom: 1px solid var(--line); }
+[data-layout~="rows2"] .clone-row.head { padding-top: 0; }
+[data-layout~="rows2"] .clone-row > :nth-child(1) { grid-area: r; }
+[data-layout~="rows2"] .clone-row > :nth-child(2) { grid-area: s; }
+[data-layout~="rows2"] .clone-row > :nth-child(3) { grid-area: c; }
+[data-layout~="rows2"] .clone-row > :nth-child(4) { grid-area: w; }
+[data-layout~="rows2"] .clone-row > :nth-child(5) { grid-area: a; }
+[data-layout~="rows2"] .clone-row > :nth-child(6) { grid-area: t; }
+[data-layout~="rows2"] .clone-row > :nth-child(7) { grid-area: x; }
+[data-layout~="rows2"] .clone-row.head > .label:first-child { visibility: hidden; }
+/* L4 advanced with save: the options that shape the whole game (menus, stats, shading, working
+   folder) move from step 02 to step 03, next to the button they affect */
+[data-layout~="advsave"] #card-save .body > .line.end { justify-content: flex-start; margin: -6px 0 0 -12px; }
+[data-layout~="advsave"] #card-save #adv { margin-bottom: 16px; }
+[data-layout~="advsave"] #card-save #adv hr { margin-top: 8px; }
