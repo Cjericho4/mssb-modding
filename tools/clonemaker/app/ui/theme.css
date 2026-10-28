@@ -372,6 +372,7 @@ input:not([type]), select {
 }
 input:not([type]):hover, select:hover:not(:disabled) { border-color: var(--muted); }
 input:not([type]):focus, select:focus { border-color: var(--accent); }
+input:not([type]):focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
 input:not([type]):disabled, select:disabled { background-color: transparent; border-color: var(--line); color: var(--dim); }
 input.path { font: 12px var(--mono); font-variant-ligatures: none; }
 input.path::placeholder { color: var(--faint); font-family: var(--sans); }
@@ -449,8 +450,8 @@ input[type="range"]:disabled::-webkit-slider-thumb { background: var(--dim); }
 .status { margin-top: 8px; color: var(--muted); font-weight: 500; }
 .status.ok { color: var(--ok); }
 .status.bad { color: var(--danger); }
-/* until a game is chosen, choosing one is the thing to do */
-#card-game:has(#game-path:placeholder-shown) #btn-iso:not(:disabled) { border-color: var(--accent); background: var(--accent-tint); }
+/* until a usable game is chosen, choosing one is the thing to do */
+#card-game:is(:has(#game-path:placeholder-shown), :has(.status.bad)) #btn-iso:not(:disabled) { border-color: var(--accent); background: var(--accent-tint); }
 
 /* ---- 02 clones ---------------------------------------------------------------------------- */
 /* one block per cloned character */
