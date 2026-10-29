@@ -62,6 +62,11 @@ export async function run(options, app) {
     say(`window ${innerWidth}x${innerHeight}, device pixel ratio ${devicePixelRatio}, screen ${screen.availWidth}x${screen.availHeight}`);
     check($("btn-go").disabled && $("source").disabled && $("btn-export").disabled && $("btn-blender").disabled && !$("btn-iso").disabled, "inputs wait for a game");
     await shot("empty");
+    app.showWelcome();
+    check(!$("welcome").hidden && document.activeElement === $("welcome-iso"), "the launch dialog asks for the game");
+    await shot("welcome");
+    $("welcome-later").click();
+    check($("welcome").hidden, "Not now closes the launch dialog");
 
     // The roster becomes chips above the stage at the minimum supported width.
     await resizeTo(640, 560);

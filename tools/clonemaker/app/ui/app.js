@@ -134,7 +134,7 @@ function setModal(box, open) {
 document.addEventListener("keydown", (e) => {
   const box = [...document.querySelectorAll(".modal")].find((m) => !m.hidden);
   if (!box) return;
-  if (e.key === "Escape" && box.id === "preview-modal") {
+  if (e.key === "Escape" && (box.id === "preview-modal" || box.id === "welcome")) {
     setModal(box, false);
     e.preventDefault();
   }
@@ -646,6 +646,8 @@ function colourChanged(row) {
     selectPreviewRow(row, true);
   };
   row.colourSelect.value = row.colour;
+  const at = row.swatches?.querySelector(".sw.custom")?.getBoundingClientRect();
+  if (at) Object.assign(picker.style, { left: at.left + "px", top: at.bottom + "px" });
   picker.click();
 }
 
@@ -994,10 +996,26 @@ async function main() {
 
   const options = await invoke("launch_options");
   $("feedback").addEventListener("click", () => invoke("open_feedback"));
-  if (!options.selftest) checkForUpdate();
-  if (options.selftest) {
-    await import("./selftest.js").then((m) => m.run(options, { state, startLoad, exportTextures, exportBlender, setRowTextures, showInfo, stage }));
+  for (const [id, pick] of [["welcome-iso", chooseIso], ["welcome-dir", chooseFolder], ["welcome-later", null]]) {
+    $(id).addEventListener("click", () => {
+      setModal($("welcome"), false);
+      pick?.();
+    });
   }
+  if (!options.selftest) {
+    checkForUpdate();
+    showWelcome();
+  }
+  if (options.selftest) {
+    await import("./selftest.js").then((m) => m.run(options, { state, startLoad, exportTextures, exportBlender, setRowTextures, showInfo, showWelcome, stage }));
+  }
+}
+
+/** On launch with no game yet: ask for it in a dialog instead of leaving it to the top bar. */
+function showWelcome() {
+  if (state.game) return;
+  setModal($("welcome"), true);
+  $("welcome-iso").focus();
 }
 
 /** Show a header button when GitHub has a newer release; quietly does nothing offline. */

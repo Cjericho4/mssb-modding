@@ -246,3 +246,6 @@ h2, h3, p { margin-top: 0; }
 .stage:not([data-stage="ready"]) canvas.model, .stage[data-stage="ready"] svg.fig, .stage[data-stage="loading"] svg.fig { display: none; }
 /* With no game yet, the group's hint already says to choose one. */
 .no-game-hint:not([hidden]) ~ .basebox .regions { display: none; }
+/* Invisible but not clipped: WebKit on macOS won't open the colour panel for a fully clipped input.
+   app.js moves it onto the clicked swatch so the panel opens next to it. */
+#picker { position: fixed; left: -100px; top: 0; width: 1px; height: 1px; padding: 0; border: 0; opacity: 0; }

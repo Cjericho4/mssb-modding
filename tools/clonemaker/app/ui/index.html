@@ -73,6 +73,14 @@
   </div>
 </div>
 
+<div id="welcome" class="modal" hidden>
+  <div class="dialog welcome" role="dialog" aria-modal="true" aria-labelledby="welcome-title" aria-describedby="welcome-text">
+    <header><span class="chip neutral">01</span><h2 id="welcome-title">Choose your game</h2></header>
+    <p id="welcome-text">Pick your own copy of Mario Superstar Baseball (USA): the .iso, or a folder extracted from it. The Clone Maker never changes it; it saves a new game next to it.</p>
+    <div class="line end"><button id="welcome-later">Not now</button><button id="welcome-dir">A folder…</button><button id="welcome-iso" class="primary">Choose your game (.iso)…</button></div>
+  </div>
+</div>
+
 <div id="blender" class="modal" hidden>
   <div class="dialog" role="dialog" aria-modal="true" aria-labelledby="blender-title">
     <header><span class="chip neutral">3D</span><h2 id="blender-title">Export 3D Model</h2></header>
@@ -94,7 +102,7 @@
     <div class="large-pics"><figure><figcaption>Before</figcaption><img id="large-before" alt="Original character textures"></figure><figure><figcaption>After</figcaption><img id="large-after" alt="Selected clone textures"></figure></div>
   </div>
 </div>
-<input type="color" id="picker" class="offscreen" tabindex="-1" aria-label="Custom colour">
+<input type="color" id="picker" tabindex="-1" aria-label="Custom colour">
 <template id="group-tpl">
   <section class="group">
     <p class="no-game-hint muted">Choose your game first. Then pick the colours, slots and animations of each clone here.</p>
