@@ -371,7 +371,7 @@ async function rebuildRows(g, reset) {
     const slot = await invoke("next_free_slot", { source: g.source, used });
     wanted = slot === null ? [] : [{ slot, colour: "blue" }];
   } else if (reset || !g.rows.length) {
-    wanted = g.info.default_rows;
+    wanted = g.info.default_rows.slice(0, 1); // one clone to start; "+ Add another clone" for more
     for (const r of g.rows) setRowTextures(r, null);
   } else {
     wanted = [];
