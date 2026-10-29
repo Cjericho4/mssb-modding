@@ -386,6 +386,14 @@ export async function run(options, app) {
       say(`3D stage: ${name} in ${Math.round(performance.now() - t0)} ms (model and pictures ${Math.round(drawn)} ms)`);
       await shot("stage_" + name.toLowerCase().replaceAll(" ", "_"));
     }
+    // dragging turns the model round to its back; a double-click faces it forward again
+    const canvas = box.querySelector("canvas.model");
+    const drag = (type, x) => canvas.dispatchEvent(new PointerEvent(type, { clientX: x, pointerId: 1, bubbles: true }));
+    drag("pointerdown", 100);
+    drag("pointermove", 362);
+    drag("pointerup", 362);
+    await shot("stage_mario_back");
+    canvas.dispatchEvent(new MouseEvent("dblclick", { bubbles: true }));
     const row = app.state.groups[0].rows[0];
     for (const colour of ["red", "green", "purple", "orange", "blue"]) {
       const t0 = performance.now();

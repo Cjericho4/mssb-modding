@@ -55,7 +55,12 @@ export function create(stage) {
         mixer.setTime(0);
         const materials = new Set();
         root.traverse((o) => o.material && materials.add(o.material));
-        return { root, mixer, materials: [...materials], box };
+        // turn about the model's own vertical axis, not the scene origin
+        const centre = box.getCenter(new THREE.Vector3()), spin = new THREE.Group();
+        spin.position.set(centre.x, 0, centre.z);
+        root.position.set(-centre.x, 0, -centre.z);
+        spin.add(root);
+        return { root: spin, mixer, materials: [...materials], box };
       });
       models.set(source, model);
       model.catch(() => models.delete(source));
@@ -138,6 +143,29 @@ export function create(stage) {
     pictures = textures;
   }
 
+  // drag to turn the model all the way round; double-click faces it forward again
+  let yaw = 0, dragX = null;
+  const turn = (to) => {
+    yaw = to;
+    if (current) current.root.rotation.y = yaw;
+    draw();
+  };
+  canvas.title = "Drag to turn · double-click to reset";
+  canvas.addEventListener("pointerdown", (e) => {
+    dragX = e.clientX;
+    try {
+      canvas.setPointerCapture(e.pointerId);
+    } catch {} // synthetic pointers (the self-test) have nothing to capture
+  });
+  canvas.addEventListener("pointermove", (e) => {
+    if (dragX === null) return;
+    turn(yaw + (e.clientX - dragX) * 0.012);
+    dragX = e.clientX;
+  });
+  canvas.addEventListener("pointerup", () => (dragX = null));
+  canvas.addEventListener("pointercancel", () => (dragX = null));
+  canvas.addEventListener("dblclick", () => turn(0));
+
   new ResizeObserver(frameCamera).observe(stage);
   new IntersectionObserver(([e]) => {
     visible = e.isIntersecting && !document.hidden;
@@ -175,6 +203,7 @@ export function create(stage) {
           if (current) scene.remove(current.root);
           current = Object.assign(model, { source });
           if (still.matches) current.mixer.setTime(0);
+          model.root.rotation.y = yaw;
           scene.add(model.root);
         }
         setPictures(textures);
