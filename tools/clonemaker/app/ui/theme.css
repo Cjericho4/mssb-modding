@@ -313,8 +313,10 @@ h2, h3, p { margin-top: 0; }
 .insp .sw { width: 32px; height: 32px; }
 .insp .basebox { display: grid; gap: 10px; }
 .insp .basebox h2 small { display: block; margin: 4px 0 0; }
-.insp .rowbtns > * { flex: 1 1 140px; }
+.insp .rowbtns { flex-direction: column; align-items: stretch; }
+.insp .rowbtns > * { width: 100%; }
 .insp .source-label .source { width: 100%; }
+.source-label { display: grid; gap: 6px; align-items: stretch; }
 .inspector[data-tab="clone"] .basebox, .inspector[data-tab="base"] .rows, .inspector[data-tab="base"] .no-game-hint { display: none; }
 .insp .clone-row .regions { margin-top: -6px; }
 .insp .clone-row .regions .hint { flex-basis: 100%; }
@@ -388,3 +390,14 @@ h2, h3, p { margin-top: 0; }
 :root[data-theme="night"] .modal, :root[data-theme="gold"] .modal { background: #000b; }
 .theme-pick { display: flex; align-items: center; gap: 10px; margin-bottom: 8px; }
 .theme-pick select { width: 160px; }
+.ctxmenu { position: fixed; z-index: 20; min-width: 200px; padding: 5px; border: 1px solid var(--rule); border-radius: 8px; background: var(--card); color: var(--ink); box-shadow: 0 12px 36px rgb(0 0 0 / .35); }
+.ctxmenu button { display: block; width: 100%; border: 0; background: transparent; text-align: left; padding: 6px 10px; border-radius: 5px; }
+.ctxmenu button:hover:not(:disabled), .ctxmenu button:focus-visible { background: var(--paper); outline: 0; }
+.ctxmenu hr { border: 0; border-top: 1px solid var(--rule); margin: 4px 2px; }
+/* Tour: everything dims except the part being explained; the card sits beside it. */
+.modal.tour { display: block; background: transparent; padding: 0; }
+.tour .spot { position: fixed; border-radius: 10px; box-shadow: 0 0 0 4px var(--ice), 0 0 0 9999px rgb(0 0 0 / .62); transition: all .2s; pointer-events: none; }
+.tour .card { position: fixed; width: 320px; max-width: calc(100vw - 16px); padding: 16px 18px 14px; border-radius: 10px; background: var(--card); color: var(--ink); border-top: 3px solid var(--ice); box-shadow: 0 18px 60px #0007; }
+.tour .card h2 { font: 700 22px/1.1 var(--display); margin: 8px 0 6px; }
+.tour .card p { margin: 0 0 14px; line-height: 1.45; }
+@media (prefers-reduced-motion: reduce) { .tour .spot { transition: none; } }

@@ -15,6 +15,7 @@ changes your original game. It saves a new `.iso` next to it.
 [What you need](#what-you-need) ·
 [1. Get the app](#1-get-the-app) ·
 [2. Choose your game](#2-choose-your-game) ·
+[Finding your way around](#finding-your-way-around) ·
 [3. Set up your clones](#3-set-up-your-clones) ·
 [4. Create the game](#4-create-the-game) ·
 [5. Play it](#5-play-it) ·
@@ -39,7 +40,7 @@ changes your original game. It saves a new `.iso` next to it.
    (no GitHub account needed).
 2. Under **Assets**, download:
    - **Windows:** `MSSB-Clone-Maker.exe`. Put it anywhere (the Desktop is fine) and double-click it.
-     Nothing to install.
+     Nothing to install. If Windows blocks it, see [Troubleshooting](#troubleshooting).
    - **Mac:** `MSSB-Clone-Maker-Mac.zip`. Double-click the zip to get **MSSB Clone Maker.app**.
      The first time, macOS blocks it because the app isn't signed with a paid Apple account:
      double-click it, click **Done**, then go to **System Settings → Privacy & Security** and click
@@ -49,40 +50,56 @@ changes your original game. It saves a new `.iso` next to it.
 
 ## 2. Choose your game
 
-Click **Choose your game (.iso)…** and pick your Mario Superstar Baseball `.iso`. The line under the
-button turns green, **"Mario Superstar Baseball (USA) - OK"**, or red with the reason (wrong file,
-not the USA version, already patched, …). An extracted game folder works too (**or a folder…**).
+The first time you open the app it asks for your game. Click **Choose your game (.iso)…** and pick
+your Mario Superstar Baseball `.iso` (an extracted game folder works too: **A folder…**). The dot at
+the top turns green, **GYQE01 ready**, or the app says what's wrong (wrong file, not the USA version,
+already patched, …). You can choose a different game later from the top bar.
+
+The first time a game loads, a short **tour** points out each part of the screen. **Take the tour**
+under **Advanced options**, or in the right-click menu, shows it again.
+
+## Finding your way around
+
+- **The dock (left):** a badge for each character you clone (**Ma** for Mario), with a coloured dot
+  for each of its clones. Click a dot to edit that clone. A red **×** on a dot means two clones want
+  the same slot. **+** under a character adds another clone of it; the **+** at the bottom clones
+  another character. The arrow at the bottom opens the dock: names, a ✓ or ⚠ per clone, and a
+  **Checks** card that says what still needs fixing.
+- **The stage (middle):** the selected clone as it will look in the game. Drag it to turn it, or
+  use **Front**, **Side**, **Back**, the turn arrows, slow spin and reset under it. **Textures** (top
+  right) shows every texture of the character, before and after, at full size; **Enlarge** opens them
+  in a window.
+- **The editor (right):** the first tab is the selected clone (see below). The second tab, named after
+  the character (for example **Mario · 4 clones**), is about the character these clones copy.
+- **Right-click** a clone, a character or the stage for shortcuts (remove a clone, export, turn the
+  model, …). **Start over…** clears every clone and choice after asking; your game is never touched.
+- **Game plan** and **Stats** are marked *Later*: they're coming in a future version.
 
 ## 3. Set up your clones
 
-**Character to clone** is who gets copied (Mario by default).
+The app starts with one clone of Mario. On the clone's tab:
 
-**Colours to change** lists the character's own colours, each with a small swatch. The main one is
-ticked: Mario's red, Luigi's green, Peach's pink dress, Donkey Kong's brown fur, a Koopa's shell and
-so on. Tick more to change them too (for example Mario's blue overalls). Skin, eyes and the
-baseball glove never change. White, black and grey characters (Boo, King Boo, Black Shy Guy, Gray
-Dry Bones) are tinted instead: pick Blue and Boo becomes a blue Boo.
-
-**Clones** has one row per copy:
-
-| Column | What it does |
+| Setting | What it does |
 |---|---|
-| ◉ (round button) | Shows this clone in the **Preview** on the right: every texture, before and after. |
-| **Slot it takes over** | Which existing character becomes the copy. The first choices, marked *recommended*, are the extra colours of Toad (and of Shy Guy, Koopa, Magikoopa, …): the character select screen stays exactly as it was. Choices marked *replaces X on the select screen* turn that character (for example Luigi) into the copy. |
-| **Colour** | A colour from the list, or **Custom…** for any colour (only its hue is used; the light and dark shading comes from the original). Hidden when the clone uses its own textures. |
+| **Slot it takes over** | Which existing character becomes the copy. The first choices, marked ★ *recommended*, are the extra colours of Toad (and of Shy Guy, Koopa, Magikoopa, …): the character select screen stays exactly as it was. Choices marked *replaces X on the select screen* turn that character (for example Luigi) into the copy. × marks a slot another clone already uses. |
+| **Colour** | One of the swatches, or the rainbow one for any colour (only its hue is used; the light and dark shading comes from the original). On a Mac the rainbow swatch may need a double-click. |
+| **Colours to change** | The character's own colours, each with a small swatch. The main one is ticked: Mario's red, Luigi's green, Peach's pink dress, Donkey Kong's brown fur, a Koopa's shell and so on. Tick more to change them too (for example Mario's blue overalls). Skin, eyes and the baseball glove never change. White, black and grey characters (Boo, King Boo, Black Shy Guy, Gray Dry Bones) are tinted instead: pick Blue and Boo becomes a blue Boo. These ticks apply to **all** clones of that character. |
 | **Animations** | Whose animations the clone plays. Normally the character's own. See [Animations from another character](#animations-from-another-character). |
-| **Own textures** | **My textures…** uses pictures you painted instead of a colour. See [Your own textures](#your-own-textures). **×** goes back to the colour. |
+| **Own textures** | **My textures…** uses pictures you painted instead of a colour. See [Your own textures](#your-own-textures). **×** goes back to the colour. **Remove clone** removes it. |
 
-**+ Add a clone** adds a row; the **×** at the end of a row removes it. The default is four Marios
-on the four Toad colours: blue, green, purple and yellow.
+On the character's tab, **These clones copy** picks a different character to make the clones from;
+they keep their colours, and their slots where they can.
+
+Add more clones with the **+** under the character in the dock: for example four Marios on the four
+Toad colours.
 
 ## 4. Create the game
 
 The new game is saved next to your original as `… - Clones.iso` (change it with **Save as…**).
-Click **Create patched game**. It takes under a minute, mostly copying the 1.4 GB game. The bar shows
+Click **Create Patched Game** (bottom right). It takes under a minute, mostly copying the 1.4 GB game. The bar shows
 each stage, and **Cancel** stops it and cleans up.
 
-The **Log** on the right shows what it is doing. The same log is saved as `… - Clones.log` next to the
+**Log** (bottom left) shows what it is doing. The same log is saved as `… - Clones.log` next to the
 new game: attach that file if you report a problem.
 
 ## 5. Play it
@@ -110,11 +127,12 @@ One game can hold clones of more than one character, for example two Mario recol
 colours and a green Bowser on a Shy Guy slot.
 
 1. Set up the first character's clones as usual.
-2. Click **+ Clone another character** (under the clones). A new section appears with its own
-   **Character to clone** (the next character nobody uses yet) and one clone on a free slot.
-3. Each section works like the first: its own colours to change, clones, animations, textures and
-   **Export Textures**. The **×** at the top right of a section removes that character and its
-   clones.
+2. Click the **+** at the bottom of the dock (**Clone another character**). A new badge appears with
+   one clone on a free slot, copying the next character nobody uses yet. Pick who it copies with
+   **These clones copy** on the character's tab.
+3. Each character works like the first: its own colours to change, clones, animations, textures and
+   exports. To remove a character and its clones, use **Remove … and its clones** on its tab, or
+   right-click its badge.
 
 A slot can only be used once in the whole game, and a character you clone can't also be replaced.
 Slots another section already uses are greyed out with *(used by another character)*.
@@ -124,20 +142,20 @@ Slots another section already uses are greyed out with *(used by another charact
 
 Paint a character any way you like instead of picking a colour.
 
-1. Choose the **Character to clone**, then click **Export Textures** and pick a place to save.
+1. On the character's tab, click **Export Textures** and pick a place to save.
    The app makes a folder (for example *Mario textures*) with one PNG picture per texture and a
    `README.txt`.
 2. Paint over the pictures in any paint program. **Keep each picture's size and file name.**
    To leave a texture as it was, don't change its picture (or delete it).
-3. On a clone row, click **My textures…** and pick that folder. The Preview shows your textures,
-   and the **Colour** column is hidden for that row: a clone with its own textures gets no colour
+3. On the clone's tab, click **My textures…** and pick that folder. The stage shows your textures,
+   and the colour swatches are turned off for that clone: a clone with its own textures gets no colour
    change, so everything you didn't paint keeps the original colours.
 
 If a picture has the wrong size or name, the app says which one before it makes the game.
 
 ## Animations from another character
 
-The **Animations** dropdown on a clone row makes the clone move like someone else, for example
+The **Animations** dropdown on the clone's tab makes the clone move like someone else, for example
 Mario with Luigi's animations.
 
 - The list only offers characters whose skeleton fits the clone.
@@ -152,7 +170,7 @@ Mario with Luigi's animations.
 Look at any character's model, skeleton and animations in [Blender](https://www.blender.org/)
 (3.6 or newer), for example to study a move up close.
 
-1. Choose your game, then click **Export 3D Model** (next to **Export Textures**).
+1. Choose your game, then click **Export 3D Model** on the character's tab.
 2. Pick the **Character**; it starts with the one you're cloning. Leave **All animations** ticked
    for every batting, running, fielding and pitching move (about 115), or untick it for just the
    normal swing (a much smaller file).
@@ -189,6 +207,8 @@ with several characters, each clone follows the character it copies.
 - **Keep shading:** how closely the new colour follows the original's light and dark areas. Higher
   keeps more of the original shading; lower is brighter and flatter.
 - **Keep the working folder:** for troubleshooting only.
+- **Theme:** **Night** (dark, the default), **Gold** (dark brown and gold) or **Light**.
+- **Take the tour:** shows the first-time tour again.
 
 ## Known issues
 
@@ -211,6 +231,11 @@ with several characters, each clone follows the character it copies.
 - **"not the USA version"**: only the USA (NTSC-U) disc, game ID GYQE01, is supported.
 - **"Windows protected your PC"** when starting the `.exe` (not everyone sees this): click
   **More info**, then **Run anyway**.
+- **Smart App Control blocked it** (Windows 11; there's no Run anyway button): right-click the
+  downloaded file → **Properties**, tick **Unblock** at the bottom, click **OK**, and open it again.
+  If it is still blocked, the only other way is turning Smart App Control off (Windows Security →
+  App & browser control), which Windows won't let you turn back on without resetting Windows, so
+  only do that if you're sure.
 - **Project Rio: the game crashes or the clones look wrong**: turn off Rio's Gecko codes for this game
   (right-click the game → **Properties** → **Gecko Codes**, untick them all).
 - **Not enough disk space**: free up about 3.5 GB on the drive you save to, or **Save as…** onto

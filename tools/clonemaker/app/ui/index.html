@@ -61,6 +61,7 @@
   <div class="tabs" role="tablist"><button id="tab-clone" role="tab" class="on" aria-selected="true">Clone</button><button id="tab-base" role="tab" aria-selected="false">Character<small id="tab-base-count"></small></button></div>
   <div id="groups" class="inspector" data-tab="clone"></div>
       <div id="adv" hidden>
+        <div class="theme-pick"><button id="btn-tour">Take the tour</button></div>
         <label class="theme-pick"><span class="label">Theme</span><select id="theme"><option value="night">Night (dark)</option><option value="gold">Gold (dark)</option><option value="light">Light</option></select></label>
         <hr>
         <label class="check"><input type="checkbox" id="chk-ui" checked><span id="chk-ui-text"></span></label>
@@ -120,6 +121,14 @@
     <div class="large-pics"><figure><figcaption>Before</figcaption><img id="large-before" alt="Original character textures"></figure><figure><figcaption>After</figcaption><img id="large-after" alt="Selected clone textures"></figure></div>
   </div>
 </div>
+<div id="tour" class="modal tour" hidden>
+  <div class="spot"></div>
+  <div class="card" role="dialog" aria-modal="true" aria-labelledby="tour-title" aria-describedby="tour-text">
+    <span id="tour-step" class="chip"></span><h2 id="tour-title"></h2><p id="tour-text"></p>
+    <div class="line end"><button id="tour-skip">Skip the tour</button><button id="tour-next" class="primary">Next</button></div>
+  </div>
+</div>
+<div id="ctxmenu" class="ctxmenu" role="menu" hidden></div>
 <input type="color" id="picker" tabindex="-1" aria-label="Custom colour">
 <template id="group-tpl">
   <section class="group">
@@ -128,7 +137,7 @@
     <section class="basebox">
       <h2><span class="base-name">Mario</span><small>the character these clones copy</small></h2>
       <div class="regions"><span class="hint">Colours to change</span><div class="regions-box"></div><p class="regions-hint muted">Choose your game first.</p></div>
-      <div class="rowbtns"><label class="source-label"><select class="source" aria-label="Character to clone"></select></label><button class="export">Export Textures</button><button class="blender">Export 3D Model</button><button class="drop danger">Remove Mario and its clones</button></div>
+      <div class="rowbtns"><label class="field source-label"><span class="lab">These clones copy</span><select class="source"></select><span class="hint">Pick another character to make these clones from instead. They keep their colours, and their slots where they can.</span></label><button class="export">Export Textures</button><button class="blender">Export 3D Model</button><button class="drop danger">Remove Mario and its clones</button></div>
     </section>
   </section>
 </template>

@@ -51,6 +51,7 @@ const stage = import("./stage.js").then((m) => m.create(document.querySelector("
   document.querySelector(".stage").dataset.stage = "fallback";
   return null;
 });
+let stageCtl = null; // the stage's controller once loaded (null without WebGL)
 const withSuffix = (path, suffix) => path.replace(/\.[^./\\]*$/, "") + suffix;
 const fileName = (path) => path.split(/[\\/]/).pop();
 const initials = (name) => (name.split(/\s+/).length > 1 ? name.split(/\s+/).map((w) => w[0]).join("").slice(0, 2) : name.slice(0, 2));
@@ -135,6 +136,10 @@ function setModal(box, open) {
 document.addEventListener("keydown", (e) => {
   const box = [...document.querySelectorAll(".modal")].find((m) => !m.hidden);
   if (!box) return;
+  if (e.key === "Escape" && box.id === "tour") {
+    startTour(TOUR.length);
+    e.preventDefault();
+  }
   if (e.key === "Escape" && (box.id === "preview-modal" || box.id === "welcome")) {
     setModal(box, false);
     e.preventDefault();
@@ -222,6 +227,7 @@ async function startLoad(path) {
   while (state.groups.length > 1) dropGroup(state.groups[state.groups.length - 1]);
   state.groups[0].info = state.groups[0].infoSource = null;
   await loadSource(state.groups[0], true);
+  if (!state.selftest && !remembered("toured")) startTour();
 }
 
 // ---------------------------------------------------------------- characters, regions, rows
@@ -246,7 +252,7 @@ function newGroup(source) {
     if (g.rows.length) selectPreviewRow(g.rows[0], true);
     else renderRoster();
   });
-  g.ui.source.replaceChildren(...state.sources.map((s) => el("option", { value: s.id, textContent: "Change to… " + s.name })));
+  g.ui.source.replaceChildren(...state.sources.map((s) => el("option", { value: s.id, textContent: s.name })));
   g.ui.source.value = String(source);
   g.ui.source.addEventListener("change", () => sourceChanged(g));
   g.ui.add.addEventListener("click", () => serial(() => addRow(g)));
@@ -387,6 +393,7 @@ async function rebuildRows(g, reset) {
   }
   while (g.rows.length > wanted.length) {
     const row = g.rows.pop();
+    if (row.el.contains(g.ui.regions)) g.ui.basehead.after(g.ui.regions);
     row.el.remove();
     row.entry.remove();
   }
@@ -1004,12 +1011,23 @@ async function main() {
     $("keeplum-value").textContent = Number($("keeplum").value).toFixed(2);
     schedulePreview();
   });
-  setDock(localStorage.getItem("dock") === "open");
-  let theme = "night";
-  try {
-    theme = localStorage.getItem("theme") || theme;
-  } catch {}
-  setTheme(theme);
+  stage.then((s) => (stageCtl = s));
+  document.addEventListener("contextmenu", showContextMenu);
+  const hideMenu = () => ($("ctxmenu").hidden = true);
+  addEventListener("pointerdown", (e) => !$("ctxmenu").contains(e.target) && hideMenu(), true);
+  addEventListener("blur", (e) => e.target === window && hideMenu()); // the window, not a control inside it
+  addEventListener("resize", hideMenu);
+  document.addEventListener("keydown", (e) => {
+    if (e.key === "Escape") $("ctxmenu").hidden = true;
+    // F5 / Ctrl+R / Cmd+R would reload the window and lose everything: ask first
+    if (e.key === "F5" || ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "r")) {
+      e.preventDefault();
+      startOver();
+    }
+  });
+  setDock(remembered("dock") === "open");
+  setTheme(remembered("theme") || "night");
+  $("btn-tour").addEventListener("click", () => startTour());
   $("theme").addEventListener("change", () => setTheme($("theme").value));
   for (const tab of ["clone", "base"]) $("tab-" + tab).addEventListener("click", () => setTab(tab));
   $("btn-dock").addEventListener("click", () => setDock(!document.body.classList.contains("dock-open")));
@@ -1042,6 +1060,7 @@ async function main() {
   });
 
   const options = await invoke("launch_options");
+  state.selftest = options.selftest;
   $("feedback").addEventListener("click", () => invoke("open_feedback"));
   for (const [id, pick] of [["welcome-iso", chooseIso], ["welcome-dir", chooseFolder], ["welcome-later", null]]) {
     $(id).addEventListener("click", () => {
@@ -1058,14 +1077,130 @@ async function main() {
   }
 }
 
+// ---------------------------------------------------------------- tour
+/** A first-time walk through the screen, one part at a time. Shown after the first game loads;
+ *  "Take the tour" in Advanced options and the right-click menu shows it again. */
+const TOUR = [
+  [".rail", "Your clones", "Each character you clone gets a badge here, with a dot for each of its clones. Click a dot to edit that clone. A red × means two clones want the same slot. The arrow at the bottom opens names and checks."],
+  [".stage", "The preview", "Your clone as it will look in the game. Drag it to turn it round, or use the buttons below it. Textures (top right) shows every texture before and after."],
+  [".insp", "Make it yours", "Pick the character slot the clone takes over, its colour, and which of the character's colours change. You can also borrow another character's animations or use textures you painted."],
+  ["#tab-base", "The character", "This tab is about the character your clones copy: copy someone else instead, or export their textures or 3D model."],
+  ["#btn-group", "More characters", "Clone another character too: Luigi, Peach, anyone. Each gets its own badge in the dock."],
+  ["#btn-go", "Make the game", "Choose where to save, then Create Patched Game. Your own game is never changed; a new one is saved next to it."],
+  ["#btn-adv", "Advanced options", "The theme, stats, shading and this tour are in here. Right-click almost anything for shortcuts too."],
+];
+
+function startTour(step = 0) {
+  const tour = $("tour"), spot = tour.querySelector(".spot"), card = tour.querySelector(".card");
+  if (step >= TOUR.length) {
+    setModal(tour, false);
+    remember("toured", "yes");
+    return;
+  }
+  const [sel, title, text] = TOUR[step], target = document.querySelector(sel);
+  if (!target?.getClientRects().length) return startTour(step + 1);
+  $("tour-title").textContent = title;
+  $("tour-text").textContent = text;
+  $("tour-step").textContent = `${step + 1} of ${TOUR.length}`;
+  $("tour-next").textContent = step === TOUR.length - 1 ? "Done" : "Next";
+  $("tour-next").onclick = () => startTour(step + 1);
+  $("tour-skip").onclick = () => startTour(TOUR.length);
+  setModal(tour, true);
+  const r = target.getBoundingClientRect(), pad = 6;
+  Object.assign(spot.style, { left: r.left - pad + "px", top: r.top - pad + "px", width: r.width + 2 * pad + "px", height: r.height + 2 * pad + "px" });
+  // the card goes beside the part: right of it, else left, else above or below
+  const cw = card.offsetWidth, ch = card.offsetHeight, gap = 14;
+  let x = r.right + gap, y = r.top;
+  if (x + cw > innerWidth - 8) x = r.left - gap - cw;
+  if (x < 8) {
+    x = Math.min(Math.max(8, r.left), innerWidth - cw - 8);
+    y = r.top - gap - ch >= 8 ? r.top - gap - ch : r.bottom + gap;
+  }
+  Object.assign(card.style, { left: x + "px", top: Math.min(Math.max(8, y), innerHeight - ch - 8) + "px" });
+  $("tour-next").focus();
+}
+
+/** A remembered preference; storage can be missing or blocked, which only means it's not remembered. */
+function remembered(key) {
+  try {
+    return localStorage.getItem(key);
+  } catch {
+    return null;
+  }
+}
+function remember(key, value) {
+  try {
+    localStorage.setItem(key, value);
+  } catch {}
+}
+
+// ---------------------------------------------------------------- right-click menus
+/** Our own right-click menus instead of the web view's (whose Reload threw the session away).
+ *  Text fields keep the system menu for copy and paste. */
+function contextItems(target) {
+  const ready = state.inputsEnabled && !state.busy;
+  const row = allRows().find((r) => r.entry.contains(target) || r.el.contains(target));
+  const g = row?.group || state.groups.find((x) => x.ui.roster.contains(target) || x.ui.root.contains(target));
+  const s = stageCtl, onModel = s && target.closest(".stage") && document.querySelector(".stage").dataset.mode !== "tex";
+  const items = [];
+  if (row) {
+    const name = row.slotSelect.selectedOptions[0]?.textContent.replace(/^[★×] /, "") || "clone";
+    items.push([`Remove ${name}`, () => removeRow(row), ready]);
+  }
+  if (g) {
+    const base = sourceName(g.source);
+    items.push([`Add another ${base} clone`, () => serial(() => addRow(g)), ready],
+      [`Export ${base}'s textures…`, () => exportTextures(g), ready],
+      [`Export ${base}'s 3D model…`, () => exportBlender(g), ready]);
+    if (state.groups.length > 1) items.push([`Remove ${base} and its clones`, () => removeGroup(g), ready]);
+  }
+  if (onModel) {
+    if (items.length) items.push(null);
+    items.push(["Front", () => s.turn(0)], ["Side", () => s.turn(Math.PI / 2)], ["Back", () => s.turn(Math.PI)],
+      [s.spinning ? "Stop spinning" : "Spin slowly", () => $("btn-spin").click()]);
+  }
+  if (target.closest(".stage")) items.push(document.querySelector(".stage").dataset.mode === "tex"
+    ? ["Show the model", () => setMode("model")] : ["Show the textures", () => setMode("tex")]);
+  if (items.length) items.push(null);
+  items.push(["Clone another character", addGroup, ready], ["Choose your game…", chooseIso, !state.busy], null,
+    ["Take the tour", () => startTour()], ["Start over…", startOver, !state.busy]);
+  return items;
+}
+
+function showContextMenu(e) {
+  if (e.target.closest("input:not([type=checkbox]):not([type=radio]):not([type=range]), textarea, #log")) return;
+  e.preventDefault();
+  if (document.querySelector(".modal:not([hidden])")) return;
+  const menu = $("ctxmenu");
+  menu.replaceChildren(...contextItems(e.target).map((item) => {
+    if (!item) return el("hr");
+    const [label, act, enabled = true] = item;
+    const b = el("button", { textContent: label, disabled: !enabled, role: "menuitem" });
+    b.addEventListener("click", () => {
+      menu.hidden = true;
+      act();
+    });
+    return b;
+  }));
+  menu.hidden = false;
+  const { width, height } = menu.getBoundingClientRect();
+  menu.style.left = Math.min(e.clientX, innerWidth - width - 4) + "px";
+  menu.style.top = Math.min(e.clientY, innerHeight - height - 4) + "px";
+  menu.querySelector("button:not(:disabled)")?.focus();
+}
+
+/** Clears every clone and choice, after asking: what the web view's Reload did without asking. */
+async function startOver() {
+  if (state.busy) return;
+  if (await askYesNo("Start over?", "This clears every clone and choice you've made. Your game and anything already saved stay as they are.")) location.reload();
+}
+
 /** The dock: slim (faces and colour dots) or open over the stage (names, readiness, checks). Remembered. */
 function setDock(open) {
   document.body.classList.toggle("dock-open", open);
   $("btn-dock").ariaExpanded = String(open);
   $("btn-dock").title = open ? "Hide names" : "Show names and checks";
-  try {
-    localStorage.setItem("dock", open ? "open" : "slim");
-  } catch {} // ponytail: only a remembered preference
+  remember("dock", open ? "open" : "slim");
 }
 
 /** The inspector shows the clone's settings, or the character it copies (change, export, remove). */
@@ -1080,9 +1215,7 @@ function setTab(tab) {
 /** Night (the default), Gold or Light; remembered. */
 function setTheme(theme) {
   document.documentElement.dataset.theme = $("theme").value = theme;
-  try {
-    localStorage.setItem("theme", theme);
-  } catch {} // ponytail: only a remembered preference
+  remember("theme", theme);
 }
 
 /** The stage shows the model, or the before/after textures at full size. */

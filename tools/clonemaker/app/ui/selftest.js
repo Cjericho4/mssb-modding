@@ -407,6 +407,24 @@ export async function run(options, app) {
     check(getComputedStyle(canvas).display === "none" && $("img-after").getBoundingClientRect().height > 200, "Textures mode shows big pictures");
     await shot("textures_mode");
     document.querySelector('.modes [data-mode="model"]').click();
+    const stageBox = canvas.getBoundingClientRect();
+    canvas.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, cancelable: true, clientX: stageBox.left + 200, clientY: stageBox.top + 200 }));
+    const menuItems = () => [...$("ctxmenu").querySelectorAll("button")].map((b) => b.textContent);
+    check(!$("ctxmenu").hidden && menuItems().includes("Back") && menuItems().includes("Start over…") && !menuItems().some((t) => /reload/i.test(t)),
+      "the stage's right-click menu: " + menuItems().join(", "));
+    await shot("context_menu");
+    [...$("ctxmenu").querySelectorAll("button")].find((b) => b.textContent === "Back").click();
+    check($("ctxmenu").hidden && document.querySelector('.turn [data-yaw="3.1416"]').classList.contains("on"), "Back from the menu");
+    document.querySelector('.turn [data-yaw="0"]').click();
+    $("btn-tour").click();
+    check(!$("tour").hidden && $("tour-title").textContent === "Your clones", "the tour starts");
+    await shot("tour_1");
+    $("tour-next").click();
+    $("tour-next").click();
+    check($("tour-title").textContent === "Make it yours", "the tour moves on");
+    await shot("tour_3");
+    $("tour-skip").click();
+    check($("tour").hidden, "the tour can be skipped");
     $("tab-base").click();
     check(getComputedStyle(document.querySelector(".group:not([hidden]) .basebox")).display !== "none", "the character tab");
     await shot("character_tab");
