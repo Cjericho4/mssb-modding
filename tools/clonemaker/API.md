@@ -42,7 +42,7 @@ exactly the source's defaults (`region_selection`). `fraction` is 0..1 of the wh
 | `next_free_slot` | `source, used: [id]` | `id \| null` (in `source_info().slots` order) | `next_free_slot` |
 | `anim_choices` | `source` | `[{ id, label, exact, note }]`: the source's own first (`"<Name> (own)"`), then every other set of animation banks its body can wear, exact bone matches before the rest; refused sets are left out, a family that shares its banks appears once by family name (`id` = its first member). `note` lists what differs, one line each | none (#9) |
 | `preview` | `request: { source, slot, colour, keeplum, regions: [index], textures?, anims? }` (with `textures`, the after side is the painted body, no recolour; `anims` other than the source adds `"; animations from <Name>"` to the caption) | `{ before_png, after_png, caption, textures }` (base64 PNG; `textures`: the after side's pictures one PNG each, in archive order, for the 3D stage) | `SourcePreview`, `colour_spec`, `atlas_layout` |
-| `stage_model` | `source` | .glb bytes (an `ArrayBuffer`): the source's in-match body (`effective_body`, as `preview`) playing the batter-idle loop `t2_s00_id75_BatterIdle`, without pictures; each textured material's `extras` holds `{ texture, sampler }` and the window fills in `preview`'s `textures` | none (the window's 3D stage) |
+| `stage_model` | `source` | .glb bytes (an `ArrayBuffer`): the source's in-match body (`effective_body`, as `preview`) playing the fielder's stand-still loop `t4_s00_id0_FielderStandStill`, with the hand and glove the game attaches to the wrists, without pictures; each textured material's `extras` holds `{ texture, sampler }` and the window fills in `preview`'s `textures` | none (the window's 3D stage) |
 | `default_output` | `game_path` | `path` | `default_output` |
 | `validate_job` | `job` | `null \| { error }` | `validate_job` |
 | `export_textures` | `source, folder` | `{ folder, count }`: the PNGs and README.txt went into the new `<folder>/<Name> textures` | none (#37) |
@@ -97,3 +97,8 @@ source's body lacks (`anim_choices` never offers them), so it needs the opened g
 | `launch_options` | | `{ selftest, dir, game }` | tells the page to run its `--selftest` walk-through (`--game`, scratch `dir`) |
 | `selftest_mark` | `name` | | screenshot hook between self-test states (`MSSB_SHOT_CMD`) |
 | `selftest_report` | `ok, lines` | exits the app | the self-test result (stdout or `--log`), exit code 0/1 |
+| `selftest_edit_png` | `path, how` | | the self-test edits an exported texture like a player: `paint` (white stripes) or `junk` (not a PNG) |
+| `selftest_check_gltf` | `path` | `"<nodes> nodes, <animations> animations, <images> images, <bytes> bytes"` | the self-test reads back an exported .gltf as glTF 2.0 |
+| `open_feedback` | | | the **Feedback** button: GitHub's new-issue page (fixed URL) |
+| `open_releases` | | | the **New version** button: the releases page (fixed URL) |
+| `open_blender_guide` | | | the user guide's "Open a character in Blender" section (fixed URL) |

@@ -14,7 +14,7 @@ clones you design. Play it in Project Rio or Dolphin.
 </p>
 
 <p align="center">
-  <img src="docs/clone-maker.png" alt="The Clone Maker window: clones of Mario on the four Toad colours and a Luigi clone, each with its own colour and animations" width="640">
+  <img src="docs/clone-maker.png" alt="The Clone Maker window before a game is chosen: the clone dock on the left, the stage for the clone's 3D model in the middle, and the clone's settings on the right" width="720">
 </p>
 
 > **Beta.** Clones of Mario, Peach, King Boo and Donkey Kong, and games mixing several of them, have
@@ -23,7 +23,8 @@ clones you design. Play it in Project Rio or Dolphin.
 ## What you can do
 
 - **Clones in any colour.** Pick a character, pick which slots it takes over, and give each copy its
-  own colour. A preview shows every texture before and after.
+  own colour. A 3D preview shows the clone as it looks in the game; turn it round to check every
+  side, or see every texture before and after.
 - **Several characters in one game.** Mario recolours on the Toad colours and King Boos on the Shy
   Guy colours, all at once.
 - **Your own textures.** Export a character's textures as pictures, paint them in any paint
@@ -31,7 +32,7 @@ clones you design. Play it in Project Rio or Dolphin.
 - **The real thing, not just a skin.** Each clone gets its character's voice, size, stats and
   chemistry, and its name and picture in the menus.
 - **Animations from another character.** Make a clone move like someone else (characters whose
-  skeleton fits are offered).
+  skeleton fits are offered; not well tested yet).
 - **Open characters in Blender.** Export any character's textured model, skeleton and animations
   to a file Blender opens.
 - **Safe.** Your original game is never changed; the Clone Maker saves a new `.iso` next to it.
@@ -41,8 +42,9 @@ clones you design. Play it in Project Rio or Dolphin.
 1. **Download** `MSSB-Clone-Maker.exe` (Windows) or `MSSB-Clone-Maker-Mac.zip` (Mac) from the
    [latest release](https://github.com/Cjericho4/mssb-modding/releases/latest). Nothing to install.
 2. **Choose your game**: your own Mario Superstar Baseball (USA) `.iso`.
-3. **Set up your clones**: the character to clone, the slots it takes, a colour for each.
-4. **Create patched game**, then open the new `.iso` in Project Rio or Dolphin and put the clones on
+3. **Set up your clones**: the character to clone, the slots it takes, a colour for each. A short
+   tour shows you around the first time.
+4. **Create Patched Game**, then open the new `.iso` in Project Rio or Dolphin and put the clones on
    your team.
 
 The [user guide](tools/clonemaker/README.md) walks through every option, with troubleshooting.

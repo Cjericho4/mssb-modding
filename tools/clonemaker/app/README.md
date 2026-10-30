@@ -1,7 +1,9 @@
 # Clone Maker window (Tauri, #33)
 
-The desktop window for the Rust core in `../core`. It ports `tools/modding/clone_gui.py` (same texts,
-defaults, error messages and layout) and talks to the core only through the commands and events in
+The desktop window for the Rust core in `../core`. It started as a port of `tools/modding/clone_gui.py`
+(same texts, defaults and error messages); since 0.4.0 it has its own layout: a slim dock of clones
+on the left, a stage with the selected clone's 3D model in the middle, and the clone and character
+tabs on the right. It talks to the core only through the commands and events in
 [`../API.md`](../API.md).
 
 - `src/main.rs`: one `api::Core` kept as Tauri state; the API.md commands map one to one onto it.
@@ -9,12 +11,17 @@ defaults, error messages and layout) and talks to the core only through the comm
   each core `Event` (`{event, payload}`) as the Tauri event of that name.
 - `src/selftest.rs`: the `--selftest` mode and the screenshot hook.
 - `ui/`: plain HTML/CSS/JS, no framework and no npm (`withGlobalTauri`). `theme.css` holds the
-  night-arena palette as custom properties; the fonts are bundled with `@font-face` (OFL texts in
+  palette as custom properties, with five themes as `<html data-theme>` overrides (night, the
+  default, honey, ballpark, light, strawberry; picked in Advanced options and kept in
+  `localStorage` with the dock state and whether the tour was seen); the fonts are bundled with `@font-face` (OFL texts in
   `ui/fonts/`).
 - `ui/stage.js`: the stage's 3D model (three.js r186, `three@0.186.1` from npm, vendored in
   `ui/vendor/` with its MIT `LICENSE`: `build/three.core.js`, `build/three.module.js` and
   `examples/jsm/` `GLTFLoader.js`, `BufferGeometryUtils.js`, `SkeletonUtils.js`, whose `'three'` and
   `'../utils/'` imports were pointed at the files next to them). Without WebGL the silhouette stays.
+  It exposes `turn`, `yaw`, `spin` and `onturn` for the turn bar and the right-click menu.
+- `ui/app.js` also draws the right-click menus (the web view's own menu, with Reload, is turned off
+  except in text fields), the first-time tour and the Start over prompt (F5, Ctrl+R, Cmd+R).
 - Its own crate and `Cargo.lock` (no workspace root), depending on `../core` by path.
 
 ## Build
@@ -32,7 +39,7 @@ with Windows 10/11).
 `MSSB-Clone-Maker --selftest [--game <iso or folder>] [--log <file>]` walks through the window and
 exits 0 or 1. A Windows exe has no console, so read the result from `--log`. Without `--game` it
 checks the window only: every widget, bundled fonts, the dialog API, inputs waiting for a game, the
-narrow (stacked) and wide (two-column) layouts, an unusable game's core message and a timed resize
+narrow (stacked) and wide (dock, stage and editor) layouts, an unusable game's core message and a timed resize
 (fails if any median is 100 ms or more; the metric is set-size to next painted frame, so about 16 ms
 means the next frame, and it is not comparable with Tk's "busy time per step"). With `--game` it also
 loads previews, checks the "Animations" dropdown (Mario's own first, Luigi and the Toads offered
@@ -41,7 +48,10 @@ to the new source), switches sources and colours, adds and removes rows, exports
 breaks one (the "not a PNG" error), paints another (`selftest_edit_png`) and sets it on the first
 row ("My textures…", the folder name and its clear button), answers the Replace and error dialogs,
 and runs and cancels a real create in a temporary folder (the log must show the painted texture and
-Luigi's animations on the first clone). With `MSSB_SHOT_CMD` set, the
+Luigi's animations on the first clone). It also times the 3D stage for a dozen characters, drags and
+turns the model (Front, Side, Back), opens the dock and its checks, switches to Textures, opens the
+stage's right-click menu, walks and skips the tour, opens the character tab and screenshots every
+theme. With `MSSB_SHOT_CMD` set, the
 page runs that program with a state name at each step (screenshots; scripts in `selftest/windows/`).
 
 On Linux, `selftest/linux/run.sh [OUT_DIR] [SCREEN]` builds and runs the self-test in Docker
@@ -54,13 +64,13 @@ them out of commits.
 
 `.github/workflows/build-clonemaker.yml` (windows-latest; pushes to `main` / `tauri-*` touching
 `tools/clonemaker/**`, and manual runs): fmt and clippy, `cargo test` (app and core), release build,
-a 1920x1080 screen (the default 1024x768 is too small for two columns), the self-test without a game,
+a 1920x1080 screen (the default 1024x768 is too small for the three-column layout), the self-test without a game,
 then uploads `MSSB-Clone-Maker-Tauri` (the exe) and the self-test screenshots. Retail files cannot be
 in CI, so the full walk-through is run locally.
 
 ## Not covered by the self-test; known differences
 
-- Native file, folder and save dialogs (only their API is checked), the `Custom…` colour dialog
-  (Windows' own; its title cannot be set), the quit-while-busy confirm, hover glow on Windows, and
+- Native file, folder and save dialogs (only their API is checked), the custom colour dialog
+  (the system's own; its title cannot be set, and on a Mac it may need a double-click), the quit-while-busy confirm, hover glow on Windows, and
   dragging the window by hand: part of the user's Rio walk-through (#34).
 - Dialogs are overlays inside the window, not separate OS windows (styled like Tk's).
