@@ -5,7 +5,7 @@
 @font-face { font-family: "Inter"; font-weight: 600; src: url("fonts/Inter-SemiBold.ttf"); }
 @font-face { font-family: "JetBrains Mono"; font-weight: 400; src: url("fonts/JetBrainsMono-Regular.ttf"); }
 
-/* Studio: a character creator. Slate roster rail, a lit stage that takes the clone's colour,
+/* Studio: a character creator. Slate dock rail,
    a stage lit neutrally so the model is the one coloured thing, and the inspector beside it. */
 :root {
   --rail: #1a212c;
