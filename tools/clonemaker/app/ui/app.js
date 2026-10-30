@@ -517,7 +517,8 @@ async function addRow(g, slot = null, colour = null) {
   row.el = el("div", { className: "clone-row" }, [row.radio,
     field("Slot it takes over", [row.slotSelect, el("span", { className: "slot-legend hint", textContent: "★ recommended · × in use" })]),
     colourField, row.colourSelect, row.swatch,
-    row.animField = field("Animations", [row.animSelect, el("span", { className: "hint", textContent: "Makes this clone move like another character. Rarely needed: some moves can look glitchy." })]),
+    row.animField = field("Animations", [row.animSelect, el("span", { className: "hint", textContent: "Makes this clone move like another character. Rarely needed: some moves can look glitchy." }),
+      el("span", { className: "hint caution", textContent: "⚠ Not well tested yet: borrowed animations may change hitboxes (how the clone swings, fields and catches)." })]),
     field("Own textures", [el("div", { className: "texbox" }, [row.texturesBox, row.remove])])]);
   row.entry = el("button", { className: "entry", tabIndex: -1 });
   row.entry.addEventListener("click", () => selectPreviewRow(row, true));

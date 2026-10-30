@@ -164,6 +164,8 @@ Mario with Luigi's animations.
 - Characters under **Some bones differ** fit with a few bones that don't line up; hover over the
   dropdown to see which. They work, but some moves can look **glitchy** (limbs bending oddly for a
   moment). Mario with Luigi's animations plays fine but isn't perfect.
+- **Not well tested yet:** borrowed animations may change the clone's hitboxes (how it swings,
+  fields and catches), not just how it looks.
 - Leave it on the character's own animations if you only want a new look.
 
 ## Open a character in Blender
