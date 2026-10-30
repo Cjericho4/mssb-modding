@@ -209,7 +209,7 @@ with several characters, each clone follows the character it copies.
     character's box colour.
 - **Give clones …'s stats:** on by default. Untick to keep the replaced character's stats.
 - **Keep the working folder:** for troubleshooting only.
-- **Theme:** **Night** (dark, the default), **Gold** (dark brown and gold) or **Light**.
+- **Theme:** **Night** (dark, the default), **Honey** (dark, honey gold), **Ballpark** (dark, grass and clay), **Light** or **Strawberry milk** (light, cream and pink).
 - **Take the tour:** shows the first-time tour again.
 
 ## Known issues

@@ -428,7 +428,7 @@ export async function run(options, app) {
     check(getComputedStyle(document.querySelector(".group:not([hidden]) .basebox")).display !== "none", "the character tab");
     await shot("character_tab");
     $("tab-clone").click();
-    for (const theme of ["gold", "light", "night"]) {
+    for (const theme of ["honey", "ballpark", "light", "strawberry", "night"]) {
       $("theme").value = theme;
       $("theme").dispatchEvent(new Event("change"));
       check(document.documentElement.dataset.theme === theme, "theme " + theme);

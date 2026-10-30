@@ -1029,7 +1029,7 @@ async function main() {
     }
   });
   setDock(remembered("dock") === "open");
-  setTheme(remembered("theme") || "night");
+  setTheme({ gold: "honey" }[remembered("theme")] || remembered("theme") || "night"); // Gold became Honey
   $("btn-tour").addEventListener("click", () => startTour());
   $("theme").addEventListener("change", () => setTheme($("theme").value));
   for (const tab of ["clone", "base"]) $("tab-" + tab).addEventListener("click", () => setTab(tab));
@@ -1215,7 +1215,7 @@ function setTab(tab) {
   }
 }
 
-/** Night (the default), Gold or Light; remembered. */
+/** Night (the default), Honey, Ballpark, Light or Strawberry milk; remembered. */
 function setTheme(theme) {
   document.documentElement.dataset.theme = $("theme").value = theme;
   remember("theme", theme);

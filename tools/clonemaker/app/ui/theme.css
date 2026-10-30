@@ -20,7 +20,8 @@
   --ice: #2b8fd6;
   --ice-2: #1f73b0;
   --ice-soft: #dcefff;
-  --clone: #2f5ee0;   /* the selected clone's colour drives the stage */
+  --clone: #2f5ee0;
+  --rail-line: #2e3949; --rail-dash: #4a5870; --rail-accent: #a6d7fa; --rail-deep: #11161e; --hi: var(--ice); --stage-edge: #0b1220;   /* the selected clone's colour drives the stage */
   --display: "Rajdhani", sans-serif;
   --sans: "Inter", sans-serif;
   --mono: "JetBrains Mono", monospace;
@@ -38,7 +39,7 @@ button { cursor: pointer; }
 .top .app { font: 700 18px/1 var(--display); letter-spacing: 0.02em; white-space: nowrap; margin-right: 6px; }
 .top .game { flex: 1; min-width: 0; display: flex; align-items: center; gap: 8px; color: var(--rail-dim); white-space: nowrap; overflow: hidden; }
 .tbtn { background: var(--rail-2); border: 0; border-radius: 5px; padding: 5px 10px; color: var(--rail-text); white-space: nowrap; }
-.tbtn:hover { background: #2e3949; }
+.tbtn:hover { background: var(--rail-line); }
 
 /* ---- rail: roster ---- */
 .rail { grid-area: rail; background: var(--rail); color: var(--rail-text); overflow-y: auto; padding: 10px 8px 12px; display: flex; flex-direction: column; gap: 2px; }
@@ -55,14 +56,14 @@ button { cursor: pointer; }
 .entry small.warn { color: #ff8a7a; }
 .entry.on { background: var(--paper); color: var(--ink); box-shadow: inset 3px 0 0 var(--ice); }
 .entry.on small { color: var(--ink-2); }
-.addc { border: 0; background: transparent; color: #8fc9f2; text-align: left; padding: 6px 8px 6px 42px; border-radius: 6px; }
+.addc { border: 0; background: transparent; color: var(--rail-accent); text-align: left; padding: 6px 8px 6px 42px; border-radius: 6px; }
 .addc:hover { background: var(--rail-2); }
-.another { margin-top: auto; border: 1px dashed #3a4658; border-radius: 6px; background: transparent; color: var(--rail-text); padding: 9px; }
+.another { margin-top: auto; border: 1px dashed var(--rail-dash); border-radius: 6px; background: transparent; color: var(--rail-text); padding: 9px; }
 
 /* ---- main ---- */
 .main { grid-area: main; overflow-y: auto; }
 .stage { position: relative; height: 262px; overflow: hidden; color: #fff;
-  background: radial-gradient(ellipse 55% 90% at 50% 100%, color-mix(in srgb, var(--clone) 70%, #fff 30%), var(--clone) 35%, color-mix(in srgb, var(--clone) 45%, #0b1220) 75%, #0b1220); }
+  background: radial-gradient(ellipse 55% 90% at 50% 100%, color-mix(in srgb, var(--clone) 70%, #fff 30%), var(--clone) 35%, color-mix(in srgb, var(--clone) 45%, var(--stage-edge)) 75%, var(--stage-edge)); }
 .stage::after { content: ""; position: absolute; left: 0; right: 0; bottom: 0; height: 18px; background: linear-gradient(transparent, rgb(0 0 0 / 0.25)); }
 .stage .ghostname { position: absolute; left: 50%; top: 22px; transform: translateX(-50%); font: 700 108px/0.85 var(--display); letter-spacing: -0.01em; text-transform: uppercase; white-space: nowrap; color: rgb(255 255 255 / 0.16); }
 .stage svg.fig { position: absolute; left: 50%; bottom: -10px; height: 236px; transform: translateX(-50%); filter: drop-shadow(0 14px 18px rgb(0 0 0 / 0.35)); }
@@ -105,7 +106,7 @@ button { cursor: pointer; }
   .entry .dot { width: 18px; height: 18px; }
   .entry small { display: none; }
   .entry.on { box-shadow: none; }
-  .addc { padding: 4px 10px; border-radius: 999px; border: 1px dashed #3a4658; }
+  .addc { padding: 4px 10px; border-radius: 999px; border: 1px dashed var(--rail-dash); }
   .another { margin: 0; padding: 4px 10px; border-radius: 999px; }
   .addc { font-size: 0; } .addc::before { content: "+"; font-size: 14px; }
   .stage { height: 200px; }
@@ -144,7 +145,7 @@ button:disabled, select:disabled, input:disabled { opacity: .55; cursor: default
 .entry small.warn { color: #ff9c8f; }
 .entry.on small.warn { color: var(--danger); }
 .base { color: #a6b3c5; }
-.addc { color: #a6d7fa; }
+.addc { color: var(--rail-accent); }
 .another { margin-top: auto; }
 .main { min-width: 0; min-height: 0; }
 .stage .label p { color: #fff; text-shadow: 0 1px 4px #000; }
@@ -259,7 +260,7 @@ h2, h3, p { margin-top: 0; }
   /* slim: a face per character, a dot per clone */
   body:not(.dock-open) .rail { align-items: center; }
   body:not(.dock-open) .roster-group { display: flex; flex-direction: column; align-items: center; gap: 6px; padding: 6px 0 8px; }
-  body:not(.dock-open) .roster-group + .roster-group { border-top: 1px solid #2e3949; }
+  body:not(.dock-open) .roster-group + .roster-group { border-top: 1px solid var(--rail-line); }
   body:not(.dock-open) .entries { align-items: center; gap: 6px; }
   body:not(.dock-open) .base { width: auto; padding: 0; }
   body:not(.dock-open) .base span, body:not(.dock-open) .base small,
@@ -269,22 +270,21 @@ h2, h3, p { margin-top: 0; }
   body:not(.dock-open) .entry .dot { width: 30px; height: 30px; display: block; }
   body:not(.dock-open) .entry.on .dot { box-shadow: 0 0 0 2px var(--rail), 0 0 0 4px #fff; }
   body:not(.dock-open) .entry.warn::after { content: "×"; position: absolute; right: -4px; top: -4px; width: 14px; height: 14px; border-radius: 50%; background: #ff6b5a; color: #1a212c; font: 700 11px/14px var(--sans); text-align: center; box-shadow: 0 0 0 2px var(--rail); }
-  body:not(.dock-open) .addc { width: 30px; height: 30px; padding: 0; border-radius: 50%; border: 1px dashed #4a5870; font-size: 0; display: grid; place-items: center; }
+  body:not(.dock-open) .addc { width: 30px; height: 30px; padding: 0; border-radius: 50%; border: 1px dashed var(--rail-dash); font-size: 0; display: grid; place-items: center; }
   body:not(.dock-open) .addc::before { content: "+"; font-size: 16px; line-height: 1; }
-  body:not(.dock-open) .another { width: 40px; height: 40px; padding: 0; border-radius: 10px; display: grid; place-items: center; color: #a6d7fa; border-color: #4a5870; }
+  body:not(.dock-open) .another { width: 40px; height: 40px; padding: 0; border-radius: 10px; display: grid; place-items: center; color: var(--rail-accent); border-color: var(--rail-dash); }
   body:not(.dock-open) .rail-foot { flex-direction: column; }
   /* open: names, a ready/warning mark per clone and the checks, over the stage */
   body.dock-open .rail { width: 264px; padding: 8px 8px 10px; box-shadow: 12px 0 30px rgb(0 0 0 / .45); }
   body.dock-open .base { padding: 4px; font-size: 17px; color: var(--rail-text); }
   body.dock-open .base small::after { content: " clones"; }
-  body.dock-open .roster-group + .roster-group { border-top: 1px solid #2e3949; margin-top: 4px; padding-top: 4px; }
+  body.dock-open .roster-group + .roster-group { border-top: 1px solid var(--rail-line); margin-top: 4px; padding-top: 4px; }
   .entry { grid-template-columns: 26px minmax(0, 1fr) auto; }
   .entry .mark { font-style: normal; font-size: 13px; color: #6fd39a; }
   .entry.warn .mark { color: #ff9c8f; }
   .entry.on .mark { color: var(--ok); } .entry.on.warn .mark { color: var(--danger); }
-  .base .badge { flex: none; width: 40px; height: 40px; border-radius: 10px; display: grid; place-items: center; background: #2e3949; color: var(--rail-text); font: 700 16px/1 var(--display); }
+  .base .badge { flex: none; width: 40px; height: 40px; border-radius: 10px; display: grid; place-items: center; background: var(--rail-line); color: var(--rail-text); font: 700 16px/1 var(--display); }
   body.dock-open .base .badge { width: 32px; height: 32px; font-size: 14px; }
-  .base.cur .badge { box-shadow: 0 0 0 2px #a6d7fa; }
   .rail-foot { margin-top: auto; display: flex; gap: 4px; align-items: center; }
   .rail-foot .another { margin: 0; flex: 1; display: flex; gap: 6px; justify-content: center; align-items: center; }
   .rail .tool { width: 40px; height: 36px; border: 0; border-radius: 8px; background: transparent; color: var(--rail-dim); display: grid; place-items: center; padding: 0; flex: none; }
@@ -295,7 +295,7 @@ h2, h3, p { margin-top: 0; }
   .checks h2 em { font: 500 11px var(--sans); color: #6fd39a; font-style: normal; }
   .checks.bad h2 em { color: #ff9c8f; }
   .checks p { margin: 0; font-size: 12px; color: var(--rail-dim); }
-  .checks button { justify-self: start; display: flex; gap: 6px; align-items: center; border: 1px dashed #4a5870; background: transparent; color: var(--rail-text); padding: 5px 9px; font-size: 12px; }
+  .checks button { justify-self: start; display: flex; gap: 6px; align-items: center; border: 1px dashed var(--rail-dash); background: transparent; color: var(--rail-text); padding: 5px 9px; font-size: 12px; }
 }
 .insp { grid-area: insp; background: var(--card); border-left: 1px solid var(--rule); overflow-y: auto; min-height: 0; }
 .tabs { display: flex; border-bottom: 1px solid var(--rule); padding: 0 14px; position: sticky; top: 0; background: var(--card); z-index: 1; }
@@ -319,8 +319,8 @@ h2, h3, p { margin-top: 0; }
 .insp .clone-row .regions .hint { flex-basis: 100%; }
 .insp #adv, .insp .drawer { margin: 0 16px 16px; }
 .ic { flex: none; display: block; }
-.soon { font: 500 10px/1 var(--sans); font-style: normal; padding: 2px 5px; border-radius: 4px; border: 1px solid #3a4658; color: var(--rail-dim); white-space: nowrap; }
-.pages { display: flex; gap: 2px; padding: 3px; border-radius: 8px; background: #11161e; }
+.soon { font: 500 10px/1 var(--sans); font-style: normal; padding: 2px 5px; border-radius: 4px; border: 1px solid var(--rail-dash); color: var(--rail-dim); white-space: nowrap; }
+.pages { display: flex; gap: 2px; padding: 3px; border-radius: 8px; background: var(--rail-deep); }
 .pages button { display: flex; align-items: center; gap: 6px; border: 0; border-radius: 6px; background: transparent; color: var(--rail-dim); padding: 4px 10px; white-space: nowrap; }
 .pages button:disabled { opacity: 1; }
 .pages button.on { background: var(--rail-2); color: var(--rail-text); }
@@ -367,25 +367,45 @@ h2, h3, p { margin-top: 0; }
 /* ---- Themes: light (default above), night and gold (dark). Picked in Advanced options; app.js remembers it.
    Gold takes its oxblood, gold and cream from GrandPOOBear's logo colours only: no name or artwork. ---- */
 :root { --on-accent: #fff; --ice-hover: #185c8e; --bad-bg: #fff0eb; --ok-bg: #ddf5e4; }
-:root[data-theme="night"], :root[data-theme="gold"] { color-scheme: dark; }
+:root[data-theme="night"], :root[data-theme="honey"], :root[data-theme="ballpark"] { color-scheme: dark; }
 :root[data-theme="night"] {
   --rail: #0f141b; --rail-2: #1c2430; --rail-text: #e6ebf2; --rail-dim: #8d99ab;
   --paper: #18202a; --card: #131a23; --ink: #e6ebf2; --ink-2: #9eabbd; --rule: #2a3442;
   --ice: #3d9be0; --ice-2: #2f86c8; --ice-hover: #3d9be0; --ice-soft: #1d3346;
   --ok: #6fd39a; --danger: #ff8f80; --muted: #9eabbd; --warn: #f0c060; --bad-bg: #3a1d1b; --ok-bg: #173226;
 }
-:root[data-theme="gold"] {
-  --rail: #140807; --rail-2: #2a1512; --rail-text: #f6ead0; --rail-dim: #b39877;
-  --paper: #2a1713; --card: #1e0e0c; --ink: #f6ead0; --ink-2: #cfb48c; --rule: #3e221b;
-  --ice: #e0b520; --ice-2: #e0b520; --ice-hover: #f2c83a; --ice-soft: #33200f; --on-accent: #241008;
-  --ok: #9bd88a; --danger: #ff9480; --muted: #cfb48c; --warn: #f2c83a; --bad-bg: #3a1610; --ok-bg: #1f2c14;
+/* Honey: GrandPOOBear's logo colours only (honey gold, amber, black outline, purple rim): no name or artwork. */
+:root[data-theme="honey"] {
+  --stage-edge: #0a0805;
+  --rail: #0b0a08; --rail-2: #1e1a12; --rail-text: #f6ecd2; --rail-dim: #b9a27a; --rail-deep: #050403;
+  --rail-line: #2c2518; --rail-dash: #5a4a2c; --rail-accent: #e8c33a;
+  --paper: #1f1a12; --card: #15120c; --ink: #f6ecd2; --ink-2: #c9b48c; --rule: #3a3020;
+  --ice: #dfb400; --ice-2: #dfb400; --ice-hover: #f0c832; --ice-soft: #2e2512; --on-accent: #1a1204; --hi: #8f66f5;
+  --ok: #9bd88a; --danger: #ff9480; --muted: #c9b48c; --warn: #f0c832; --bad-bg: #3a1a10; --ok-bg: #1f2c14;
 }
-:root[data-theme="gold"] .addc, :root[data-theme="gold"] .another, :root[data-theme="gold"] .plus { color: #f0c53a; }
-:root[data-theme="gold"] .base.cur .badge { box-shadow: 0 0 0 2px #e0b520; }
-:root[data-theme="gold"] .chip { color: #f0c53a; }
-:root[data-theme="night"] .chip, :root[data-theme="night"] .later .soon { color: #a6d7fa; }
-:root[data-theme="night"] .sw.on, :root[data-theme="gold"] .sw.on { box-shadow: 0 0 0 2px var(--card), 0 0 0 4px var(--ink); }
-:root[data-theme="night"] .modal, :root[data-theme="gold"] .modal { background: #000b; }
+:root[data-theme="honey"] .top, :root[data-theme="honey"] .rail { box-shadow: inset 0 -1px 0 #7d51f055; }
+/* Strawberry milk: FrostPrime's avatar colours only (cream, berry pink, lavender, dark berry): no name or artwork. */
+:root[data-theme="strawberry"] {
+  --stage-edge: #2a0d18;
+  --rail: #4a1d2b; --rail-2: #5e2738; --rail-text: #fff4ec; --rail-dim: #e3b5c0; --rail-deep: #3a1420;
+  --rail-line: #6e3346; --rail-dash: #b1708a; --rail-accent: #ffc4d6;
+  --paper: #fbf3ea; --card: #fffdf8; --ink: #3a1418; --ink-2: #86565e; --rule: #efd9d2;
+  --ice: #c2477a; --ice-2: #b23d6e; --ice-hover: #9c325f; --ice-soft: #fbe3ea; --hi: #9b7bd4;
+  --ok: #2f7a4a; --danger: #b3261e; --muted: #86565e; --warn: #8a5a00;
+}
+/* Ballpark: outfield grass, chalk lines and infield clay. */
+:root[data-theme="ballpark"] {
+  --stage-edge: #06140b;
+  --rail: #0b1a11; --rail-2: #16291d; --rail-text: #eef3ea; --rail-dim: #93a996; --rail-deep: #07120b;
+  --rail-line: #22392a; --rail-dash: #4d6b55; --rail-accent: #f0a46c;
+  --paper: #13241a; --card: #0f1d15; --ink: #eef3ea; --ink-2: #a5b9a7; --rule: #253c2d;
+  --ice: #d9773a; --ice-2: #d9773a; --ice-hover: #e88a4c; --ice-soft: #2c2416; --on-accent: #1a0d04;
+  --ok: #8fe0a6; --danger: #ff9480; --muted: #a5b9a7; --warn: #f0c060; --bad-bg: #3a1d16; --ok-bg: #173226;
+}
+:root:not([data-theme="light"]):not([data-theme="strawberry"]) .chip { color: var(--rail-accent); }
+:root:not([data-theme="light"]):not([data-theme="strawberry"]) .sw.on { box-shadow: 0 0 0 2px var(--card), 0 0 0 4px var(--ink); }
+:root:not([data-theme="light"]) .modal { background: #000b; }
+.base.cur .badge { box-shadow: 0 0 0 2px var(--hi); }
 .theme-pick { display: flex; align-items: center; gap: 10px; margin-bottom: 8px; }
 .theme-pick select { width: 160px; }
 .ctxmenu { position: fixed; z-index: 20; min-width: 200px; padding: 5px; border: 1px solid var(--rule); border-radius: 8px; background: var(--card); color: var(--ink); box-shadow: 0 12px 36px rgb(0 0 0 / .35); }
@@ -394,7 +414,7 @@ h2, h3, p { margin-top: 0; }
 .ctxmenu hr { border: 0; border-top: 1px solid var(--rule); margin: 4px 2px; }
 /* Tour: everything dims except the part being explained; the card sits beside it. */
 :root .modal.tour { display: block; background: transparent; padding: 0; } /* the spot does the dimming */
-.tour .spot { position: fixed; border-radius: 10px; box-shadow: 0 0 0 4px var(--ice), 0 0 0 9999px rgb(0 0 0 / .5); transition: all .2s; pointer-events: none; }
+.tour .spot { position: fixed; border-radius: 10px; box-shadow: 0 0 0 4px var(--hi), 0 0 0 9999px rgb(0 0 0 / .5); transition: all .2s; pointer-events: none; }
 .tour .card { position: fixed; width: 320px; max-width: calc(100vw - 16px); padding: 16px 18px 14px; border-radius: 10px; background: var(--card); color: var(--ink); border-top: 3px solid var(--ice); box-shadow: 0 18px 60px #0007; }
 .tour .card h2 { font: 700 22px/1.1 var(--display); margin: 8px 0 6px; }
 .tour .card p { margin: 0 0 14px; line-height: 1.45; }
