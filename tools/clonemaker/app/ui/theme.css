@@ -188,7 +188,8 @@ input[type="checkbox"] { accent-color: var(--ice-2); margin: 0; width: 15px; hei
 #adv, .drawer { margin: 0 18px 18px; padding: 16px; border: 1px solid var(--rule); border-radius: 8px; background: var(--card); }
 #adv hr { display: none; }
 #adv .indent { padding-left: 21px; }
-.shading { display: flex; align-items: center; flex-wrap: wrap; gap: 12px; margin-top: 12px; }
+.shading { display: flex; align-items: center; gap: 12px; }
+.shading input { flex: 1; min-width: 0; }
 h2, h3, p { margin-top: 0; }
 .shading h3 { font-size: 12px; margin: 0; }
 .shading input { accent-color: var(--ice-2); }
@@ -392,8 +393,8 @@ h2, h3, p { margin-top: 0; }
 .ctxmenu button:hover:not(:disabled), .ctxmenu button:focus-visible { background: var(--paper); outline: 0; }
 .ctxmenu hr { border: 0; border-top: 1px solid var(--rule); margin: 4px 2px; }
 /* Tour: everything dims except the part being explained; the card sits beside it. */
-.modal.tour { display: block; background: transparent; padding: 0; }
-.tour .spot { position: fixed; border-radius: 10px; box-shadow: 0 0 0 4px var(--ice), 0 0 0 9999px rgb(0 0 0 / .62); transition: all .2s; pointer-events: none; }
+:root .modal.tour { display: block; background: transparent; padding: 0; } /* the spot does the dimming */
+.tour .spot { position: fixed; border-radius: 10px; box-shadow: 0 0 0 4px var(--ice), 0 0 0 9999px rgb(0 0 0 / .5); transition: all .2s; pointer-events: none; }
 .tour .card { position: fixed; width: 320px; max-width: calc(100vw - 16px); padding: 16px 18px 14px; border-radius: 10px; background: var(--card); color: var(--ink); border-top: 3px solid var(--ice); box-shadow: 0 18px 60px #0007; }
 .tour .card h2 { font: 700 22px/1.1 var(--display); margin: 8px 0 6px; }
 .tour .card p { margin: 0 0 14px; line-height: 1.45; }

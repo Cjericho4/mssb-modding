@@ -393,7 +393,7 @@ async function rebuildRows(g, reset) {
   }
   while (g.rows.length > wanted.length) {
     const row = g.rows.pop();
-    if (row.el.contains(g.ui.regions)) g.ui.basehead.after(g.ui.regions);
+    parkShared(row);
     row.el.remove();
     row.entry.remove();
   }
@@ -562,7 +562,7 @@ async function addRow(g, slot = null, colour = null) {
 function removeRow(row) {
   const g = row.group;
   const focused = row.el.contains(document.activeElement) || row.entry === document.activeElement;
-  if (row.el.contains(g.ui.regions)) g.ui.basehead.after(g.ui.regions); // the next selected clone takes it back
+  parkShared(row);
   row.el.remove();
   row.entry.remove();
   g.rows.splice(g.rows.indexOf(row), 1);
@@ -576,6 +576,13 @@ function removeRow(row) {
   refreshSlots();
   if (focused) (g.rows[0]?.entry || g.ui.add).focus();
   schedulePreview();
+}
+
+/** Takes the shared controls a selected clone shows (colours to change, shading) out of a clone
+ *  that is being removed; renderRoster gives them to the next selected clone. */
+function parkShared(row) {
+  if (row.el.contains(row.group.ui.regions)) row.group.ui.basehead.after(row.group.ui.regions);
+  if (row.el.contains($("shading-box"))) $("adv").append($("shading-box"));
 }
 
 function updateAddLabel(g) {
@@ -637,7 +644,7 @@ function renderRoster() {
       else if (r.animField.parentElement !== r.el) r.el.append(r.animField);
       r.animField.firstChild.textContent = `Animations for ${name}`;
       if (on) {
-        r.colourField.after(g.ui.regions); // which of the character's colours change sits under the colour picked
+        r.colourField.after(g.ui.regions, $("shading-box")); // which colours change, and how, sit under the colour picked
         g.ui.regions.querySelector(".hint").textContent = `Colours to change on ${sourceName(g.source)} (all its clones)`;
         document.documentElement.style.setProperty("--clone", colourSwatch(r.colour));
         $("clone-name").textContent = $("ghost-name").textContent = name;

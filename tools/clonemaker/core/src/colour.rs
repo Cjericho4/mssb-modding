@@ -182,16 +182,20 @@ fn bin_stats(cand: &[Candidate], bins: &[usize]) -> (f64, f64) {
         percentile(members.iter().map(|c| (c.v, c.n)).collect(), 0.5),
     )
 }
+/// The gloves' orange-brown leather.
+const GLOVE_LEATHER_HUE: f64 = 0.08;
 /// Detect all clothing/body colour regions, preserving Python's cluster and summation order.
 pub fn detect_regions(gpc: &Gpc, char_id: usize, keep: HashSet<usize>) -> Result<Vec<Region>> {
     let mut skip = keep;
     skip.extend(keep_textures(char_id));
+    let mut gloves = HashSet::new();
     for t in &gpc.textures {
         let hash = format!("{:x}", md5::compute(t.bytes(&gpc.data)?));
         if GLOVE_HASHES.contains(&&hash[..12]) {
-            skip.insert(t.index);
+            gloves.insert(t.index);
         }
     }
+    skip.extend(&gloves);
     let mut counts = ColourCounts::default();
     for t in &gpc.textures {
         if !skip.contains(&t.index) {
@@ -363,6 +367,13 @@ pub fn detect_regions(gpc: &Gpc, char_id: usize, keep: HashSet<usize>) -> Result
         });
         overrides.extend(regions);
         regions = overrides;
+    }
+    // The gloves stay out of the colour count, but a colour far from their leather (Yoshi's green
+    // thumb on his glove) is recoloured in them too; reds, oranges, yellows and tints never are.
+    for r in &mut regions {
+        if r.width < 0.5 && hue_distance(r.hue, GLOVE_LEATHER_HUE) > r.width + 0.1 {
+            r.skip.retain(|i| !gloves.contains(i));
+        }
     }
     let mut picked = Vec::new();
     for prefix in region_defaults(char_id) {

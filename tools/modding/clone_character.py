@@ -1212,6 +1212,9 @@ be99c0e257ad 77d9b7b1a3dc 4cd06b1fd065 9f4cc4b5fd1b 12d3a56c160c e68703ece83c 91
 """.split())
 
 
+GLOVE_LEATHER_HUE = 0.08   # the gloves' orange-brown leather
+
+
 def glove_textures(gpc):
     return frozenset(t["index"] for t in gpc.textures
                      if hashlib.md5(texture_bytes(gpc, t)).hexdigest()[:12] in GLOVE_TEXTURES)
@@ -1490,6 +1493,12 @@ def detect_regions(gpc, char=None, keep=frozenset(), bins=72, min_share=0.015):
             o.weight = sum(n for rgb, n in counts.items()
                            if o.contains(*colorsys.rgb_to_hsv(rgb[0] / 255.0, rgb[1] / 255.0, rgb[2] / 255.0))) / total
         regions = ov + [r for r in regions if not any(o.width < 0.5 and _overlaps(r, o) for o in ov)]
+    # The gloves stay out of the colour count, but a colour far from their leather (Yoshi's green
+    # thumb on his glove) is recoloured in them too; reds, oranges, yellows and tints never are.
+    gloves = glove_textures(gpc)
+    for r in regions:
+        if r.width < 0.5 and abs((r.hue - GLOVE_LEATHER_HUE + 0.5) % 1.0 - 0.5) > r.width + 0.1:
+            r.skip = r.skip - gloves
     want = REGION_DEFAULTS.get(char, ())
     picked = []
     for prefix in want:

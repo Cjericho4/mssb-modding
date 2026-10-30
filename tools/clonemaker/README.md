@@ -84,6 +84,7 @@ The app starts with one clone of Mario. On the clone's tab:
 | **Slot it takes over** | Which existing character becomes the copy. The first choices, marked ★ *recommended*, are the extra colours of Toad (and of Shy Guy, Koopa, Magikoopa, …): the character select screen stays exactly as it was. Choices marked *replaces X on the select screen* turn that character (for example Luigi) into the copy. × marks a slot another clone already uses. |
 | **Colour** | One of the swatches, or the rainbow one for any colour (only its hue is used; the light and dark shading comes from the original). On a Mac the rainbow swatch may need a double-click. |
 | **Colours to change** | The character's own colours, each with a small swatch. The main one is ticked: Mario's red, Luigi's green, Peach's pink dress, Donkey Kong's brown fur, a Koopa's shell and so on. Tick more to change them too (for example Mario's blue overalls). Skin, eyes and the baseball glove never change. White, black and grey characters (Boo, King Boo, Black Shy Guy, Gray Dry Bones) are tinted instead: pick Blue and Boo becomes a blue Boo. These ticks apply to **all** clones of that character. |
+| **Keep shading** | How closely the new colour follows the original's light and dark areas. Higher keeps more of the original shading; lower is brighter and flatter. The same for every clone. |
 | **Own textures** | **My textures…** uses pictures you painted instead of a colour. See [Your own textures](#your-own-textures). **×** goes back to the colour. **Remove clone** removes it. |
 
 On the character's tab, **These clones copy** picks a different character to make the clones from;
@@ -207,8 +208,6 @@ with several characters, each clone follows the character it copies.
     closest to the clone's (red, blue, yellow, green or purple). Tick it to keep the replaced
     character's box colour.
 - **Give clones …'s stats:** on by default. Untick to keep the replaced character's stats.
-- **Keep shading:** how closely the new colour follows the original's light and dark areas. Higher
-  keeps more of the original shading; lower is brighter and flatter.
 - **Keep the working folder:** for troubleshooting only.
 - **Theme:** **Night** (dark, the default), **Gold** (dark brown and gold) or **Light**.
 - **Take the tour:** shows the first-time tour again.
