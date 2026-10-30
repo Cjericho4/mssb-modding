@@ -53,6 +53,7 @@ const stage = import("./stage.js").then((m) => m.create(document.querySelector("
 });
 const withSuffix = (path, suffix) => path.replace(/\.[^./\\]*$/, "") + suffix;
 const fileName = (path) => path.split(/[\\/]/).pop();
+const initials = (name) => (name.split(/\s+/).length > 1 ? name.split(/\s+/).map((w) => w[0]).join("").slice(0, 2) : name.slice(0, 2));
 
 /** #rrggbb painted next to a row: a preset is its hue at s 0.85, v 0.9 (clone_gui.colour_swatch). */
 function colourSwatch(colour) {
@@ -124,7 +125,7 @@ function setModal(box, open) {
   if (open && !modalReturn) modalReturn = document.activeElement;
   box.hidden = !open;
   const anyOpen = [...document.querySelectorAll(".modal")].some((m) => !m.hidden);
-  for (const part of document.querySelectorAll("body > header, body > main, body > nav, body > footer")) part.inert = anyOpen;
+  for (const part of document.querySelectorAll("body > header, body > main, body > nav, body > aside, body > footer")) part.inert = anyOpen;
   if (!anyOpen && modalReturn) {
     modalReturn.focus?.({ preventScroll: true });
     modalReturn = null;
@@ -587,9 +588,14 @@ function selectPreviewRow(row, refresh = false) {
 function renderRoster() {
   const rows = allRows(), selected = rows.find((r) => r.id === state.previewRow);
   const activeGroup = selected?.group || state.selectedGroup || state.groups[0];
+  const conflicts = new Set();
   for (const g of state.groups) {
     g.ui.root.hidden = g !== activeGroup;
-    g.ui.heading.replaceChildren(el("span", { textContent: sourceName(g.source) }), el("small", { textContent: String(g.rows.length) }));
+    const base = sourceName(g.source);
+    g.ui.heading.replaceChildren(el("i", { className: "badge", textContent: initials(base) }), el("span", { textContent: base }), el("small", { textContent: String(g.rows.length) }));
+    g.ui.heading.title = base;
+    g.ui.heading.classList.toggle("cur", g === activeGroup);
+    g.ui.add.title = `Add another ${base} clone`;
     for (const r of g.rows) {
       const on = r === selected;
       const name = r.slotSelect.selectedOptions[0]?.textContent.replace(/^[★×] /, "") || "Clone";
@@ -602,7 +608,11 @@ function renderRoster() {
       r.entry.setAttribute("aria-label", `${name}, ${subtitle}`);
       const dot = el("i", { className: "dot" + (r.textures || isCustom(r.colour) ? " custom" : "") });
       dot.style.setProperty("--c", colourSwatch(r.colour));
-      r.entry.replaceChildren(dot, el("span", {}, [el("b", { textContent: name }), el("small", { className: conflict ? "warn" : "", textContent: subtitle })]));
+      if (conflict) conflicts.add(name);
+      r.entry.title = conflict ? `${name}: slot used twice` : name;
+      r.entry.classList.toggle("warn", conflict);
+      r.entry.replaceChildren(dot, el("span", {}, [el("b", { textContent: name }), el("small", { className: conflict ? "warn" : "", textContent: subtitle })]),
+        el("i", { className: "mark", textContent: conflict ? "⚠" : "✓", ariaHidden: "true" }));
       if (r.entry.parentElement !== g.ui.entries) g.ui.entries.append(r.entry);
       r.el.hidden = !on;
       r.radio.checked = on;
@@ -620,6 +630,15 @@ function renderRoster() {
       }
     }
   }
+  $("tab-clone").textContent = selected ? $("clone-name").textContent : "Clone";
+  $("tab-base").firstChild.textContent = activeGroup ? sourceName(activeGroup.source) : "Character";
+  $("tab-base-count").textContent = activeGroup ? (activeGroup.rows.length === 1 ? "1 clone" : `${activeGroup.rows.length} clones`) : "";
+  $("checks").hidden = !rows.length;
+  $("checks").classList.toggle("bad", conflicts.size > 0);
+  $("checks-count").textContent = conflicts.size ? (conflicts.size === 1 ? "1 to fix" : `${conflicts.size} to fix`) : "All good";
+  $("checks-text").textContent = conflicts.size
+    ? `${[...conflicts].join(", ")} ${conflicts.size === 1 ? "is" : "are"} picked by more than one clone. Give one of them another slot.`
+    : rows.length === 1 ? "Your clone is ready." : `All ${rows.length} clones are ready.`;
   if (!selected) {
     ++state.previewSeq; // discard a preview for a removed row
     $("clone-name").textContent = state.game ? "Add a clone" : "Make it your own";
@@ -982,6 +1001,25 @@ async function main() {
     $("keeplum-value").textContent = Number($("keeplum").value).toFixed(2);
     schedulePreview();
   });
+  setDock(localStorage.getItem("dock") === "open");
+  $("btn-dock").addEventListener("click", () => setDock(!document.body.classList.contains("dock-open")));
+  for (const tab of ["clone", "base"]) $("tab-" + tab).addEventListener("click", () => setTab(tab));
+  for (const b of document.querySelectorAll(".modes [data-mode]")) b.addEventListener("click", () => setMode(b.dataset.mode));
+  stage.then((s) => {
+    if (!s) return;
+    const marks = document.querySelectorAll(".turn [data-yaw].gtxt");
+    s.onturn = (yaw) => {
+      for (const b of marks) b.classList.toggle("on", Math.abs(yaw - Number(b.dataset.yaw)) < 0.01);
+    };
+    s.onturn(0);
+    for (const b of document.querySelectorAll(".turn [data-yaw]")) b.addEventListener("click", () => s.turn(Number(b.dataset.yaw)));
+    for (const b of document.querySelectorAll(".turn [data-turn]")) b.addEventListener("click", () => s.turn(s.yaw + Number(b.dataset.turn)));
+    $("btn-spin").addEventListener("click", () => {
+      s.spin(!s.spinning);
+      $("btn-spin").classList.toggle("on", s.spinning);
+      $("btn-spin").ariaPressed = String(s.spinning);
+    });
+  });
   $("btn-out").addEventListener("click", chooseOutput);
   $("btn-go").addEventListener("click", create);
   $("btn-cancel").addEventListener("click", cancel);
@@ -1008,6 +1046,33 @@ async function main() {
   }
   if (options.selftest) {
     await import("./selftest.js").then((m) => m.run(options, { state, startLoad, exportTextures, exportBlender, setRowTextures, showInfo, showWelcome, stage }));
+  }
+}
+
+/** The dock: slim (faces and colour dots) or open over the stage (names, readiness, checks). Remembered. */
+function setDock(open) {
+  document.body.classList.toggle("dock-open", open);
+  $("btn-dock").ariaExpanded = String(open);
+  $("btn-dock").title = open ? "Hide names" : "Show names and checks";
+  try {
+    localStorage.setItem("dock", open ? "open" : "slim");
+  } catch {} // ponytail: only a remembered preference
+}
+
+function setTab(tab) {
+  $("groups").dataset.tab = tab;
+  for (const t of ["clone", "base"]) {
+    $("tab-" + t).classList.toggle("on", t === tab);
+    $("tab-" + t).ariaSelected = String(t === tab);
+  }
+}
+
+/** The stage shows the model, or the before/after textures at full size. */
+function setMode(mode) {
+  document.querySelector(".stage").dataset.mode = mode;
+  for (const b of document.querySelectorAll(".modes [data-mode]")) {
+    b.classList.toggle("on", b.dataset.mode === mode);
+    b.ariaPressed = String(b.dataset.mode === mode);
   }
 }
 

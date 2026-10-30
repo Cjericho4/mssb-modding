@@ -33,7 +33,7 @@ export function create(stage) {
   const loader = new GLTFLoader();
   const models = new Map(); // source -> Promise<{ root, mixer, materials, box }>
   const still = matchMedia("(prefers-reduced-motion: reduce)");
-  let current = null, pictures = [], token = 0, visible = true, frame = 0, last = 0;
+  let current = null, pictures = [], token = 0, visible = true, frame = 0, last = 0, spinning = false;
 
   function load(source) {
     if (!models.has(source)) {
@@ -102,10 +102,10 @@ export function create(stage) {
     camera.aspect = w / h;
     if (current) {
       const size = current.box.getSize(new THREE.Vector3()), centre = current.box.getCenter(new THREE.Vector3());
-      const tall = Math.max(size.y / 0.86, size.x / camera.aspect / 0.8);
+      const tall = Math.max(size.y / 0.74, size.x / camera.aspect / 0.8);
       const distance = tall / 2 / Math.tan(THREE.MathUtils.degToRad(camera.fov / 2)) + size.z / 2;
       // the model's feet a little above the stage's bottom edge
-      const lift = tall * 0.5 - size.y / 2 - tall * 0.03;
+      const lift = tall * 0.5 - size.y / 2 - tall * 0.13; // feet clear the turn bar
       camera.position.set(centre.x, centre.y + lift, centre.z + distance);
       camera.lookAt(centre.x, centre.y + lift, centre.z);
     }
@@ -119,7 +119,9 @@ export function create(stage) {
   function tick(now) {
     frame = 0;
     if (!current || !visible || still.matches) return;
-    current.mixer.update(Math.min((now - last) / 1000, 0.1));
+    const dt = Math.min((now - last) / 1000, 0.1);
+    current.mixer.update(dt);
+    if (spinning) turn(yaw + dt * 0.6);
     last = now;
     draw();
     frame = requestAnimationFrame(tick);
@@ -146,8 +148,9 @@ export function create(stage) {
   // drag to turn the model all the way round; double-click faces it forward again
   let yaw = 0, dragX = null;
   const turn = (to) => {
-    yaw = to;
+    yaw = Math.atan2(Math.sin(to), Math.cos(to)); // keep within ±π so Front/Side/Back can be recognised
     if (current) current.root.rotation.y = yaw;
+    api.onturn?.(yaw);
     draw();
   };
   canvas.title = "Drag to turn · double-click to reset";
@@ -180,7 +183,21 @@ export function create(stage) {
     play();
   });
 
-  return {
+  const api = {
+    /** Called with the new angle whenever the model turns. */
+    onturn: null,
+    get yaw() {
+      return yaw;
+    },
+    turn,
+    get spinning() {
+      return spinning;
+    },
+    /** Slowly turns the model until stopped (not with reduced motion: the model then stays still). */
+    spin(on) {
+      spinning = on;
+      play();
+    },
     /** The latest `show`'s promise (the self-test times it). */
     drawn: Promise.resolve(null),
     show(source, pngs) {
@@ -227,4 +244,5 @@ export function create(stage) {
       else delete stage.dataset.stage;
     },
   };
+  return api;
 }

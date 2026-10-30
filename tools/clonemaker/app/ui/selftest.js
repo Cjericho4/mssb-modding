@@ -394,6 +394,19 @@ export async function run(options, app) {
     drag("pointerup", 362);
     await shot("stage_mario_back");
     canvas.dispatchEvent(new MouseEvent("dblclick", { bubbles: true }));
+    check(document.querySelector('.turn [data-yaw="0"].gtxt').classList.contains("on"), "Front lights up after a reset");
+    document.querySelector('.turn [data-yaw="1.571"]').click();
+    check(document.querySelector('.turn [data-yaw="1.571"]').classList.contains("on"), "Side turns the model");
+    await shot("stage_mario_side");
+    document.querySelector('.turn [data-yaw="0"]').click();
+    $("btn-dock").click();
+    check(document.body.classList.contains("dock-open") && !$("checks").hidden, "the dock opens with its checks");
+    await shot("dock_open");
+    $("btn-dock").click();
+    document.querySelector('.modes [data-mode="tex"]').click();
+    check(getComputedStyle(canvas).display === "none" && $("img-after").getBoundingClientRect().height > 200, "Textures mode shows big pictures");
+    await shot("textures_mode");
+    document.querySelector('.modes [data-mode="model"]').click();
     const row = app.state.groups[0].rows[0];
     for (const colour of ["red", "green", "purple", "orange", "blue"]) {
       const t0 = performance.now();
