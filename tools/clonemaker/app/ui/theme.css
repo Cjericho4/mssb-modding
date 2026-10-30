@@ -6,7 +6,7 @@
 @font-face { font-family: "JetBrains Mono"; font-weight: 400; src: url("fonts/JetBrainsMono-Regular.ttf"); }
 
 /* Studio: a character creator. Slate roster rail, a lit stage that takes the clone's colour,
-   and a light inspector underneath. The stage is the one loud thing; everything else is quiet. */
+   a stage lit neutrally so the model is the one coloured thing, and the inspector beside it. */
 :root {
   --rail: #1a212c;
   --rail-2: #232c39;
@@ -21,7 +21,8 @@
   --ice-2: #1f73b0;
   --ice-soft: #dcefff;
   --clone: #2f5ee0;
-  --rail-line: #2e3949; --rail-dash: #4a5870; --rail-accent: #a6d7fa; --rail-deep: #11161e; --hi: var(--ice); --stage-edge: #0b1220;   /* the selected clone's colour drives the stage */
+  --rail-line: #2e3949; --rail-dash: #4a5870; --rail-accent: #a6d7fa; --rail-deep: #11161e; --hi: var(--ice); --stage-edge: #0b1220;
+  --stage-light: radial-gradient(ellipse 60% 85% at 50% 100%, color-mix(in srgb, var(--stage-edge) 72%, #fff 28%), color-mix(in srgb, var(--stage-edge) 85%, #fff 15%) 40%, var(--stage-edge) 85%);
   --display: "Rajdhani", sans-serif;
   --sans: "Inter", sans-serif;
   --mono: "JetBrains Mono", monospace;
@@ -63,7 +64,7 @@ button { cursor: pointer; }
 /* ---- main ---- */
 .main { grid-area: main; overflow-y: auto; }
 .stage { position: relative; height: 262px; overflow: hidden; color: #fff;
-  background: radial-gradient(ellipse 55% 90% at 50% 100%, color-mix(in srgb, var(--clone) 70%, #fff 30%), var(--clone) 35%, color-mix(in srgb, var(--clone) 45%, var(--stage-edge)) 75%, var(--stage-edge)); }
+  background: var(--stage-light); }
 .stage::after { content: ""; position: absolute; left: 0; right: 0; bottom: 0; height: 18px; background: linear-gradient(transparent, rgb(0 0 0 / 0.25)); }
 .stage .ghostname { position: absolute; left: 50%; top: 22px; transform: translateX(-50%); font: 700 108px/0.85 var(--display); letter-spacing: -0.01em; text-transform: uppercase; white-space: nowrap; color: rgb(255 255 255 / 0.16); }
 .stage svg.fig { position: absolute; left: 50%; bottom: -10px; height: 236px; transform: translateX(-50%); filter: drop-shadow(0 14px 18px rgb(0 0 0 / 0.35)); }
@@ -383,7 +384,17 @@ h2, h3, p { margin-top: 0; }
   --ice: #dfb400; --ice-2: #dfb400; --ice-hover: #f0c832; --ice-soft: #2e2512; --on-accent: #1a1204; --hi: #8f66f5;
   --ok: #9bd88a; --danger: #ff9480; --muted: #c9b48c; --warn: #f0c832; --bad-bg: #3a1a10; --ok-bg: #1f2c14;
 }
-:root[data-theme="honey"] .top, :root[data-theme="honey"] .rail { box-shadow: inset 0 -1px 0 #7d51f055; }
+:root[data-theme="honey"] { --rail-line: #3a2c52; }
+/* the logo's rim: gold fading into purple */
+:root[data-theme="honey"] .top { border-bottom: 0; box-shadow: inset 0 -2px 0 transparent; background-image: linear-gradient(90deg, #dfb400, #c48f00 45%, #7d51f0) ; background-size: 100% 2px; background-position: bottom; background-repeat: no-repeat; background-color: var(--rail); }
+:root[data-theme="honey"] .rail { box-shadow: inset -1px 0 0 #7d51f066; }
+:root[data-theme="honey"] .stage { background-image: radial-gradient(ellipse 40% 60% at 100% 0%, #7d51f055, transparent 70%), var(--stage-light); }
+:root[data-theme="honey"] .tabs button.on { border-bottom-color: #8f66f5; }
+:root[data-theme="honey"] .pages button.on, :root[data-theme="honey"] .gbtn.on { box-shadow: inset 0 -2px 0 #8f66f5; }
+:root[data-theme="honey"] body:not(.dock-open) .entry.on .dot { box-shadow: 0 0 0 2px var(--rail), 0 0 0 4px #8f66f5; }
+:root[data-theme="honey"] .entry.on { box-shadow: inset 3px 0 0 #8f66f5; }
+:root[data-theme="honey"] :focus-visible { outline-color: #a585ff; }
+:root[data-theme="honey"] .checks h2 em, :root[data-theme="honey"] .soon { color: #b9a0ff; border-color: #4a3a78; }
 /* Strawberry milk: FrostPrime's avatar colours only (cream, berry pink, lavender, dark berry): no name or artwork. */
 :root[data-theme="strawberry"] {
   --stage-edge: #2a0d18;
