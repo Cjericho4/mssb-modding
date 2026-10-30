@@ -42,7 +42,7 @@
       <span id="preview-chip" class="offscreen">Mario</span>
       <figure><figcaption>Before</figcaption><div class="pic"><img id="img-before" alt="Original character textures" hidden><span>No preview yet</span></div></figure>
       <figure><figcaption>After</figcaption><div class="pic"><img id="img-after" alt="Selected clone textures" hidden></div></figure>
-      <button id="btn-enlarge">Enlarge</button>
+      <button id="btn-enlarge" title="Show the textures at full size">Enlarge</button>
     </div>
     <div class="modes glass" role="group" aria-label="The stage shows">
       <button data-mode="model" class="gbtn on" aria-pressed="true"><svg class="ic" width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 1.8l5.5 3v6.4L8 14.2l-5.5-3V4.8z M2.5 4.8L8 8l5.5-3.2M8 8v6.2"/></svg><span>Model</span></button>
@@ -114,13 +114,6 @@
 </div>
 
 
-<div id="preview-modal" class="modal" hidden>
-  <div class="dialog preview-dialog" role="dialog" aria-modal="true" aria-labelledby="preview-title">
-    <header><h2 id="preview-title">Texture preview</h2><button id="preview-close">Close</button></header>
-    <p id="large-caption"></p>
-    <div class="large-pics"><figure><figcaption>Before</figcaption><img id="large-before" alt="Original character textures"></figure><figure><figcaption>After</figcaption><img id="large-after" alt="Selected clone textures"></figure></div>
-  </div>
-</div>
 <div id="tour" class="modal tour" hidden>
   <div class="spot"></div>
   <div class="card" role="dialog" aria-modal="true" aria-labelledby="tour-title" aria-describedby="tour-text">

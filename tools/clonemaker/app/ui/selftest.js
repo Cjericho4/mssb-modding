@@ -10,7 +10,7 @@ const painted = () => new Promise((r) => requestAnimationFrame(() => setTimeout(
 
 const WIDGETS = ["pill", "btn-iso", "btn-dir", "game-path", "status", "source", "regions-box", "rows", "btn-add",
   "btn-export", "btn-blender", "blender", "blender-source", "blender-all", "blender-go", "blender-cancel", "btn-adv", "adv", "chk-ui", "chk-colour", "chk-stats", "keeplum", "chk-keep", "out-path", "btn-out", "btn-go",
-  "roster", "clone-name", "btn-log", "log-drawer", "btn-enlarge", "preview-modal", "preview-close", "run-box", "progress-bar", "btn-cancel", "preview-chip", "preview-caption", "img-before", "img-after", "log"];
+  "roster", "clone-name", "btn-log", "log-drawer", "btn-enlarge", "run-box", "progress-bar", "btn-cancel", "preview-chip", "preview-caption", "img-before", "img-after", "log"];
 
 export async function run(options, app) {
   const lines = [];
@@ -140,10 +140,9 @@ export async function run(options, app) {
     entries()[1].dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowUp", bubbles: true }));
     check(!rows()[0].hidden && rows()[1].hidden, "Up selects the previous clone");
     $("btn-enlarge").click();
-    check(!$("preview-modal").hidden && document.activeElement === $("preview-close") && document.querySelector("main").inert,
-      "Enlarge opens a focused modal with an inert background");
-    $("preview-close").click();
-    check($("preview-modal").hidden && !document.querySelector("main").inert, "Close restores the studio");
+    check(document.querySelector(".stage").dataset.mode === "tex" && getComputedStyle($("btn-enlarge")).display === "none",
+      "Enlarge switches the stage to Textures, where it hides");
+    document.querySelector('.modes [data-mode="model"]').click();
     $("btn-log").click();
     check(!$("log-drawer").hidden && $("btn-log").ariaExpanded === "true", "Log opens its drawer");
     $("btn-log").click();

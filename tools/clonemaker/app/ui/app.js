@@ -140,7 +140,7 @@ document.addEventListener("keydown", (e) => {
     startTour(TOUR.length);
     e.preventDefault();
   }
-  if (e.key === "Escape" && (box.id === "preview-modal" || box.id === "welcome")) {
+  if (e.key === "Escape" && box.id === "welcome") {
     setModal(box, false);
     e.preventDefault();
   }
@@ -1001,16 +1001,7 @@ async function main() {
     $("btn-log").ariaExpanded = String(!$("log-drawer").hidden);
     if (!$("log-drawer").hidden) $("log-drawer").scrollIntoView({ block: "nearest" });
   });
-  $("btn-enlarge").addEventListener("click", () => {
-    for (const part of ["before", "after"]) {
-      $("large-" + part).src = $("img-" + part).src;
-      $("large-" + part).hidden = $("img-" + part).hidden;
-    }
-    $("large-caption").textContent = $("preview-caption").textContent;
-    setModal($("preview-modal"), true);
-    $("preview-close").focus();
-  });
-  $("preview-close").addEventListener("click", () => setModal($("preview-modal"), false));
+  $("btn-enlarge").addEventListener("click", () => setMode("tex"));
   $("chk-ui").addEventListener("change", () => { $("chk-colour").disabled = !$("chk-ui").checked || state.busy || !state.game; });
   $("keeplum").addEventListener("input", () => {
     $("keeplum-value").textContent = Number($("keeplum").value).toFixed(2);

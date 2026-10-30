@@ -210,12 +210,6 @@ h2, h3, p { margin-top: 0; }
 .dialog a { color: var(--ice-2); }
 .chip { font-size: 10px; border-radius: 4px; padding: 3px 6px; background: var(--ice-soft); color: #20537a; }
 .chip.red { background: var(--bad-bg); color: var(--danger); } .chip.green { background: var(--ok-bg); color: var(--ok); }
-.preview-dialog { width: 760px; max-width: 100%; }
-.preview-dialog header { justify-content: space-between; }
-.large-pics { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; padding: 0 20px 20px; overflow: auto; }
-.large-pics figure { margin: 0; min-width: 0; }
-.large-pics img { width: 100%; image-rendering: pixelated; }
-.large-pics figcaption { margin-bottom: 6px; color: var(--ink-2); }
 @media (max-width: 1100px) { .top .game #game-path { display: none; } .top .app { font-size: 16px; } }
 @media (max-width: 760px) {
   .rail { max-height: 30vh; overflow-y: auto; display: block; }
@@ -355,7 +349,8 @@ h2, h3, p { margin-top: 0; }
 .stage[data-mode="tex"] .tex figcaption { font: 700 18px/1 var(--display); color: #fff; margin-bottom: 8px; }
 .stage[data-mode="tex"] .pic { width: 100%; height: auto; flex: 1 1 0; min-height: 0; border-radius: 6px; }
 .stage[data-mode="tex"] .pic img { position: absolute; inset: 0; }
-.stage[data-mode="tex"] #btn-enlarge { grid-column: 2; justify-self: end; }
+.stage[data-mode="tex"] #btn-enlarge { display: none; }
+.stage[data-mode="tex"] .tex { grid-template-rows: minmax(0, 1fr); }
 @media (max-width: 760px) {
   body { grid-template: "top" auto "rail" auto "main" minmax(200px, 40%) "insp" minmax(0, 1fr) "bar" auto / minmax(0, 1fr); }
   .stage { height: 100%; }
