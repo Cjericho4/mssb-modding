@@ -317,6 +317,7 @@ h2, h3, p { margin-top: 0; }
 .insp .rowbtns > * { width: 100%; }
 .insp .source-label .source { width: 100%; }
 .source-label { display: grid; gap: 6px; align-items: stretch; }
+.insp .basebox > .field { border-top: 1px solid var(--rule); padding-top: 12px; margin-top: 2px; }
 .inspector[data-tab="clone"] .basebox, .inspector[data-tab="base"] .rows, .inspector[data-tab="base"] .no-game-hint { display: none; }
 .insp .clone-row .regions { margin-top: -6px; }
 .insp .clone-row .regions .hint { flex-basis: 100%; }

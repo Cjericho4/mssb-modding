@@ -84,11 +84,12 @@ The app starts with one clone of Mario. On the clone's tab:
 | **Slot it takes over** | Which existing character becomes the copy. The first choices, marked ★ *recommended*, are the extra colours of Toad (and of Shy Guy, Koopa, Magikoopa, …): the character select screen stays exactly as it was. Choices marked *replaces X on the select screen* turn that character (for example Luigi) into the copy. × marks a slot another clone already uses. |
 | **Colour** | One of the swatches, or the rainbow one for any colour (only its hue is used; the light and dark shading comes from the original). On a Mac the rainbow swatch may need a double-click. |
 | **Colours to change** | The character's own colours, each with a small swatch. The main one is ticked: Mario's red, Luigi's green, Peach's pink dress, Donkey Kong's brown fur, a Koopa's shell and so on. Tick more to change them too (for example Mario's blue overalls). Skin, eyes and the baseball glove never change. White, black and grey characters (Boo, King Boo, Black Shy Guy, Gray Dry Bones) are tinted instead: pick Blue and Boo becomes a blue Boo. These ticks apply to **all** clones of that character. |
-| **Animations** | Whose animations the clone plays. Normally the character's own. See [Animations from another character](#animations-from-another-character). |
 | **Own textures** | **My textures…** uses pictures you painted instead of a colour. See [Your own textures](#your-own-textures). **×** goes back to the colour. **Remove clone** removes it. |
 
 On the character's tab, **These clones copy** picks a different character to make the clones from;
-they keep their colours, and their slots where they can.
+they keep their colours, and their slots where they can. That tab also has the exports and, at the
+bottom, the selected clone's **Animations** (rarely needed; see
+[Animations from another character](#animations-from-another-character)).
 
 Add more clones with the **+** under the character in the dock: for example four Marios on the four
 Toad colours.
@@ -155,7 +156,7 @@ If a picture has the wrong size or name, the app says which one before it makes 
 
 ## Animations from another character
 
-The **Animations** dropdown on the clone's tab makes the clone move like someone else, for example
+The **Animations for …** dropdown at the bottom of the character's tab makes the clone move like someone else, for example
 Mario with Luigi's animations.
 
 - The list only offers characters whose skeleton fits the clone.

@@ -517,7 +517,7 @@ async function addRow(g, slot = null, colour = null) {
   row.el = el("div", { className: "clone-row" }, [row.radio,
     field("Slot it takes over", [row.slotSelect, el("span", { className: "slot-legend hint", textContent: "★ recommended · × in use" })]),
     colourField, row.colourSelect, row.swatch,
-    field("Animations", [row.animSelect]),
+    row.animField = field("Animations", [row.animSelect, el("span", { className: "hint", textContent: "Makes this clone move like another character. Rarely needed: some moves can look glitchy." })]),
     field("Own textures", [el("div", { className: "texbox" }, [row.texturesBox, row.remove])])]);
   row.entry = el("button", { className: "entry", tabIndex: -1 });
   row.entry.addEventListener("click", () => selectPreviewRow(row, true));
@@ -631,6 +631,10 @@ function renderRoster() {
         b.setAttribute("aria-pressed", String(picked));
         b.disabled = Boolean(r.textures) || !state.inputsEnabled;
       }
+      // A clone's animations live on the character tab, under the exports: few people change them.
+      if (on) g.ui.root.querySelector(".basebox").append(r.animField);
+      else if (r.animField.parentElement !== r.el) r.el.append(r.animField);
+      r.animField.firstChild.textContent = `Animations for ${name}`;
       if (on) {
         r.colourField.after(g.ui.regions); // which of the character's colours change sits under the colour picked
         g.ui.regions.querySelector(".hint").textContent = `Colours to change on ${sourceName(g.source)} (all its clones)`;

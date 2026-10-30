@@ -188,7 +188,7 @@ export async function run(options, app) {
     regionBoxes()[1].click();
 
     // animations from another character: only skeletons that fit are offered
-    const animSelect = (i = 0) => rows()[i].querySelector("select.anims");
+    const animSelect = (i = 0) => app.state.groups[0].rows[i].animSelect; // the selected clone's sits on the character tab
     const animIds = [...animSelect().options].map((o) => Number(o.value));
     check(animSelect().options[0].textContent === "Mario (own)" && animSelect().value === "0", "a row starts with Mario's own animations");
     check(animIds.includes(1) && animIds.includes(13) && !animIds.includes(2) && !animIds.includes(29),
