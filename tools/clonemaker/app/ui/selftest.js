@@ -407,6 +407,16 @@ export async function run(options, app) {
     check(getComputedStyle(canvas).display === "none" && $("img-after").getBoundingClientRect().height > 200, "Textures mode shows big pictures");
     await shot("textures_mode");
     document.querySelector('.modes [data-mode="model"]').click();
+    $("tab-base").click();
+    check(getComputedStyle(document.querySelector(".group:not([hidden]) .basebox")).display !== "none", "the character tab");
+    await shot("character_tab");
+    $("tab-clone").click();
+    for (const theme of ["gold", "light", "night"]) {
+      $("theme").value = theme;
+      $("theme").dispatchEvent(new Event("change"));
+      check(document.documentElement.dataset.theme === theme, "theme " + theme);
+      if (theme !== "night") await shot("theme_" + theme);
+    }
     const row = app.state.groups[0].rows[0];
     for (const colour of ["red", "green", "purple", "orange", "blue"]) {
       const t0 = performance.now();

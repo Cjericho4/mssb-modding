@@ -237,7 +237,7 @@ function newGroup(source) {
   roster.append(heading, entries, add);
   const g = {
     source, rows: [], ticks: null, info: null, animChoices: [], infoSource: null, infoSeq: 0,
-    ui: { root, roster, heading, entries, source: q("source"), regionsBox: q("regions-box"), regionsHint: q("regions-hint"),
+    ui: { root, roster, heading, entries, source: q("source"), regions: q("regions"), basehead: root.querySelector(".basebox h2"), regionsBox: q("regions-box"), regionsHint: q("regions-hint"),
       noGame: q("no-game-hint"), rows: q("rows"), add, export: q("export"), blender: q("blender"), drop: q("drop") },
   };
   heading.addEventListener("click", () => {
@@ -505,7 +505,7 @@ async function addRow(g, slot = null, colour = null) {
     return el("div", { className: "field" }, [title, ...controls]);
   };
   row.colourTitle = el("span", { className: "picked" });
-  const colourField = field("Colour ", [row.swatches]);
+  const colourField = row.colourField = field("Colour ", [row.swatches]);
   colourField.firstElementChild.append(row.colourTitle);
   row.el = el("div", { className: "clone-row" }, [row.radio,
     field("Slot it takes over", [row.slotSelect, el("span", { className: "slot-legend hint", textContent: "★ recommended · × in use" })]),
@@ -554,6 +554,7 @@ async function addRow(g, slot = null, colour = null) {
 function removeRow(row) {
   const g = row.group;
   const focused = row.el.contains(document.activeElement) || row.entry === document.activeElement;
+  if (row.el.contains(g.ui.regions)) g.ui.basehead.after(g.ui.regions); // the next selected clone takes it back
   row.el.remove();
   row.entry.remove();
   g.rows.splice(g.rows.indexOf(row), 1);
@@ -624,6 +625,8 @@ function renderRoster() {
         b.disabled = Boolean(r.textures) || !state.inputsEnabled;
       }
       if (on) {
+        r.colourField.after(g.ui.regions); // which of the character's colours change sits under the colour picked
+        g.ui.regions.querySelector(".hint").textContent = `Colours to change on ${sourceName(g.source)} (all its clones)`;
         document.documentElement.style.setProperty("--clone", colourSwatch(r.colour));
         $("clone-name").textContent = $("ghost-name").textContent = name;
         $("clone-subtitle").textContent = `${sourceName(g.source)}, ${r.textures ? "with your own textures" : "recoloured " + colourLabel(r.colour).toLowerCase()}`;
@@ -1002,8 +1005,14 @@ async function main() {
     schedulePreview();
   });
   setDock(localStorage.getItem("dock") === "open");
-  $("btn-dock").addEventListener("click", () => setDock(!document.body.classList.contains("dock-open")));
+  let theme = "night";
+  try {
+    theme = localStorage.getItem("theme") || theme;
+  } catch {}
+  setTheme(theme);
+  $("theme").addEventListener("change", () => setTheme($("theme").value));
   for (const tab of ["clone", "base"]) $("tab-" + tab).addEventListener("click", () => setTab(tab));
+  $("btn-dock").addEventListener("click", () => setDock(!document.body.classList.contains("dock-open")));
   for (const b of document.querySelectorAll(".modes [data-mode]")) b.addEventListener("click", () => setMode(b.dataset.mode));
   stage.then((s) => {
     if (!s) return;
@@ -1059,12 +1068,21 @@ function setDock(open) {
   } catch {} // ponytail: only a remembered preference
 }
 
+/** The inspector shows the clone's settings, or the character it copies (change, export, remove). */
 function setTab(tab) {
   $("groups").dataset.tab = tab;
   for (const t of ["clone", "base"]) {
     $("tab-" + t).classList.toggle("on", t === tab);
     $("tab-" + t).ariaSelected = String(t === tab);
   }
+}
+
+/** Night (the default), Gold or Light; remembered. */
+function setTheme(theme) {
+  document.documentElement.dataset.theme = $("theme").value = theme;
+  try {
+    localStorage.setItem("theme", theme);
+  } catch {} // ponytail: only a remembered preference
 }
 
 /** The stage shows the model, or the before/after textures at full size. */

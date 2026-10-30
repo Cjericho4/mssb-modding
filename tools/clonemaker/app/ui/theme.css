@@ -53,7 +53,7 @@ button { cursor: pointer; }
 .entry b { display: block; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .entry small { display: block; color: var(--rail-dim); font-size: 11px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .entry small.warn { color: #ff8a7a; }
-.entry.on { background: #f2f4f7; color: var(--ink); box-shadow: inset 3px 0 0 var(--ice); }
+.entry.on { background: var(--paper); color: var(--ink); box-shadow: inset 3px 0 0 var(--ice); }
 .entry.on small { color: var(--ink-2); }
 .addc { border: 0; background: transparent; color: #8fc9f2; text-align: left; padding: 6px 8px 6px 42px; border-radius: 6px; }
 .addc:hover { background: var(--rail-2); }
@@ -94,7 +94,7 @@ button { cursor: pointer; }
 .out { flex: 1; min-width: 0; display: flex; border: 1px solid var(--rule); border-radius: 6px; background: var(--paper); }
 .out input { flex: 1; min-width: 0; border: 0; background: transparent; padding: 8px 10px; font: 12px var(--mono); }
 .out button { border: 0; border-left: 1px solid var(--rule); background: transparent; padding: 0 12px; white-space: nowrap; }
-.go { border: 0; border-radius: 7px; padding: 10px 18px; background: var(--ice); color: #fff; font: 700 18px/1 var(--display); letter-spacing: 0.02em; white-space: nowrap; }
+.go { border: 0; border-radius: 7px; padding: 10px 18px; background: var(--ice); color: var(--on-accent); font: 700 18px/1 var(--display); letter-spacing: 0.02em; white-space: nowrap; }
 .go:hover { background: var(--ice-2); }
 
 @media (max-width: 760px) {
@@ -142,7 +142,7 @@ button:disabled, select:disabled, input:disabled { opacity: .55; cursor: default
 .entry .dot { flex: none; }
 .entry small { color: #a6b3c5; }
 .entry small.warn { color: #ff9c8f; }
-.entry.on small.warn { color: #a5221d; }
+.entry.on small.warn { color: var(--danger); }
 .base { color: #a6b3c5; }
 .addc { color: #a6d7fa; }
 .another { margin-top: auto; }
@@ -177,8 +177,8 @@ input[type="checkbox"] { accent-color: var(--ice-2); margin: 0; width: 15px; hei
 .source { width: 156px; }
 .bar { min-width: 0; z-index: 2; }
 .bar > button { white-space: nowrap; }
-.go, button.primary { background: var(--ice-2); color: #fff; border-color: transparent; }
-.go:hover:not(:disabled), button.primary:hover:not(:disabled) { background: #185c8e; }
+.go, button.primary { background: var(--ice-2); color: var(--on-accent); border-color: transparent; }
+.go:hover:not(:disabled), button.primary:hover:not(:disabled) { background: var(--ice-hover); }
 .bar.busy .out, .bar.busy #btn-go { display: none; }
 #run-box { display: flex; flex: 1; align-items: center; gap: 14px; min-width: 0; }
 .grow { flex: 1; min-width: 0; }
@@ -209,7 +209,7 @@ h2, h3, p { margin-top: 0; }
 .dialog > .form { display: grid; gap: 8px; padding: 16px 20px; min-width: min(400px, 100%); overflow: auto; }
 .dialog a { color: var(--ice-2); }
 .chip { font-size: 10px; border-radius: 4px; padding: 3px 6px; background: var(--ice-soft); color: #20537a; }
-.chip.red { background: #ffe4df; color: var(--danger); } .chip.green { background: #ddf5e4; color: var(--ok); }
+.chip.red { background: var(--bad-bg); color: var(--danger); } .chip.green { background: var(--ok-bg); color: var(--ok); }
 .preview-dialog { width: 760px; max-width: 100%; }
 .preview-dialog header { justify-content: space-between; }
 .large-pics { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; padding: 0 20px 20px; overflow: auto; }
@@ -237,7 +237,7 @@ h2, h3, p { margin-top: 0; }
 .base { border: 0; border-radius: 4px; background: transparent; width: 100%; text-align: left; }
 .base:hover:not(:disabled) { background: var(--rail-2); }
 .status { display: none; }
-.status.bad { display: block; margin: 0; padding: 12px 18px; color: var(--danger); background: #fff0eb; overflow-wrap: anywhere; }
+.status.bad { display: block; margin: 0; padding: 12px 18px; color: var(--danger); background: var(--bad-bg); overflow-wrap: anywhere; }
 .stage .label { max-width: calc(100% - 220px); }
 .stage .label h1, .stage .label p { overflow-wrap: anywhere; }
 @media (max-width: 760px) { .base { width: auto; } }
@@ -316,6 +316,8 @@ h2, h3, p { margin-top: 0; }
 .insp .rowbtns > * { flex: 1 1 140px; }
 .insp .source-label .source { width: 100%; }
 .inspector[data-tab="clone"] .basebox, .inspector[data-tab="base"] .rows, .inspector[data-tab="base"] .no-game-hint { display: none; }
+.insp .clone-row .regions { margin-top: -6px; }
+.insp .clone-row .regions .hint { flex-basis: 100%; }
 .insp #adv, .insp .drawer { margin: 0 16px 16px; }
 .ic { flex: none; display: block; }
 .soon { font: 500 10px/1 var(--sans); font-style: normal; padding: 2px 5px; border-radius: 4px; border: 1px solid #3a4658; color: var(--rail-dim); white-space: nowrap; }
@@ -361,3 +363,28 @@ h2, h3, p { margin-top: 0; }
   .stage .label { max-width: calc(100% - 32px); }
   .stage[data-mode="tex"] .tex { top: 64px; }
 }
+
+/* ---- Themes: light (default above), night and gold (dark). Picked in Advanced options; app.js remembers it.
+   Gold takes its oxblood, gold and cream from GrandPOOBear's logo colours only: no name or artwork. ---- */
+:root { --on-accent: #fff; --ice-hover: #185c8e; --bad-bg: #fff0eb; --ok-bg: #ddf5e4; }
+:root[data-theme="night"], :root[data-theme="gold"] { color-scheme: dark; }
+:root[data-theme="night"] {
+  --rail: #0f141b; --rail-2: #1c2430; --rail-text: #e6ebf2; --rail-dim: #8d99ab;
+  --paper: #18202a; --card: #131a23; --ink: #e6ebf2; --ink-2: #9eabbd; --rule: #2a3442;
+  --ice: #3d9be0; --ice-2: #2f86c8; --ice-hover: #3d9be0; --ice-soft: #1d3346;
+  --ok: #6fd39a; --danger: #ff8f80; --muted: #9eabbd; --warn: #f0c060; --bad-bg: #3a1d1b; --ok-bg: #173226;
+}
+:root[data-theme="gold"] {
+  --rail: #140807; --rail-2: #2a1512; --rail-text: #f6ead0; --rail-dim: #b39877;
+  --paper: #2a1713; --card: #1e0e0c; --ink: #f6ead0; --ink-2: #cfb48c; --rule: #3e221b;
+  --ice: #e0b520; --ice-2: #e0b520; --ice-hover: #f2c83a; --ice-soft: #33200f; --on-accent: #241008;
+  --ok: #9bd88a; --danger: #ff9480; --muted: #cfb48c; --warn: #f2c83a; --bad-bg: #3a1610; --ok-bg: #1f2c14;
+}
+:root[data-theme="gold"] .addc, :root[data-theme="gold"] .another, :root[data-theme="gold"] .plus { color: #f0c53a; }
+:root[data-theme="gold"] .base.cur .badge { box-shadow: 0 0 0 2px #e0b520; }
+:root[data-theme="gold"] .chip { color: #f0c53a; }
+:root[data-theme="night"] .chip, :root[data-theme="night"] .later .soon { color: #a6d7fa; }
+:root[data-theme="night"] .sw.on, :root[data-theme="gold"] .sw.on { box-shadow: 0 0 0 2px var(--card), 0 0 0 4px var(--ink); }
+:root[data-theme="night"] .modal, :root[data-theme="gold"] .modal { background: #000b; }
+.theme-pick { display: flex; align-items: center; gap: 10px; margin-bottom: 8px; }
+.theme-pick select { width: 160px; }
