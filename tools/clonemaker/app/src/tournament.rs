@@ -129,7 +129,7 @@ pub(crate) fn portable_sheet(mut team: TeamSheet) -> Result<TeamSheet, String> {
             if w * h != pixel_count {
                 return Err(format!("{name} must contain a full-size texture."));
             }
-            for pixel in rgba.chunks_exact_mut(4) {
+            for pixel in rgba.as_chunks_mut::<4>().0 {
                 if pixel[3] == 0 {
                     pixel[..3].fill(0);
                 }
