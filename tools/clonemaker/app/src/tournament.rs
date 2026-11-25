@@ -363,9 +363,39 @@ fn publish(stage: &Path, output: &Path) -> Result<(), String> {
     use rustix::fs::{renameat_with, RenameFlags, CWD};
     renameat_with(CWD, stage, CWD, output, RenameFlags::NOREPLACE).map_err(message)
 }
-#[cfg(not(any(target_os = "macos", target_os = "linux")))]
+#[cfg(windows)]
 fn publish(stage: &Path, output: &Path) -> Result<(), String> {
-    // Windows refuses to replace directories, including empty directories.
+    use std::os::windows::ffi::OsStrExt;
+    use windows_sys::Win32::Storage::FileSystem::MoveFileW;
+
+    fn wide_path(path: &Path) -> Result<Vec<u16>, String> {
+        let path = std::path::absolute(path).map_err(message)?;
+        let (Some(parent), Some(name)) = (path.parent(), path.file_name()) else {
+            return Err("Expected a matchup folder name.".into());
+        };
+        // Canonicalize the existing parent for Win32 long-path support. The destination
+        // itself need not exist, and a link at its name must count as a collision.
+        let parent = fs::canonicalize(parent).map_err(message)?;
+        let mut wide: Vec<u16> = parent.join(name).as_os_str().encode_wide().collect();
+        if wide.contains(&0) {
+            return Err("A matchup folder path contains a null character.".into());
+        }
+        wide.push(0);
+        Ok(wide)
+    }
+
+    let from = wide_path(stage)?;
+    let to = wide_path(output)?;
+    // MoveFileW renames a directory only if the new name is free. Both UTF-16
+    // buffers are NUL-terminated and remain valid for the duration of the call.
+    if unsafe { MoveFileW(from.as_ptr(), to.as_ptr()) } == 0 {
+        return Err(std::io::Error::last_os_error().to_string());
+    }
+    Ok(())
+}
+
+#[cfg(not(any(windows, target_os = "macos", target_os = "linux")))]
+fn publish(stage: &Path, output: &Path) -> Result<(), String> {
     fs::rename(stage, output).map_err(message)
 }
 
