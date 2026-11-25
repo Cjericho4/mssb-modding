@@ -120,7 +120,7 @@ export function initPlannerGuide(planner) {
       const switched = side !== newSide;
       side = newSide;
       header.querySelector(".planner-guide-hint").textContent =
-        "Both teams autosave on this device. Save " + side + " team… makes a file for the " + side + " lineup.";
+        "Both teams autosave here. Save " + side + " team… keeps one lineup. Save matchup… keeps both.";
       if (!panel.hidden && switched) showStep();
       else if (!panel.hidden) highlight();
     }

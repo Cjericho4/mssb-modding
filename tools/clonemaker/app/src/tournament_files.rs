@@ -64,7 +64,7 @@ pub(crate) async fn save_tournament_matchup_sheet(
         save_json_dialog(
             &app,
             &matchup_sheet(&away, &home)?,
-            "Away vs Home.matchup.json",
+            &crate::tournament_library::matchup_filename(&away.player, &home.player),
         )
     })
     .await

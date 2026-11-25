@@ -49,6 +49,17 @@ pub(crate) fn suggested_filename(player: &str) -> String {
     format!("{}.team.json", safe_name(player))
 }
 
+pub(crate) fn matchup_filename(away: &str, home: &str) -> String {
+    let side = |player: &str, fallback: &str| {
+        if player.trim().is_empty() {
+            fallback.to_owned()
+        } else {
+            safe_name(player)
+        }
+    };
+    format!("{} vs {}.matchup.json", side(away, "Away"), side(home, "Home"))
+}
+
 fn remember(folder: &Path, export: &Path, json: &[u8]) -> io::Result<()> {
     fs::create_dir_all(folder)?;
     let stem = export
@@ -136,6 +147,13 @@ pub(crate) async fn load_tournament_team(app: AppHandle, id: String) -> Result<T
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn matchup_names_follow_the_two_sheets() {
+        assert_eq!(matchup_filename("", " "), "Away vs Home.matchup.json");
+        assert_eq!(matchup_filename("Comets", ""), "Comets vs Home.matchup.json");
+        assert_eq!(matchup_filename(" Away/Side ", "Comets"), "Away_Side vs Comets.matchup.json");
+    }
+
     #[test]
     fn new_library_is_empty() {
         let tmp = tempfile::tempdir().unwrap();

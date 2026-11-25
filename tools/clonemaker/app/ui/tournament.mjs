@@ -292,7 +292,10 @@ function makeToolbar() {
     if (path) {
       if (mode === "tournament") await refreshLibrary();
       makeToolbar();
-      status.textContent = "Saved " + side + " team to " + path + ". Reopen it in Tournament mode under Team library → My saved teams.";
+      const reopen = mode === "plan"
+        ? "Choose a side, then click Import team or matchup… to reopen this file."
+        : "Pick this team in Team library, or click Import team or matchup… to reopen the file.";
+      status.textContent = "Saved " + side + " team to " + path + ". " + reopen;
     }
   }), "tourney-save");
   const saveMatch = button("Save matchup…", () => run(async () => {
