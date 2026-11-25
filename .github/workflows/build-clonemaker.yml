@@ -43,11 +43,13 @@ jobs:
     - name: Format and lints
       run: |
         cargo fmt --check
+        if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
         cargo clippy --release -- -D warnings
 
     - name: Unit tests
       run: |
         cargo test --release
+        if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
         if (Test-Path ../core/Cargo.toml) { cargo test --release --manifest-path ../core/Cargo.toml }
 
     - name: Build the .exe

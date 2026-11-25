@@ -25,6 +25,9 @@ mssb-clone-core = { path = "../core" }
 [target.'cfg(any(target_os = "macos", target_os = "linux"))'.dependencies]
 rustix = { version = "1.1.5", features = ["fs"] }
 
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61.2", features = ["Win32_Storage_FileSystem"] }
+
 [features]
 # Embed ui/ into the binary (a plain `cargo build` then makes the portable exe; no tauri-cli needed)
 default = ["custom-protocol"]

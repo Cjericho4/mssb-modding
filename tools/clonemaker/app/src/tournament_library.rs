@@ -63,7 +63,11 @@ pub(crate) fn matchup_filename(away: &str, home: &str) -> String {
             safe_name(player)
         }
     };
-    format!("{} vs {}.matchup.json", side(away, "Away"), side(home, "Home"))
+    format!(
+        "{} vs {}.matchup.json",
+        side(away, "Away"),
+        side(home, "Home")
+    )
 }
 
 fn file_label(path: &Path) -> String {
@@ -201,8 +205,14 @@ mod tests {
     #[test]
     fn matchup_names_follow_the_two_sheets() {
         assert_eq!(matchup_filename("", " "), "Away vs Home.matchup.json");
-        assert_eq!(matchup_filename("Comets", ""), "Comets vs Home.matchup.json");
-        assert_eq!(matchup_filename(" Away/Side ", "Comets"), "Away_Side vs Comets.matchup.json");
+        assert_eq!(
+            matchup_filename("Comets", ""),
+            "Comets vs Home.matchup.json"
+        );
+        assert_eq!(
+            matchup_filename(" Away/Side ", "Comets"),
+            "Away_Side vs Comets.matchup.json"
+        );
     }
 
     #[test]

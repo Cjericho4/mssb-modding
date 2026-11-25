@@ -535,8 +535,10 @@ mod tests {
 
         // The team inspector must keep reading the selected ISO if a later build replaces its path.
         let mut selected = File::open(&iso).unwrap();
-        let next = tempfile::NamedTempFile::new_in(temp.path()).unwrap();
-        next.persist(&iso).unwrap();
+        // Move the open file first: Windows can refuse to replace an open destination directly.
+        fs::rename(&iso, temp.path().join("original.iso")).unwrap();
+        fs::write(&iso, b"replacement").unwrap();
+        assert_eq!(fs::read(&iso).unwrap(), b"replacement");
         assert_eq!(
             read_usa_iso_range(&mut selected, &iso, "x", 1, 3).unwrap(),
             b"ell"

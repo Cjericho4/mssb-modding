@@ -33,7 +33,7 @@ fn clone_sources(dol: &Dol) -> mssb_clone_core::Result<Vec<Option<usize>>> {
         .map(|slot| {
             let glove = dol.u16(ADDR_GLOVE + slot as u32 * 2)? as usize;
             let source = glove / 6;
-            if glove % 6 != 0 || source >= CHAR_NAMES.len() || source == slot {
+            if !glove.is_multiple_of(6) || source >= CHAR_NAMES.len() || source == slot {
                 return Ok(None);
             }
             let items = |id: usize| dol.read(ADDR_SUBITEM_FILES + id as u32 * 6 * 16, 6 * 16);
