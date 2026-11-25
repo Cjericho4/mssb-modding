@@ -190,7 +190,9 @@ The import starts a fresh game and reads handedness from the selected ISO.
 In Rio, host an unlisted private lobby with **No Game Mode**.
 Assign the two players to controller ports and enable **Fast Reset from HUD**.
 Check the lobby acknowledgement on both machines before starting Exhibition.
-Compare the lineup, fielding positions and clone artwork during play.
+Press **Start** at the title screen. At captain selection, have the second player press **A** to join.
+Use both controllers to confirm the teams. Compare the lineup, fielding positions and clone artwork on the field.
+The Mac-to-Linux test used **Fair Input Delay** and the host's save data.
 Rio's [release notes](https://www.projectrio.online/version-history) describe temporary menu graphics during Fast Reset.
 
 ## Your own textures
@@ -276,7 +278,8 @@ with several characters, each clone follows the character it copies.
   its own colours**, not the clone's colour (those menu models can't be recoloured yet).
 - **Not every character has been played as a clone in Rio yet.** Mario, Peach, King Boo and DK have.
 - The paired-team workflow targets private **No Game Mode** play. Ranked modes expect the original game.
-  The Rio 2.2.0 loader and lineup generator have been checked. Live netplay with custom artwork still needs two-player verification.
+  A live Rio 2.2.0 test verified all 18 lineup slots and positions on Mac and Linux.
+  Both players saw the blue and green Mario clones. Both games loaded each clone's running speed, running bar and handedness.
 
 ## Troubleshooting
 

@@ -58,7 +58,7 @@ You need your own copy of the game. Share team JSON files and keep your game ima
 For private matches in Project Rio 2.2.0, open **Game plan** in Clone Maker.
 Both players need identical finished game images. Exchange the saved matchup, compare the matchup IDs,
 and use **Fast Reset from HUD** in a **No Game Mode** lobby. Use the original game for ranked play.
-Live two-player verification of custom artwork is pending. See the
+A private Mac-to-Linux match showed both players the same blue and green Mario clones. See the
 [guide to saving two teams for Rio](tools/clonemaker/README.md#save-two-teams-for-project-rio).
 
 ---
