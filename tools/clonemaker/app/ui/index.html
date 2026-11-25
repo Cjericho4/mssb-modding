@@ -11,7 +11,7 @@
 <body>
 <header class="top">
   <span class="app">MSSB Clone Maker</span>
-  <nav class="pages" aria-label="Pages"><button class="on" aria-current="page"><svg class="ic" width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="8" cy="5.5" r="2.6"/><path d="M3 14c.6-3 2.6-4.6 5-4.6s4.4 1.6 5 4.6"/></svg><span>Studio</span></button><button data-open-plan aria-label="Game plan" aria-haspopup="dialog" aria-controls="tournament-plan"><svg class="ic" width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="2" y="2" width="5" height="5" rx="1"/><rect x="9" y="2" width="5" height="5" rx="1"/><rect x="2" y="9" width="5" height="5" rx="1"/><rect x="9" y="9" width="5" height="5" rx="1"/></svg><span>Game plan</span></button><button type="button" data-open-tournament aria-label="Tournament mode" title="Tournament mode" aria-haspopup="dialog" aria-controls="tournament-plan"><svg class="ic" width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 2h6v3a3 3 0 0 1-6 0V2ZM5 3H2v1a3 3 0 0 0 3 3M11 3h3v1a3 3 0 0 1-3 3M8 8v4M5 14h6M6 12h4"/></svg><span>Tournament mode</span></button><button id="nav-stats" disabled aria-haspopup="dialog" aria-controls="clone-stats"><svg class="ic" width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 13.5V9M8 13.5V3M13 13.5V6.5"/></svg><span>Stats</span></button></nav>
+  <nav class="pages" aria-label="Pages"><button class="on" aria-current="page" data-open-studio><svg class="ic" width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="8" cy="5.5" r="2.6"/><path d="M3 14c.6-3 2.6-4.6 5-4.6s4.4 1.6 5 4.6"/></svg><span>Studio</span></button><button data-open-plan aria-label="Game plan" aria-controls="tournament-plan"><svg class="ic" width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="2" y="2" width="5" height="5" rx="1"/><rect x="9" y="2" width="5" height="5" rx="1"/><rect x="2" y="9" width="5" height="5" rx="1"/><rect x="9" y="9" width="5" height="5" rx="1"/></svg><span>Game plan</span></button><button type="button" data-open-tournament aria-label="Tournament mode" title="Tournament mode" aria-controls="tournament-plan"><svg class="ic" width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 2h6v3a3 3 0 0 1-6 0V2ZM5 3H2v1a3 3 0 0 0 3 3M11 3h3v1a3 3 0 0 1-3 3M8 8v4M5 14h6M6 12h4"/></svg><span>Tournament mode</span></button><button id="nav-stats" disabled aria-haspopup="dialog" aria-controls="clone-stats"><svg class="ic" width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 13.5V9M8 13.5V3M13 13.5V6.5"/></svg><span>Stats</span></button></nav>
   <div class="game"><div class="pill" id="pill" role="status"><i></i><span>No game yet</span></div><input id="game-path" readonly tabindex="-1" aria-label="Game path"></div>
   <button id="btn-iso" class="tbtn">Choose your game (.iso)…</button>
   <button id="btn-dir" class="tbtn">or a folder…</button>
@@ -21,7 +21,7 @@
 <nav class="rail" aria-label="Clones">
   <div id="roster"></div>
   <section id="checks" class="checks" aria-live="polite"><h2>Checks<em id="checks-count"></em></h2><p id="checks-text"></p>
-    <button data-open-plan aria-label="Game plan" aria-haspopup="dialog" aria-controls="tournament-plan"><svg class="ic" width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="2" y="2" width="5" height="5" rx="1"/><rect x="9" y="2" width="5" height="5" rx="1"/><rect x="2" y="9" width="5" height="5" rx="1"/><rect x="9" y="9" width="5" height="5" rx="1"/></svg>See the whole game plan</button></section>
+    <button data-open-plan aria-label="Game plan" aria-controls="tournament-plan"><svg class="ic" width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="2" y="2" width="5" height="5" rx="1"/><rect x="9" y="2" width="5" height="5" rx="1"/><rect x="2" y="9" width="5" height="5" rx="1"/><rect x="9" y="9" width="5" height="5" rx="1"/></svg>See the whole game plan</button></section>
   <div class="rail-foot"><button id="btn-group" class="another" title="Clone another character"><svg class="ic" width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 3v10M3 8h10"/></svg><span>Clone another character</span></button>
     <button id="btn-dock" class="tool" aria-expanded="false" title="Show names and checks"><svg class="ic" width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 3l5 5-5 5"/></svg></button></div>
 </nav>
@@ -163,12 +163,25 @@
   </details>
 </dialog>
 <dialog id="tournament-plan" aria-labelledby="tourney-title">
-  <header><h2 id="tourney-title">Game plan</h2><div class="tourney-header-actions"><button type="button" class="tourney-switch-mode">Open in Tournament mode</button><button type="button" class="tourney-close">Close</button></div></header>
-  <p class="tourney-intro"></p>
+  <h2 id="tourney-title" class="offscreen">Game plan</h2>
   <fieldset>
     <div class="tourney-toolbar"></div>
     <div class="tourney-editor"></div>
-    <div class="tourney-footer"><button type="button" data-open-teams aria-haspopup="dialog" aria-controls="rio-teams">Open finished-game roster…</button><button type="button" class="tourney-build">Build tournament matchup…</button></div>
+    <div class="tourney-footer">
+      <details class="portrait-tools" hidden>
+        <summary>Add player portraits…</summary>
+        <div class="portrait-picker">
+          <p>Load the 54 player faces once from your original USA game.</p>
+          <button type="button" data-kind="iso">Choose game image…</button>
+          <button type="button" data-kind="folder">Choose extracted folder…</button>
+          <span class="portrait-message" aria-live="polite"></span>
+        </div>
+      </details>
+      <button type="button" data-open-teams aria-haspopup="dialog" aria-controls="rio-teams">Open finished-game roster…</button>
+      <button type="button" class="tourney-switch-mode">Open in Tournament mode</button>
+      <button type="button" class="tourney-build">Build tournament matchup…</button>
+      <button type="button" class="tourney-close">Back to Studio</button>
+    </div>
   </fieldset>
   <p role="status" aria-live="polite"></p>
   <dialog class="tourney-stat-dialog" aria-labelledby="tourney-stat-title" aria-describedby="tourney-stat-note">

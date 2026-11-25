@@ -1,6 +1,7 @@
 import {sides, positions, captainSlots, moveBatter, swapFieldPosition} from "./rio-roster.mjs";
 import {loadDraft, saveDraft} from "./game-plan-draft.mjs";
 import {playerPool} from "./game-plan-pool.mjs";
+import {initPortraits, rosterFace} from "./roster-portraits.mjs";
 
 const format = "mssb-tournament-team-v1";
 const MiB = 1024 * 1024;
@@ -10,6 +11,9 @@ const editor = dialog.querySelector(".tourney-editor");
 const status = dialog.querySelector("[role=status]");
 const fieldset = dialog.querySelector("fieldset");
 const close = dialog.querySelector(".tourney-close");
+const nav = document.querySelector(".pages");
+const studioButton = nav.querySelector("[data-open-studio]");
+const showPortraits = initPortraits(dialog.querySelector(".portrait-tools"));
 const statDialog = dialog.querySelector(".tourney-stat-dialog");
 const invoke = window.__TAURI__.core.invoke;
 const teams = Object.fromEntries(sides.map((s, t) => [s, {format, player:"", rows:positions.map((_,i) => ({
@@ -305,7 +309,7 @@ function playerDrag(elem, index, dropPlayer) {
 }
 function fieldPanel(team) {
   const panel = el("section", "", "tourney-field-panel");
-  panel.append(el("h3","Starting field positions"), el("p","Drop one fielder on another to swap. The number is their batting spot."));
+  panel.append(el("h3","Starting field positions"), el("p","Drag one fielder onto another to swap positions."));
   const diamond = el("div","","plan-diamond");
   team.rows.forEach((row, i) => {
     const selector = '.tourney-fielder[data-pos="' + row.pos + '"]';
@@ -315,7 +319,7 @@ function fieldPanel(team) {
     marker.setAttribute("aria-pressed",String(selected[side] === i));
     const badge = el("b",positions[row.pos],"position-badge");
     badge.append(el("span","#" + (i + 1), "field-bat-num"));
-    marker.append(badge,el("span",title(row),"bat-name tourney-name"));
+    marker.append(rosterFace(row.source,names.get(row.source)),badge,el("span",title(row),"bat-name tourney-name"));
     playerDrag(marker,i,from => {
       swapFieldPosition(team,from,row.pos);
       selected[side] = from;
@@ -327,16 +331,23 @@ function fieldPanel(team) {
   return panel;
 }
 function orderPanel(team) {
-  const panel = el("section");
-  panel.append(el("h3","Batting order"), el("p","Drag the nine batters into order. Each row keeps its field position."));
+  const panel = el("section","","tourney-order-panel");
+  panel.append(el("h3","Batting order"), el("p","Drag a batter to move their spot."));
   const ol = el("ol","","tourney-order");
   team.rows.forEach((row,i) => {
     const li = el("li");
     const b = button("", () => { selected[side] = i; draw('.tourney-row[data-index="' + i + '"]'); }, "tourney-row");
     b.dataset.index = String(i);
     b.setAttribute("aria-pressed",String(selected[side] === i));
-    b.append(el("span",String(i+1),"tourney-number"),el("strong",title(row),"tourney-name"),
-      el("small",row.captain ? "Captain" : ""),el("small",row.star ? "★" : ""),el("b",positions[row.pos]));
+    const flags = el("span","","tourney-flags");
+    if (row.captain) flags.append(el("small","Captain","tourney-captain-flag"));
+    if (row.star) {
+      const star = el("small","★","tourney-star-flag");
+      star.setAttribute("aria-label","Superstar");
+      flags.append(star);
+    }
+    b.append(el("span",String(i+1),"tourney-number"),rosterFace(row.source,names.get(row.source)),
+      el("strong",title(row),"tourney-name"),flags,el("b",positions[row.pos],"tourney-position"));
     playerDrag(b,i,from => move(team,from,i));
     li.append(b);
     ol.append(li);
@@ -439,7 +450,12 @@ function inspector(team) {
   const i = selected[side], row = team.rows[i];
   const panel = el("section","","tourney-inspector");
   const member = el("div", "", "tourney-member");
-  member.append(el("h3","Edit batter " + (i + 1)));
+  const head = el("div","","tourney-member-head");
+  const caption = el("div","","tourney-batter-caption");
+  const activeName = el("h3", title(row));
+  caption.append(el("small","Batter " + (i + 1) + " · " + positions[row.pos]), activeName);
+  head.append(rosterFace(row.source,names.get(row.source)),caption);
+  member.append(head);
   const fields = el("div","","tourney-fields");
   const confirmation = el("div","","source-change");
   const source = select(names,row.source,"tourney-source",id=>chooseSource(i,id));
@@ -449,6 +465,7 @@ function inspector(team) {
   label.value = row.label || "";
   label.oninput = () => {
     row.label = label.value;
+    activeName.textContent = title(row);
     draftChanged();
     for (const name of editor.querySelectorAll('[data-index="' + i + '"] .tourney-name')) name.textContent = title(row);
   };
@@ -521,24 +538,49 @@ dialog.querySelector(".tourney-build").onclick = () => run(async () => {
     el("p","Rio lineup SHA-256 · "+result.hudSha256),
     el("p","Compare both hashes, then open the finished-game roster in Game plan. Load hud.json with the built ISO and select Use in Rio on both computers."));
 });
-close.onclick = () => dialog.close();
-dialog.oncancel = event => {if (busy) event.preventDefault();};
-dialog.onclose = () => {dragging=undefined; flushDraft(); opener?.focus();};
+function setCurrentPage(active) {
+  for (const button of nav.querySelectorAll("[data-open-studio],[data-open-plan],[data-open-tournament]")) {
+    button.classList.toggle("on", button === active);
+    if (button === active) button.setAttribute("aria-current", "page");
+    else button.removeAttribute("aria-current");
+  }
+}
+function backToStudio() {
+  if (!busy && dialog.open) dialog.close();
+}
+close.onclick = backToStudio;
+studioButton.addEventListener("click", backToStudio);
+document.addEventListener("keydown", event => {
+  if (event.key === "Escape" && dialog.open && !busy && !event.defaultPrevented &&
+      !document.querySelector("dialog:modal") && !event.target.closest?.("select,input[type=search]")) {
+    event.preventDefault();
+    backToStudio();
+  }
+});
+dialog.onclose = () => {
+  if (dialog.open) return;
+  dragging = undefined;
+  flushDraft();
+  document.body.classList.remove("planning");
+  setCurrentPage(studioButton);
+  if (opener?.getClientRects().length) opener.focus();
+  else studioButton.focus();
+};
 window.addEventListener("pagehide", flushDraft);
 editor.addEventListener("input", () => { status.textContent = ""; });
 async function openMode(nextMode, trigger) {
   if (busy) return;
   if (!dialog.open) {
     opener = trigger;
-    dialog.showModal();
+    document.body.classList.add("planning");
+    dialog.show();
   }
   mode = nextMode;
   const planning = mode === "plan";
   dialog.dataset.mode = mode;
   dialog.querySelector("#tourney-title").textContent = planning ? "Game plan" : "Tournament mode";
-  dialog.querySelector(".tourney-intro").textContent = planning
-    ? "Choose your nine batters and their starting positions. Both teams are saved on this device as you edit."
-    : "Load a tournament team or build a matchup from both lineups and your clean retail ISO.";
+  setCurrentPage(nav.querySelector(planning ? "[data-open-plan]" : "[data-open-tournament]"));
+  showPortraits();
   dialog.querySelector(".tourney-switch-mode").textContent = planning ? "Open in Tournament mode" : "Back to Game plan";
   dialog.querySelector("[data-open-teams]").hidden = !planning;
   dialog.querySelector(".tourney-build").hidden = planning;

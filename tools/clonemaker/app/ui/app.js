@@ -224,6 +224,7 @@ async function startLoad(path) {
     setEnabled(false);
     return;
   }
+  window.dispatchEvent(new CustomEvent("studio-game-opened", {detail:{path}}));
   $("out-path").value = await invoke("default_output", { gamePath: path });
   while (state.groups.length > 1) dropGroup(state.groups[state.groups.length - 1]);
   state.groups[0].info = state.groups[0].infoSource = null;

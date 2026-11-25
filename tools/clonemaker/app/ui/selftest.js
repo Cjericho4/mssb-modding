@@ -86,6 +86,29 @@ export async function run(options, app) {
     await waitFor(() => ready("plan"), "one click from welcome opens the editable Game plan without a disc");
     check($("welcome").hidden && !plan.open && !tournamentField(".tourney-team-picker") && tournamentField(".tourney-build").hidden,
       "both roster drafts are available before tournament setup");
+    const cachedFaces = await invoke("load_roster_portraits", {sourcePath:null});
+    const faceSlots = selector => [...tournament.querySelectorAll(selector + " .roster-face")];
+    const hasSourceImage = face => {
+      const img = face.querySelector("img");
+      const encoded = cachedFaces[Number(face.dataset.source)];
+      return img?.complete && img.naturalWidth === 50 && img.naturalHeight === 50 &&
+        img.src === "data:image/png;base64," + encoded;
+    };
+    const fieldFaces = () => faceSlots(".tourney-fielder");
+    const batterFaces = () => faceSlots(".tourney-row");
+    check(fieldFaces().length === 9 && batterFaces().length === 9 &&
+      faceSlots(".draft-player-choice").length === 54 && faceSlots(".tourney-inspector").length === 1,
+      "the field, batting order, character pool and selected batter each have a portrait slot");
+    if (cachedFaces.length) {
+      await waitFor(() => [...fieldFaces(), ...batterFaces(), ...faceSlots(".draft-player-choice"), ...faceSlots(".tourney-inspector")].every(hasSourceImage),
+        "all locally cached headshots decode in the correct character slots");
+    }
+    await shot("game_plan_faces");
+    await resizeTo(640, 560);
+    check(fits() && tournament.scrollWidth <= tournament.clientWidth + 1,
+      "Game Plan fits the minimum window width");
+    await shot("game_plan_narrow");
+    await resizeTo(1320, 780);
     const findDK = () => tournamentField('.draft-player-choice[data-character="2"]');
     const searchPool = tournamentField('.draft-player-pool input[type="search"]');
     searchPool.value = "DK";
@@ -100,6 +123,10 @@ export async function run(options, app) {
       "the planner accepts repeat characters without a captain or a lobby name");
     tournamentField(".tourney-switch-mode").click();
     await waitFor(() => ready("tournament") && tournamentField(".tourney-team-picker"), "Game plan hands both drafts to Tournament mode");
+    if (cachedFaces.length) {
+      await waitFor(() => batterFaces().length === 9 && batterFaces().slice(0,3).every(face =>
+        Number(face.dataset.source) === 2 && hasSourceImage(face)), "Tournament mode shows a DK head for each of the three DK batters");
+    }
     check(tournamentField('.tourney-row[data-index="2"]').getAttribute("aria-pressed") === "true" &&
       [0,1,2].every(i => tournamentField('.tourney-row[data-index="' + i + '"] .tourney-name').textContent === "Donkey Kong"),
       "the selected batter and all three DKs survive the handoff");
@@ -115,6 +142,11 @@ export async function run(options, app) {
       !tournamentField("fieldset").disabled;
     pickPreset(presets[0].value);
     await waitFor(loadedIntoHome, "an official tournament team loads into Home");
+    if (cachedFaces.length) {
+      await waitFor(() => batterFaces().every((face, i) => Number(face.dataset.source) === firstTeam.rows[i].source && hasSourceImage(face)),
+        "switching tournament teams restores each batter's matching headshot");
+    }
+    await shot("tournament_faces");
     check(tournamentField(".tourney-lobby").value === "" && Number(tournamentField(".tourney-source").value) === firstTeam.rows[0].source,
       "a preset supplies the roster and asks for the player's own lobby name");
     const homeLobby = tournamentField(".tourney-lobby");

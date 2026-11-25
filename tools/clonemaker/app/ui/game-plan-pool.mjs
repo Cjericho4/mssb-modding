@@ -1,3 +1,5 @@
+import {rosterFace} from "./roster-portraits.mjs";
+
 let query = "";
 const normalized = text => text.toLowerCase().replace(/[^a-z0-9]+/g, "");
 
@@ -7,7 +9,7 @@ export function playerPool({names, selectedSource, selectedBatter, onChoose, onD
   const heading = document.createElement("h3");
   heading.textContent = "Character pool";
   const instructions = document.createElement("p");
-  instructions.textContent = "Drop a character on the lineup or field. Click to place one in batting spot " + selectedBatter + ".";
+  instructions.textContent = "Click to fill batting spot " + selectedBatter + ", or drag a player onto the field or lineup.";
   const search = document.createElement("input");
   search.type = "search";
   search.placeholder = "Find a character";
@@ -25,7 +27,10 @@ export function playerPool({names, selectedSource, selectedBatter, onChoose, onD
       const tile = document.createElement("button");
       tile.type = "button";
       tile.className = "draft-player-choice";
-      tile.textContent = name;
+      const caption = document.createElement("span");
+      caption.className = "pool-name";
+      caption.textContent = name;
+      tile.append(rosterFace(id, name), caption);
       tile.dataset.character = id;
       tile.draggable = true;
       tile.setAttribute("aria-label", "Place " + name + " in batting spot " + selectedBatter);

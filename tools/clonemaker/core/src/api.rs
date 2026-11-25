@@ -441,7 +441,12 @@ pub fn load_game(path: &Path) -> (Option<Game>, OpenGame) {
 /// Read the selected game's HUD portraits in character-slot order, as transparent base64 PNGs.
 pub fn roster_portraits(disc: &Disc, dol: &Dol) -> Result<Vec<String>> {
     let desc = crate::menu::portrait_desc(dol)?;
-    let resource = crate::menu::TextureFile::new(disc.load("ZZZZ.dat", desc, 0)?)?;
+    roster_portraits_from_resource(disc.load("ZZZZ.dat", desc, 0)?)
+}
+
+/// Decode the 54 roster portraits from the expanded HUD texture resource.
+pub fn roster_portraits_from_resource(data: Vec<u8>) -> Result<Vec<String>> {
+    let resource = crate::menu::TextureFile::new(data)?;
     resource
         .portraits()?
         .into_iter()
