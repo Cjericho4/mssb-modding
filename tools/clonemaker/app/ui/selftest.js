@@ -97,6 +97,37 @@ export async function run(options, app) {
     };
     const fieldFaces = () => faceSlots(".tourney-fielder");
     const batterFaces = () => faceSlots(".tourney-row");
+    const openSlots = () => tournament.querySelectorAll(".tourney-row .tourney-open-face").length;
+    const switchSide = side => tournamentField('.tourney-tabs [data-side="' + side + '"]').click();
+    const importSheet = async (sheet, name = "Practice.team.json") => {
+      const files = tournamentField(".tourney-import input");
+      const transfer = new DataTransfer();
+      transfer.items.add(new File([JSON.stringify(sheet)], name, {type:"application/json"}));
+      files.files = transfer.files;
+      files.dispatchEvent(new Event("change", {bubbles:true}));
+      await waitFor(() => !tournamentField("fieldset").disabled, "the sheet import to finish reading");
+    };
+    check(openSlots() === 9 && fieldFaces().length === 9 && !tournamentField(".tourney-lobby").value,
+      "a new Away sheet has nine unassigned spots and a blank Rio name");
+    switchSide("Home");
+    check(openSlots() === 9, "a fresh Home sheet is also empty");
+    switchSide("Away");
+    const firstPick = () => tournamentField('.draft-player-choice[data-character="0"]').click();
+    firstPick(); firstPick();
+    check(openSlots() === 7 && tournamentField('.tourney-row[data-index="2"] .tourney-pick').getAttribute("aria-pressed") === "true",
+      "choosing two players from the pool fills consecutive spots, including a repeat character");
+    tournamentField(".tourney-new-team").click();
+    tournamentField(".tourney-keep").click();
+    check(openSlots() === 7, "canceling a new sheet preserves the existing roster");
+    tournamentField(".tourney-new-team").click();
+    tournamentField(".tourney-confirm").click();
+    check(openSlots() === 9, "starting a new team restores nine empty spots");
+    await shot("empty_team_sheet");
+    for (let i = 0; i < 9; i++) {
+      tournamentField('.tourney-row[data-index="' + i + '"] .tourney-pick').click();
+      choose(tournamentField(".tourney-source"), i);
+    }
+    tournamentField('.tourney-row[data-index="0"] .tourney-pick').click();
     check(fieldFaces().length === 9 && batterFaces().length === 9 &&
       faceSlots(".draft-player-choice").length === 54 && faceSlots(".tourney-inspector").length === 1,
       "the field, batting order, character pool and selected batter each have a portrait slot");
@@ -167,7 +198,7 @@ export async function run(options, app) {
       return first;
     };
     const firstPlanStep = checkGuide("Game Plan");
-    // The Lobsters preset contains its stock "Birdo" name as an explicit label.
+    // A previously exported team can spell out a stock name as an explicit label.
     // An actual nickname, unlike that stock label, should survive a substitution.
     slot("row",3).querySelector(".tourney-pick").click();
     const originalSource = tournamentField(".tourney-source").value;
@@ -175,19 +206,11 @@ export async function run(options, app) {
     inputName(tournamentField(".tourney-label"), "Birdo");
     choose(tournamentField(".tourney-source"), 15);
     check(slotName("row",3).textContent === "Toadette" && slotName("fielder",3).textContent === "Toadette" &&
-      inspectorShows("", "Toadette"), "substituting Toadette for a preset labeled Birdo updates both default names");
+      inspectorShows("", "Toadette"), "substituting Toadette for a roster labeled Birdo updates both default names");
     inputName(tournamentField(".tourney-label"), "Slugger");
     choose(tournamentField(".tourney-source"), originalSource);
     check(inspectorShows("Slugger", "Slugger"), "an intentional nickname survives changing character");
     inputName(tournamentField(".tourney-label"), "");
-    tournamentField(".tourney-save").click();
-    check(document.activeElement === tournamentField(".tourney-lobby") && tournamentField(".tourney-lobby").validity.customError,
-      "saving an unnamed team focuses the missing Rio username");
-    inputName(tournamentField(".tourney-lobby"), "Practice");
-    tournamentField(".tourney-save").click();
-    check(document.activeElement === tournamentField(".tourney-captain") &&
-      tournamentField('[role="status"]').textContent.includes("needs a captain"), "saving a team without a captain points to an eligible player");
-    inputName(tournamentField(".tourney-lobby"), "");
     openGuide();
     const fieldName = editName("fielder", 1);
     check(document.activeElement === fieldName && fieldName.maxLength === 64, "clicking the name of an unselected fielder focuses its name editor");
@@ -289,43 +312,43 @@ export async function run(options, app) {
       slot("row",2).querySelector(".tourney-pick").click();
     }
     tournamentField('.tourney-tabs [data-side="Home"]').click();
-    const presets = [...tournamentField(".tourney-team-picker").querySelectorAll("optgroup:first-of-type option")];
-    check(presets.length >= 14, "the ASSBLAST tournament rosters are available inside the picker");
-    const firstTeam = await invoke("load_tournament_team", {id:presets[0].value});
-    const pickPreset = id => {
-      choose(tournamentField(".tourney-team-picker"),id);
-      tournamentField(".tourney-load-picked").click();
-    };
-    const loadedIntoHome = () => tournamentField('[role="status"]').textContent.includes("loaded into Home") &&
-      !tournamentField("fieldset").disabled;
-    pickPreset(presets[0].value);
-    await waitFor(loadedIntoHome, "an official tournament team loads into Home");
-    if (cachedFaces.length) {
-      await waitFor(() => batterFaces().every((face, i) => Number(face.dataset.source) === firstTeam.rows[i].source && hasSourceImage(face)),
-        "switching tournament teams restores each batter's matching headshot");
-    }
-    await shot("tournament_faces");
-    check(tournamentField(".tourney-lobby").value === "" && Number(tournamentField(".tourney-source").value) === firstTeam.rows[0].source,
-      "a preset supplies the roster and asks for the player's own lobby name");
-    const homeLobby = tournamentField(".tourney-lobby");
-    homeLobby.value = "Local Player";
-    homeLobby.dispatchEvent(new Event("input", {bubbles:true}));
-    pickPreset(presets[1].value);
-    await waitFor(loadedIntoHome, "another preset loads while keeping the user's lobby name");
-    check(tournamentField(".tourney-lobby").value === "Local Player", "the tournament manager's name never replaces the player's");
+    check(openSlots() === 9 && !(await invoke("list_tournament_teams")).some(entry => entry.kind !== "saved"),
+      "the second team starts blank and the library contains only user saves");
+    const firstTeam = {format:"mssb-tournament-team-v1", player:"Local Player", rows:Array.from({length:9},
+      (_,i) => ({source:i === 0 ? 2 : null,pos:i,captain:false,star:false,...(i === 0 ? {label:"Our cleanup hitter"} : {})}))};
+    await importSheet(firstTeam);
+    check(openSlots() === 8 && tournamentField(".tourney-lobby").value === "Local Player" &&
+      tournamentField(".tourney-label").value === firstTeam.rows[0].label, "importing an unfinished sheet keeps every open spot and the correct active team");
     const labelEdit = tournamentField(".tourney-label");
-    labelEdit.value = "My batter";
-    labelEdit.dispatchEvent(new Event("input", {bubbles:true}));
+    inputName(labelEdit, "My batter");
     check(slotName("row",0).textContent === "My batter" && slotName("fielder",0).textContent === "My batter",
       "editing the Home inspector immediately updates both on-field and lineup names");
-    pickPreset(presets[0].value);
-    await waitFor(() => tournamentField(".tourney-keep") && !tournamentField("fieldset").disabled, "replacing an edited roster asks first");
+    await importSheet(firstTeam);
     tournamentField(".tourney-keep").click();
-    check(tournamentField(".tourney-label").value === "My batter", "keeping an edited team preserves its batter");
-    pickPreset(presets[0].value);
-    await waitFor(() => tournamentField(".tourney-confirm") && !tournamentField("fieldset").disabled, "replacement can be confirmed");
+    check(tournamentField(".tourney-label").value === "My batter", "canceling an import retains the edited sheet");
+    await importSheet(firstTeam);
     tournamentField(".tourney-confirm").click();
-    check(tournamentField(".tourney-label").value === (firstTeam.rows[0].label ?? ""), "confirmed replacement restores the chosen batting order");
+    check(tournamentField(".tourney-label").value === firstTeam.rows[0].label, "confirmed import restores the saved sheet");
+    const {loadDraft} = await import("./game-plan-draft.mjs");
+    await sleep(300);
+    const snapshot = await loadDraft();
+    const bothSheets = {format:"mssb-tournament-matchup-v1", away:snapshot.teams.Away, home:firstTeam};
+    await importSheet({...bothSheets, home:{...firstTeam, rows:[]}}, "Broken.matchup.json");
+    check(!tournamentField(".tourney-confirm") && tournamentField(".tourney-lobby").value === "Local Player",
+      "a bad second sheet cannot replace either team");
+    tournamentField(".tourney-new-matchup").click();
+    tournamentField(".tourney-confirm").click();
+    check(openSlots() === 9, "new matchup starts Away blank");
+    switchSide("Home");
+    check(openSlots() === 9, "new matchup also clears Home");
+    tournamentField(".tourney-build").click();
+    check(document.activeElement === tournamentField(".tourney-source") && openSlots() === 9 &&
+      tournamentField('[role="status"]').textContent.includes("0 of 9"), "Build highlights the first unassigned slot before opening a disc picker");
+    await importSheet(bothSheets, "Practice.matchup.json");
+    check(slotName("row",1).textContent === "Away DK", "matchup import restores Away's named clone");
+    switchSide("Home");
+    check(openSlots() === 8 && tournamentField(".tourney-label").value === firstTeam.rows[0].label, "matchup import restores Home's unfinished sheet");
+    say("verified blank-first drafting, no bundled teams, partial team and two-sided matchup imports, and protected replacement");
     tournamentField('.tourney-tabs [data-side="Away"]').click();
     check(tournamentField(".tourney-lobby").value === "" && tournamentField(".tourney-source").value === "2" &&
       slotName("row",1).textContent === "Away DK",
@@ -338,7 +361,6 @@ export async function run(options, app) {
     tournamentField(".tourney-close").click();
     await waitFor(() => !tournament.open && !plan.open && document.activeElement === directPlan,
       "closing a shared draft opened from welcome returns to Game plan navigation");
-    const {loadDraft} = await import("./game-plan-draft.mjs");
     const savedPlan = await loadDraft();
     check(savedPlan?.teams.Away.rows[1].label === "Away DK" && !savedPlan.teams.Away.rows[0].label,
       "the saved draft retains the nickname on the correct duplicate");

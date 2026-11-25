@@ -2,7 +2,7 @@
 const pickSide = {
   title:"Choose the team you want to edit",
   target:".tourney-tabs",
-  text:"Click Away or Home. Each side has nine players. The batting order, field and player details all show the side you picked."
+  text:"Start with Away or Home. Each team sheet has nine empty batting spots, one for each field position. To start from a file, use Import team or matchup…."
 };
 const arrange = {
   title:"Set who bats first and who plays where",
@@ -16,34 +16,34 @@ const nameAndPaint = {
 };
 const save = {
   title:"Save a team you can share",
-  target:".tourney-lobby, .tourney-save",
-  text:side => "Enter the " + side + " player’s Project Rio username under Rio lobby name. Pick one eligible captain, such as Mario or DK. Click Save " + side + " team… and choose a filename. Repeat for the other side to save both teams."
+  target:".tourney-save, .tourney-save-matchup",
+  text:side => "Click Save " + side + " team… to share this team sheet. Use Save matchup… to keep Away and Home together in one file. You can save with empty spots and add the Rio usernames later."
 };
 const reopen = {
   title:"Edit a team you saved earlier",
   target:".tourney-library, .tourney-import",
-  text:side => "Under Team library, pick your team from My saved teams and click Load into " + side + ". Edit it, then save again. Choose the same file to update it or a new filename for another version. Use Import team file… to open a file someone sent you."
+  text:side => "In the team library, pick one of your saved teams and click Load into " + side + ". Edit it, then save again. Choose the same file to update it or a new filename for another version. Use Import team or matchup… to open a file someone sent you."
 };
 const steps = {
   plan: [pickSide, {
     title:"Choose your nine players", target:".draft-player-pool",
-    text:"Click the portrait of the player you want to replace. Click a character in the pool to put them in that spot. You can pick the same character twice for two DKs."
+    text:"Click a character in the pool to fill the highlighted spot. The next empty spot is selected for you. For a specific assignment, drag a character onto a batting spot or field position. You can pick the same character twice."
   }, arrange, nameAndPaint, save, {
     title:"Pick up where you left off", target:".tourney-switch-mode",
-    text:"Your draft saves automatically on this device. Click Import team file… to open a team file. Open Tournament mode to find My saved teams in the team library or to build a game from both lineups."
+    text:"Your draft saves automatically on this device. Import a team file into the selected side, or a matchup file to restore both teams. Tournament mode shares the same draft and can build a game from both lineups."
   }],
   tournament: [{
-    title:"Choose a side and load a lineup", target:".tourney-tabs, .tourney-library",
-    text:side => "Your Game Plan lineups are already here. To use a different team, click Away or Home, pick a team under Team library, then click Load into " + side + ". You can also import a team file someone sent you."
+    title:"Start or import a matchup", target:".tourney-tabs, .tourney-import",
+    text:side => "Choose Away or Home to fill a blank sheet. If you already made a Game Plan, your draft is here. Import team or matchup… loads one team into " + side + " or restores both sides from a matchup file."
   }, {
     title:"Change the players in this lineup", target:".tourney-source",
-    text:"Click a player’s portrait. Use the Character menu to put a different character in that spot. You can choose a character who already plays for this team."
+    text:"Select a batting spot or field position. Pick a character from the Character menu or the pool. Fill more spots the same way. You can pick a character more than once."
   }, arrange, nameAndPaint, save, reopen, {
     title:"Build the game for both players", target:".tourney-build",
-    text:"Set up Away and Home with different Rio lobby names. Click Build tournament matchup…, choose your original USA game disc image (.iso), then pick an output folder. The cloner writes the game and the Rio lineup there."
+    text:"Fill all nine spots on each side, choose one captain per team, and enter each player’s Rio username. Click Build tournament matchup…, choose your original USA disc image (.iso), then pick an output folder."
   }, {
     title:"Use the two lineups in Project Rio", target:".tourney-switch-mode",
-    text:"On each computer, go to Game Plan and open the finished-game roster. Choose the built game image, click Load matchup… and open hud.json from the build folder. Close Rio, then click Use in Rio… to install the lineup. The roster editor shows the lobby settings."
+    text:"On both computers, open the finished-game roster in Game Plan. Choose the built game, load hud.json, then click Use in Rio… with Rio closed. Join a private No Game Mode lobby. The host clicks Assign Controller Ports, assigns each player one controller, then enables Fast Reset. If the ports change, turn Fast Reset off and on again."
   }]
 };
 

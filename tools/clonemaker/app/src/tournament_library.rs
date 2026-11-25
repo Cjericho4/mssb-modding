@@ -1,35 +1,19 @@
-//! Bundled ASSBLAST rosters and the player's saved tournament teams.
-use crate::tournament::{self, Team};
-use serde::{Deserialize, Serialize};
+//! Team sheets saved by this player.
+use crate::tournament::{self, TeamSheet};
+use serde::Serialize;
 use sha2::{Digest, Sha256};
 use std::{
     fs,
     io::{self, Read, Write},
     path::{Path, PathBuf},
-    sync::OnceLock,
 };
 use tauri::{AppHandle, Manager};
-
-#[derive(Deserialize)]
-struct Preset {
-    id: String,
-    label: String,
-    team: Team,
-}
 
 #[derive(Serialize)]
 pub(crate) struct Entry {
     id: String,
     label: String,
     kind: &'static str,
-}
-
-fn presets() -> &'static [Preset] {
-    static PRESETS: OnceLock<Vec<Preset>> = OnceLock::new();
-    PRESETS.get_or_init(|| {
-        serde_json::from_str(include_str!("tournament-teams/assblast.json"))
-            .expect("bundled tournament teams must be valid")
-    })
 }
 
 fn library(app: &AppHandle) -> Result<PathBuf, String> {
@@ -117,19 +101,11 @@ fn saved_entries(folder: &Path) -> Result<Vec<Entry>, String> {
 
 fn entries(folder: &Path) -> Result<Vec<Entry>, String> {
     let mut all = saved_entries(folder)?;
-    all.extend(presets().iter().map(|p| Entry {
-        id: p.id.clone(),
-        label: p.label.clone(),
-        kind: "preset",
-    }));
     all.sort_by_cached_key(|r| (r.kind, r.label.to_lowercase(), r.id.clone()));
     Ok(all)
 }
 
-fn load(folder: &Path, id: &str) -> Result<Team, String> {
-    if let Some(preset) = presets().iter().find(|p| p.id == id) {
-        return Ok(preset.team.clone());
-    }
+fn load(folder: &Path, id: &str) -> Result<TeamSheet, String> {
     // Resolve only entries the library lists. A client cannot provide a path to read.
     let entry = saved_entries(folder)?
         .into_iter()
@@ -137,9 +113,9 @@ fn load(folder: &Path, id: &str) -> Result<Team, String> {
         .ok_or("This team is no longer in your tournament library.")?;
     let path = folder.join(format!("{}.json", &entry.id["saved/".len()..]));
     let file = fs::File::open(path).map_err(|e| e.to_string())?;
-    let team: Team =
+    let team: TeamSheet =
         serde_json::from_reader(file.take(24 * 1024 * 1024 + 1)).map_err(|e| e.to_string())?;
-    tournament::validate(&team)?;
+    tournament::validate_sheet(&team)?;
     Ok(team)
 }
 
@@ -151,7 +127,7 @@ pub(crate) async fn list_tournament_teams(app: AppHandle) -> Result<Vec<Entry>, 
 }
 
 #[tauri::command]
-pub(crate) async fn load_tournament_team(app: AppHandle, id: String) -> Result<Team, String> {
+pub(crate) async fn load_tournament_team(app: AppHandle, id: String) -> Result<TeamSheet, String> {
     tauri::async_runtime::spawn_blocking(move || load(&library(&app)?, &id))
         .await
         .map_err(|e| e.to_string())?
@@ -161,30 +137,22 @@ pub(crate) async fn load_tournament_team(app: AppHandle, id: String) -> Result<T
 mod tests {
     use super::*;
     #[test]
-    fn bundled_teams_load_distinct_historical_rosters_without_a_disc() {
+    fn new_library_is_empty() {
         let tmp = tempfile::tempdir().unwrap();
-        let all = entries(tmp.path()).unwrap();
-        assert_eq!(all.len(), 14);
-        for entry in &all {
-            tournament::validate(&load(tmp.path(), &entry.id).unwrap()).unwrap();
-        }
-        let dk = load(tmp.path(), "preset/grandpoobear").unwrap();
-        assert_eq!(
-            (
-                dk.rows[0].source,
-                dk.rows[0].pos,
-                dk.rows[1].source,
-                dk.rows[1].pos
-            ),
-            (2, 3, 2, 5)
-        );
+        assert!(entries(tmp.path()).unwrap().is_empty());
+        assert!(load(tmp.path(), "preset/example").is_err());
     }
     #[test]
     fn saved_team_updates_and_loads_even_if_the_export_moves() {
         let tmp = tempfile::tempdir().unwrap();
         let folder = tmp.path().join("library");
         let path = tmp.path().join("My home nine.team.json");
-        let mut team = presets()[0].team.clone();
+        let mut team: TeamSheet = serde_json::from_value(serde_json::json!({
+            "format":"mssb-tournament-team-v1", "player":"",
+            "rows":(0..9).map(|pos| serde_json::json!({
+                "source":if pos == 0 { Some(2) } else {None}, "pos":pos, "captain":false, "star":false
+            })).collect::<Vec<_>>()
+        })).unwrap();
         remember(&folder, &path, &serde_json::to_vec(&team).unwrap()).unwrap();
         team.rows[0].stats.insert("speed".into(), 0);
         remember(&folder, &path, &serde_json::to_vec(&team).unwrap()).unwrap();
@@ -195,6 +163,10 @@ mod tests {
             load(&folder, &saved[0].id).unwrap().rows[0].stats["speed"],
             0
         );
+        let loaded = load(&folder, &saved[0].id).unwrap();
+        assert_eq!(loaded.rows[0].source, Some(2));
+        assert!(loaded.rows[1].source.is_none());
+        assert!(loaded.player.is_empty());
         assert!(load(&folder, "saved/../../Settings").is_err());
     }
 }

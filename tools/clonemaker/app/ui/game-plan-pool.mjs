@@ -1,6 +1,7 @@
 import {rosterFace} from "./roster-portraits.mjs";
 
 let query = "";
+export function resetPoolSearch() { query = ""; }
 const normalized = text => text.toLowerCase().replace(/[^a-z0-9]+/g, "");
 
 export function playerPool({names, selectedSource, selectedBatter, onChoose, onDragStart, onDragEnd}) {
@@ -9,7 +10,9 @@ export function playerPool({names, selectedSource, selectedBatter, onChoose, onD
   const heading = document.createElement("h3");
   heading.textContent = "Character pool";
   const instructions = document.createElement("p");
-  instructions.textContent = "Click to fill batting spot " + selectedBatter + ", or drag a player onto the field or lineup.";
+  instructions.textContent = selectedSource === null
+    ? "Pick a character for spot " + selectedBatter + ". Each pick moves to the next open spot."
+    : "Choose a replacement for batting spot " + selectedBatter + ", or drag a character onto another spot.";
   const search = document.createElement("input");
   search.type = "search";
   search.placeholder = "Find a character";

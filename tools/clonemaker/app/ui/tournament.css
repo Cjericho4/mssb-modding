@@ -55,6 +55,25 @@ body.planning .top .pages span { display: inline; }
 }
 #tournament-plan .tourney-replace:empty { display: none; }
 
+#tournament-plan .tourney-new-sheets { position: relative; }
+#tournament-plan .tourney-new-sheets summary {
+  cursor: pointer; padding: 5px 8px; color: var(--ink); white-space: nowrap;
+}
+#tournament-plan .tourney-new-choices {
+  position: absolute; z-index: 12; top: 100%; left: 0; display: grid; gap: 4px; padding: 5px;
+  background: var(--card); border: 1px solid var(--rule); border-radius: 6px; box-shadow: 0 3px 12px #131d2a29;
+}
+#tournament-plan .tourney-count { margin-left: 8px; white-space: nowrap; color: var(--rail-dim); font: 11px var(--sans); }
+#tournament-plan .tourney-open-face {
+  width: calc(var(--face-size) * .65); height: calc(var(--face-size) * .65); place-self: center;
+  border: 1px dashed currentColor; border-radius: 50%; color: var(--rail-dim); font: 18px/1 var(--sans);
+}
+#tournament-plan .tourney-fielder .tourney-open-face { margin: 4px auto; background: #18382e; color: #c7dacf; }
+#tournament-plan .is-empty .tourney-pick { cursor: pointer; }
+#tournament-plan .is-empty .tourney-name-slot { pointer-events: none; }
+#tournament-plan .tourney-clear-player { margin-top: 8px; }
+#tournament-plan .tourney-empty-hint { margin-top: 10px; color: var(--ink-2); }
+
 /* Studio's roster rail, stage, and inspector; the pool is part of the stage column. */
 #tournament-plan .tourney-editor {
   display: grid; grid-template-areas: "order field inspector" "order pool inspector";
@@ -62,7 +81,7 @@ body.planning .top .pages span { display: inline; }
   grid-template-rows: minmax(376px,1fr) minmax(150px,.46fr); min-height: 0;
   overflow: auto; background: var(--rail);
 }
-#tournament-plan[data-mode=tournament] .tourney-editor {
+#tournament-plan .tourney-editor.without-pool {
   grid-template-areas: "order field inspector"; grid-template-rows: minmax(374px,1fr);
 }
 #tournament-plan .tourney-editor > section { min-width: 0; min-height: 0; }
@@ -309,11 +328,11 @@ body.planning .top .pages span { display: inline; }
   #tournament-plan .tourney-row { column-gap: 5px; }
 }
 @media (max-width: 940px) {
-  #tournament-plan .tourney-editor, #tournament-plan[data-mode=tournament] .tourney-editor {
+  #tournament-plan .tourney-editor, #tournament-plan .tourney-editor.without-pool {
     grid-template: "order field" minmax(510px,auto) "inspector pool" auto / minmax(178px,34%) minmax(0,1fr);
     align-content: start; background: var(--paper);
   }
-  #tournament-plan[data-mode=tournament] .tourney-editor { grid-template-areas: "order field" "inspector inspector"; }
+  #tournament-plan .tourney-editor.without-pool { grid-template-areas: "order field" "inspector inspector"; }
   #tournament-plan .tourney-order-panel { overflow: auto; }
   #tournament-plan .tourney-field-panel { min-height: 420px; }
   #tournament-plan .tourney-editor > .tourney-inspector {
@@ -330,9 +349,9 @@ body.planning .top .pages span { display: inline; }
   #tournament-plan .tourney-lobby { max-width: 123px; }
   #tournament-plan .tourney-import { margin-left: 0; }
   #tournament-plan .tourney-library { flex-basis: 100%; }
-  #tournament-plan .tourney-editor, #tournament-plan[data-mode=tournament] .tourney-editor { grid-template-columns: minmax(168px,30%) minmax(0,1fr); }
+  #tournament-plan .tourney-editor, #tournament-plan .tourney-editor.without-pool { grid-template-columns: minmax(168px,30%) minmax(0,1fr); }
   #tournament-plan .tourney-editor { grid-template-rows: clamp(372px,calc(100dvh - 198px),465px) auto; }
-  #tournament-plan[data-mode=tournament] .tourney-editor { grid-template-rows: clamp(344px,calc(100dvh - 223px),458px) auto; }
+  #tournament-plan .tourney-editor.without-pool { grid-template-rows: clamp(344px,calc(100dvh - 223px),458px) auto; }
   #tournament-plan .tourney-order { margin-top: 6px; gap: 1px; }
   #tournament-plan .tourney-order-panel { padding-block: 10px 5px; }
   #tournament-plan .tourney-order-panel > :is(h3,p) { margin-inline: 4px; }
@@ -348,7 +367,7 @@ body.planning .top .pages span { display: inline; }
   #tournament-plan .tourney-footer button { padding: 5px 8px; font-size: 12px; }
 }
 @media (max-width: 560px) {
-  #tournament-plan .tourney-editor, #tournament-plan[data-mode=tournament] .tourney-editor {
+  #tournament-plan .tourney-editor, #tournament-plan .tourney-editor.without-pool {
     grid-template: "field" minmax(395px,auto) "order" auto "pool" auto "inspector" auto / minmax(0,1fr);
   }
   #tournament-plan .tourney-editor .tourney-inspector { grid-column: 1; }

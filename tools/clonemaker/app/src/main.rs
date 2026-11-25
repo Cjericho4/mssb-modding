@@ -209,6 +209,7 @@ fn main() {
             rio_teams::save_rio_roster,
             rio_teams::install_rio_matchup,
             tournament_files::save_tournament_team,
+            tournament_files::save_tournament_matchup_sheet,
             tournament_library::list_tournament_teams,
             tournament_library::load_tournament_team,
             tournament_files::build_tournament_matchup,

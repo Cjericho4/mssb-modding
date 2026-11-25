@@ -100,7 +100,7 @@
 <div id="welcome" class="modal" hidden>
   <div class="dialog welcome" role="dialog" aria-modal="true" aria-labelledby="welcome-title" aria-describedby="welcome-text">
     <header><h2 id="welcome-title">Get started</h2></header>
-    <p id="welcome-text">Plan two lineups or edit a saved tournament team. You can start either mode without a game disc.</p>
+    <p id="welcome-text">Create two team sheets from scratch or import a team or matchup file. You can plan both sides without a game disc.</p>
     <div class="line"><button id="welcome-plan" class="primary">Plan a roster</button><button id="welcome-tournament">Open Tournament Mode</button></div>
     <p>To make clones in Studio, open your original USA game.</p>
     <div class="line end"><button id="welcome-later">Not now</button><button id="welcome-dir">Open game folder…</button><button id="welcome-iso">Choose game image (.iso)…</button></div>
@@ -161,8 +161,10 @@
   <details class="plan-help"><summary>Load this matchup in Project Rio</summary>
     <p>Share the saved matchup. Both players open the same finished ISO and load the matchup in the finished-game roster editor.
     Compare the matchup IDs. With the game closed, select <strong>Use in Rio</strong> on both computers and choose
-    Rio’s <strong>HudFiles</strong> folder. Clone Maker backs up the previous HUD there.
-    In a private No Game Mode lobby, enable <strong>Fast Reset from HUD</strong> to start with both teams’ batting orders and field positions.</p>
+    Rio’s <strong>HudFiles</strong> folder. Clone Maker backs up the previous HUD there.</p>
+    <p>Have both players join a private <strong>No Game Mode</strong> lobby. The host clicks <strong>Assign Controller Ports</strong>
+    and gives each player one controller. Then turn on <strong>Fast Reset</strong>. Rio reads the player assignments when you turn it on.
+    If you change ports, turn Fast Reset off and on again before starting the game.</p>
   </details>
 </dialog>
 <dialog id="tournament-plan" aria-labelledby="tourney-title">

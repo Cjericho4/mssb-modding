@@ -1,10 +1,11 @@
 import {sides, positions, captainSlots, moveBatter, swapFieldPosition} from "./rio-roster.mjs";
 import {loadDraft, saveDraft} from "./game-plan-draft.mjs";
-import {playerPool} from "./game-plan-pool.mjs";
+import {playerPool, resetPoolSearch} from "./game-plan-pool.mjs";
 import {initPortraits, lineupFaces} from "./roster-portraits.mjs";
 import {initPlannerGuide} from "./planner-guide.mjs";
 
 const format = "mssb-tournament-team-v1";
+const matchupFormat = "mssb-tournament-matchup-v1";
 const MiB = 1024 * 1024;
 const dialog = document.querySelector("#tournament-plan");
 const toolbar = dialog.querySelector(".tourney-toolbar");
@@ -18,11 +19,10 @@ const showPortraits = initPortraits(dialog.querySelector(".portrait-tools"));
 const guide = initPlannerGuide(dialog);
 const statDialog = dialog.querySelector(".tourney-stat-dialog");
 const invoke = window.__TAURI__.core.invoke;
-const teams = Object.fromEntries(sides.map((s, t) => [s, {format, player:"", rows:positions.map((_,i) => ({
-  source:i + t * 9, pos:i, captain:i === 0, star:false
-}))}]));
+const emptyRow = pos => ({source:null, pos, captain:false, star:false});
+const emptyTeam = () => ({format, player:"", rows:positions.map((_,i) => emptyRow(i))});
+const teams = Object.fromEntries(sides.map(s => [s, emptyTeam()]));
 const selected = {Away:0, Home:0};
-const saved = Object.fromEntries(sides.map(s => [s, {player:teams[s].player, rows:JSON.stringify(teams[s].rows)}]));
 const libraryChoice = {Away:"", Home:""};
 let side = "Away", names = new Map(), busy = false, dragging, opener;
 let statFields = new Map();
@@ -97,7 +97,9 @@ async function run(action) {
 }
 const integer = (v, max) => Number.isInteger(v) && v >= 0 && v <= max;
 const record = v => v !== null && typeof v === "object" && !Array.isArray(v);
-const title = row => row.label?.trim() || names.get(row.source);
+const title = row => row.label?.trim() || names.get(row.source) || "Open spot";
+const filledCount = team => team.rows.filter(row => row.source !== null).length;
+const hasSheet = team => Boolean(team.player) || team.rows.some((row,i) => row.source !== null || row.pos !== i);
 const humanLobbyName = name => Boolean(name.trim()) && !["CPU","No Player Selected"].includes(name.trim());
 function textureSize(name, encoded) {
   const match = /^t(\d{2,})_([1-9]\d*)x([1-9]\d*)\.png$/.exec(name);
@@ -136,14 +138,20 @@ function validateStats(stats, batter) {
 }
 function validateTeam(team, draft = false) {
   if (!record(team) || team.format !== format) throw Error("Choose a portable tournament team saved with Save team.");
-  if (typeof team.player !== "string" || team.player.length > 30) throw Error("Use a Rio lobby name of up to 30 characters.");
+  if (typeof team.player !== "string" || team.player.length > 30 || /\p{Cc}/u.test(team.player)) throw Error("Use a Rio lobby name of up to 30 characters without control characters.");
   const player = draft ? team.player : team.player.trim();
-  if (!draft && !humanLobbyName(player)) throw Error("Enter the human player's Rio lobby name (up to 30 characters).");
   if (!Array.isArray(team.rows) || team.rows.length !== 9) throw Error("A tournament team needs nine batters.");
   const rows = team.rows.map((r, i) => {
-    if (!record(r) || !names.has(r.source) || !integer(r.pos, 8) || typeof r.captain !== "boolean" || typeof r.star !== "boolean")
+    if (!record(r) || (r.source !== null && !names.has(r.source)) || !integer(r.pos, 8) || typeof r.captain !== "boolean" || typeof r.star !== "boolean")
       throw Error("Check the character, field position and flags for batter " + (i + 1) + ".");
-    if (r.label !== undefined && (typeof r.label !== "string" || r.label.length > 64)) throw Error("Use a player label of up to 64 characters.");
+    if (r.source === null) {
+      if (r.captain || r.star || (r.label !== undefined && r.label !== "") ||
+          (r.textures !== undefined && (!record(r.textures) || Object.keys(r.textures).length)) ||
+          (r.stats !== undefined && (!record(r.stats) || Object.keys(r.stats).length)))
+        throw Error("Empty batting spot " + (i + 1) + " contains player details. Choose a character for that spot first.");
+      return emptyRow(r.pos);
+    }
+    if (r.label !== undefined && (typeof r.label !== "string" || r.label.length > 64 || /\p{Cc}/u.test(r.label))) throw Error("Use a player label of up to 64 characters without control characters.");
     if (r.stats !== undefined) validateStats(r.stats, i + 1);
     const label = draft ? r.label : r.label?.trim();
     return {source:r.source, pos:r.pos, captain:r.captain, star:r.star,
@@ -152,7 +160,7 @@ function validateTeam(team, draft = false) {
   });
   if (new Set(rows.map(r=>r.pos)).size !== 9) throw Error("Assign all nine different field positions.");
   const captains = rows.filter(r=>r.captain);
-  if ((!draft && captains.length !== 1) || captains.length > 1 || captains.some(r => !captainSlots.has(r.source)))
+  if (captains.length > 1 || captains.some(r => !captainSlots.has(r.source)))
     throw Error("Choose one captain from the twelve captain characters.");
   validateTextures(rows);
   return {format, player, rows};
@@ -178,57 +186,61 @@ async function refreshLibrary() {
     libraryError = "Could not load the team library. " + errorText(error);
   }
 }
-function replaceTeam(team, keepLobbyName) {
-  if (keepLobbyName) team.player = teams[side].player;
-  else saved[side].player = team.player;
-  teams[side] = team;
-  saved[side].rows = JSON.stringify(team.rows);
-  selected[side] = 0;
+function replaceTeam(which, team) {
+  resetPoolSearch();
+  teams[which] = team;
+  selected[which] = 0;
+  libraryChoice[which] = "";
+}
+function confirmReplace(needed, message, actionLabel, action, returnTo) {
+  if (!needed) { action(); return; }
+  const panel = toolbar.querySelector(".tourney-replace");
+  const cancel = button("Keep editing", () => {
+    panel.replaceChildren();
+    returnTo?.focus();
+  }, "tourney-keep");
+  panel.replaceChildren(el("span", message), cancel, button(actionLabel, action, "tourney-confirm"));
+  requestAnimationFrame(() => { if (cancel.isConnected) cancel.focus(); });
+}
+function loadSheet(team, label, trigger) {
+  confirmReplace(hasSheet(teams[side]), "Replace the current " + side + " sheet with " + label + "?",
+    "Replace " + side + " team", () => {
+      replaceTeam(side,team);
+      draw('.tourney-tabs [data-side="' + side + '"]');
+      status.textContent = label + " loaded into " + side + ".";
+    }, trigger);
+}
+function replaceMatchup(away, home) {
+  replaceTeam("Away",away);
+  replaceTeam("Home",home);
+  side = "Away";
+  draw('.tourney-tabs [data-side="Away"]');
 }
 function libraryPicker() {
   const panel = el("div", "", "tourney-library");
   const picker = el("select", "", "tourney-team-picker");
-  picker.add(new Option("Choose a team…", ""));
-  for (const [kind, label] of [["preset","ASSBLAST tournament teams"], ["saved","My saved teams"]]) {
-    const entries = library.filter(entry => entry.kind === kind);
-    if (!entries.length) continue;
+  const entries = library.filter(entry => entry.kind === "saved");
+  picker.add(new Option(entries.length ? "Choose a saved team…" : "No saved teams yet", ""));
+  if (entries.length) {
     const group = el("optgroup");
-    group.label = label;
+    group.label = "My saved teams";
     for (const entry of entries) group.append(new Option(entry.label, entry.id));
     picker.append(group);
   }
-  const confirm = el("div", "", "tourney-replace");
-  confirm.setAttribute("aria-live","polite");
+  picker.disabled = !entries.length;
   const load = button("Load into " + side, () => run(async () => {
-    const entry = library.find(item => item.id === picker.value);
-    if (!entry) return;
-    const team = validateTeam(await invoke("load_tournament_team", {id:entry.id}));
-    const isPreset = entry.kind === "preset";
-    const accept = () => {
-      replaceTeam(team, isPreset);
-      draw();
-      status.textContent = entry.label + " loaded into " + side + "." +
-        (team.player.trim() ? "" : " Enter your Rio lobby name for this side.");
-      const nextFocus = toolbar.querySelector(team.player.trim() ? ".tourney-team-picker" : ".tourney-lobby");
-      requestAnimationFrame(() => nextFocus.focus({preventScroll:true}));
-    };
-    const current = teams[side];
-    const replacingEdits = JSON.stringify(current.rows) !== saved[side].rows ||
-      (!isPreset && current.player !== saved[side].player && current.player !== team.player);
-    if (!replacingEdits) { accept(); return; }
-    const keep = button("Keep editing", () => {confirm.replaceChildren(); picker.focus();}, "tourney-keep");
-    confirm.replaceChildren(el("span", "Replace your unsaved " + side + " edits with " + entry.label + "?"),
-      keep, button("Replace " + side + " team", accept, "tourney-confirm"));
+    const entry = entries.find(item => item.id === picker.value);
+    if (entry) loadSheet(validateTeam(await invoke("load_tournament_team", {id:entry.id})), entry.label, picker);
   }), "tourney-load-picked");
   picker.value = libraryChoice[side];
   load.disabled = !picker.value;
   picker.onchange = () => {
     libraryChoice[side] = picker.value;
     load.disabled = !picker.value;
-    confirm.replaceChildren();
+    toolbar.querySelector(".tourney-replace").replaceChildren();
     status.textContent = "";
   };
-  panel.append(labeled("Team library",picker),load,confirm);
+  panel.append(labeled("Team library",picker),load);
   if (libraryError) panel.append(el("p",libraryError));
   return panel;
 }
@@ -244,7 +256,8 @@ function makeToolbar() {
   }
   const name = el("input","","tourney-lobby");
   name.maxLength = 30;
-  name.placeholder = side + " player’s Rio username";
+  name.placeholder = "Optional for now";
+  name.title = "Enter the " + side + " player’s Project Rio username before building the game.";
   name.value = teams[side].player;
   name.oninput = () => { teams[side].player = name.value; name.setCustomValidity(""); status.textContent = ""; draftChanged(); };
   const input = el("input");
@@ -255,51 +268,66 @@ function makeToolbar() {
     const file = input.files[0];
     input.value = "";
     if (!file) return;
-    if (file.size > 24 * MiB) throw Error("Choose a portable team under 24 MiB.");
-    const team = validateTeam(JSON.parse(await file.text()));
-    replaceTeam(team, false);
-    libraryChoice[side] = "";
-    draw();
-    status.textContent = side + " team loaded for " + team.player + ".";
+    if (file.size > 48 * MiB) throw Error("Choose a matchup under 48 MiB or a team sheet under 24 MiB.");
+    let doc;
+    try { doc = JSON.parse(await file.text()); }
+    catch { throw Error("Choose a team or matchup JSON file saved by Clone Maker."); }
+    const trigger = load.querySelector("button");
+    if (doc?.format === matchupFormat) {
+      const away = validateTeam(doc.away), home = validateTeam(doc.home);
+      confirmReplace(sides.some(s => hasSheet(teams[s])), "Replace both the Away and Home sheets with " + file.name + "?",
+        "Import both teams", () => {
+          replaceMatchup(away,home);
+          status.textContent = "Imported Away and Home from " + file.name + ".";
+        }, trigger);
+    } else {
+      if (file.size > 24 * MiB) throw Error("Choose a team sheet under 24 MiB.");
+      loadSheet(validateTeam(doc), file.name, trigger);
+    }
   });
   const load = el("span","","tourney-import");
-  load.append(button("Import team file…",()=>input.click()),input);
-  const save = button("Save " + side + " team…", () => {
-    if (!humanLobbyName(name.value)) {
-      const message = "Enter the " + side + " player’s Project Rio username here, then save this team.";
-      status.textContent = message;
-      name.setCustomValidity(message);
-      name.focus();
-      name.reportValidity();
-      return;
-    }
-    const rows = teams[side].rows;
-    if (!rows.some(row => row.captain)) {
-      const current = selected[side];
-      const eligible = captainSlots.has(rows[current].source) ? current : rows.findIndex(row => captainSlots.has(row.source));
-      if (eligible !== -1) {
-        selected[side] = eligible;
-        draw(".tourney-captain");
-        status.textContent = "The " + side + " team needs a captain. Select Captain for " + title(rows[eligible]) + ", or choose another eligible player, then save again.";
-      } else {
-        editor.querySelector(".tourney-source").focus();
-        status.textContent = "The " + side + " team needs a captain. Choose a character such as Mario or Donkey Kong, select Captain, then save again.";
-      }
-      return;
-    }
-    return run(writeTeam);
-  }, "tourney-save");
-  async function writeTeam() {
-    const path = await invoke("save_tournament_team",{team:validateTeam(teams[side])});
+  load.append(button("Import team or matchup…",()=>input.click()),input);
+  const save = button("Save " + side + " team…", () => run(async () => {
+    const path = await invoke("save_tournament_team",{team:validateTeam(teams[side]),side});
     if (path) {
-      saved[side] = {player:teams[side].player, rows:JSON.stringify(teams[side].rows)};
       if (mode === "tournament") await refreshLibrary();
       makeToolbar();
       status.textContent = "Saved " + side + " team to " + path + ". Reopen it in Tournament mode under Team library → My saved teams.";
     }
-  }
-  toolbar.replaceChildren(el("span","Edit team","tourney-side-label"), tabs, labeled("Rio lobby name",name), load, save);
+  }), "tourney-save");
+  const saveMatch = button("Save matchup…", () => run(async () => {
+    const path = await invoke("save_tournament_matchup_sheet", {
+      away:validateTeam(teams.Away), home:validateTeam(teams.Home)
+    });
+    if (path) status.textContent = "Saved both teams to " + path + ". Use Import team or matchup… to reopen them together.";
+  }), "tourney-save-matchup");
+  const newSheets = el("details","","tourney-new-sheets");
+  const newMenu = el("summary","Start new…");
+  const newTeam = button("New " + side + " sheet…", () => {
+    newSheets.open = false;
+    confirmReplace(hasSheet(teams[side]), "Start an empty " + side + " sheet in place of this lineup?",
+      "Start empty " + side + " sheet", () => {
+        replaceTeam(side,emptyTeam());
+        draw(".tourney-source");
+        status.textContent = "Started an empty " + side + " team sheet.";
+      }, newMenu);
+  }, "tourney-new-team");
+  const newMatch = button("New matchup…", () => {
+    newSheets.open = false;
+    confirmReplace(sides.some(s => hasSheet(teams[s])), "Start a new matchup with empty Away and Home sheets? Save any sheets you want to keep first.",
+      "Start new matchup", () => {
+        replaceMatchup(emptyTeam(),emptyTeam());
+        status.textContent = "New matchup. Choose a character for the first Away batting spot or import a team file.";
+      }, newMenu);
+  }, "tourney-new-matchup");
+  const choices = el("div","","tourney-new-choices");
+  choices.append(newTeam,newMatch);
+  newSheets.append(newMenu,choices);
+  toolbar.replaceChildren(el("span","Edit team","tourney-side-label"), tabs, labeled("Rio lobby name",name), newSheets, load, save, saveMatch);
   if (mode === "tournament") toolbar.append(libraryPicker());
+  const confirmation = el("div", "", "tourney-replace");
+  confirmation.setAttribute("aria-live","polite");
+  toolbar.append(confirmation);
   guide.update(side);
 }
 function move(team, from, to) {
@@ -312,9 +340,9 @@ function endDrag() {
   for (const target of editor.querySelectorAll(".drag-over")) target.classList.remove("drag-over");
 }
 function playerDrag(elem, index, dropPlayer) {
-  elem.draggable = true;
+  elem.draggable = teams[side].rows[index].source !== null;
   elem.ondragstart = event => {
-    if (busy || !event.dataTransfer) { event.preventDefault(); return; }
+    if (busy || !elem.draggable || !event.dataTransfer) { event.preventDefault(); return; }
     dragging = {side, index};
     event.dataTransfer.setData("text/plain", title(teams[side].rows[index]));
     event.dataTransfer.effectAllowed = "move";
@@ -411,19 +439,28 @@ function playerCard(row, i, type) {
   pick.setAttribute("aria-pressed", String(selected[side] === i));
   card.classList.toggle("is-selected", selected[side] === i);
   const slot = el("span", "", field ? "tourney-name-slot bat-name" : "tourney-name-slot");
-  slot.append(button("", () => editPlayerName(selector, i), "tourney-name"));
+  const vacant = row.source === null;
+  card.classList.toggle("is-empty", vacant);
   card.append(pick, slot);
-  showCardName(card, row, i);
+  if (vacant) {
+    slot.append(el("span", "Add player", "tourney-name"));
+    pick.setAttribute("aria-label", "Add player to batting spot " + (i + 1) + ", " + positions[row.pos]);
+  } else {
+    slot.append(button("", () => editPlayerName(selector, i), "tourney-name"));
+    showCardName(card, row, i);
+  }
   card.onclick = event => {
-    if (event.target.closest(".tourney-name-slot")) return;
+    if (!vacant && event.target.closest(".tourney-name-slot")) return;
     selected[side] = i;
-    draw(selector + " .tourney-pick");
+    draw(vacant ? ".tourney-source" : selector + " .tourney-pick");
+    if (vacant) editor.querySelector(".tourney-source").scrollIntoView({block:"nearest"});
   };
   return card;
 }
 function fieldPanel(team, faceFor) {
   const panel = el("section", "", "tourney-field-panel");
-  panel.append(el("h3","Starting field positions"), el("p","Drag to swap positions. Click a name to edit."));
+  panel.append(el("h3","Starting field positions"), el("p", filledCount(team) < 9
+    ? "Click an open position to add a player. Drag portraits to swap positions." : "Drag to swap positions. Click a name to edit."));
   const diamond = el("div","","plan-diamond");
   team.rows.forEach((row, i) => {
     const selector = '.tourney-fielder[data-pos="' + row.pos + '"]';
@@ -443,7 +480,9 @@ function fieldPanel(team, faceFor) {
 }
 function orderPanel(team, faceFor) {
   const panel = el("section","","tourney-order-panel");
-  panel.append(el("h3","Batting order"), el("p","Drag to reorder. Click a name to edit."));
+  const heading = el("h3","Batting order");
+  heading.append(el("small", filledCount(team) + " of 9 filled", "tourney-count"));
+  panel.append(heading, el("p", filledCount(team) ? "Drag to reorder. Click a name to edit." : "Choose an open batting spot or import a team file."));
   const ol = el("ol","","tourney-order");
   team.rows.forEach((row,i) => {
     const li = el("li");
@@ -537,7 +576,7 @@ function editStats(row, i) {
   };
   statDialog.showModal();
 }
-function chooseSource(i, id) {
+function chooseSource(i, id, advance = false) {
   const row = teams[side].rows[i];
   selected[side] = i;
   endDrag();
@@ -545,13 +584,20 @@ function chooseSource(i, id) {
   const change = () => {
     // Presets often spell out the default character name as a label. A substitution should
     // change that name too; a nickname the player chose stays with the roster spot.
-    if (row.label?.trim().toLowerCase() === names.get(row.source).toLowerCase()) delete row.label;
+    if (row.source !== null && row.label?.trim().toLowerCase() === names.get(row.source).toLowerCase()) delete row.label;
     row.source = id;
     if (!captainSlots.has(id)) row.captain = false;
     delete row.textures;
     delete row.stats;
-    draw(".tourney-source");
-    if (row.label?.trim()) status.textContent = names.get(id) + " now plays as " + row.label.trim() + ". Click the name to change it.";
+    if (advance) {
+      const next = Array.from({length:8},(_,n) => (i + n + 1) % 9).find(n => teams[side].rows[n].source === null);
+      if (next !== undefined) selected[side] = next;
+    }
+    draw(advance && selected[side] !== i ? '.draft-player-choice[data-character="' + id + '"]' : ".tourney-source");
+    if (advance) {
+      status.textContent = names.get(id) + " added to batting spot " + (i + 1) + ". " +
+        (selected[side] !== i ? "Next open spot: " + (selected[side] + 1) + "." : side + " has nine players.");
+    } else if (row.label?.trim()) status.textContent = names.get(id) + " now plays as " + row.label.trim() + ". Click the name to change it.";
   };
   if (!Object.keys(row.textures||{}).length && !Object.keys(row.stats||{}).length) { change(); return; }
   draw();
@@ -578,6 +624,16 @@ function inspector(team, faceFor) {
   const fields = el("div","","tourney-fields");
   const confirmation = el("div","","source-change");
   const source = select(names,row.source,"tourney-source",id=>chooseSource(i,id));
+  if (row.source === null) {
+    const placeholder = new Option("Choose a character…", "");
+    placeholder.disabled = true;
+    source.add(placeholder, 0);
+    source.value = "";
+    fields.append(labeled("Character",source));
+    member.append(fields, el("p", "Choose a character here or click a portrait in the character pool.", "tourney-empty-hint"));
+    panel.append(member);
+    return panel;
+  }
   const label = el("input","","tourney-label");
   label.maxLength = 64;
   label.placeholder = "Optional";
@@ -591,7 +647,18 @@ function inspector(team, faceFor) {
   const star = checkbox("Superstar","checkbox",row.star,false,"tourney-star",checked=>{row.star=checked; draw(".tourney-star");});
   fields.append(labeled("Character",source),labeled("Player label",label),labeled("Batting spot",bat),
     labeled("Field position",pos),captain,star);
-  member.append(fields,confirmation);
+  const clear = button("Remove from sheet", () => {
+    const discard = () => {
+      team.rows[i] = emptyRow(row.pos);
+      draw(".tourney-source");
+      status.textContent = "Batting spot " + (i + 1) + " is open.";
+    };
+    const keep = button("Keep player", () => { confirmation.replaceChildren(); clear.focus(); });
+    confirmation.replaceChildren(el("p", "Remove " + title(row) + " and its player settings from this batting spot?"),
+      button("Remove player", discard, "tourney-confirm-clear"), keep);
+    keep.focus();
+  }, "tourney-clear-player");
+  member.append(fields,clear,confirmation);
   const customization = texturePanel(team,row,i);
   panel.append(member,customization);
   const stats = el("div","","tourney-stats");
@@ -617,12 +684,20 @@ function draw(focus, persist = true) {
   dragging = undefined;
   makeToolbar();
   const team = teams[side];
-  const faceFor = lineupFaces(team.rows,names);
+  const memberFace = lineupFaces(team.rows,names);
+  const faceFor = (row, notice) => {
+    if (row.source !== null) return memberFace(row, notice);
+    const empty = el("span", "+", "roster-face tourney-open-face");
+    empty.setAttribute("aria-hidden","true");
+    return empty;
+  };
+  const showPool = mode === "plan" || filledCount(team) < 9;
+  editor.classList.toggle("without-pool", !showPool);
   editor.replaceChildren(fieldPanel(team,faceFor),orderPanel(team,faceFor));
-  if (mode === "plan") {
+  if (showPool) {
     const i = selected[side];
     editor.append(playerPool({
-      names, selectedSource:team.rows[i].source, selectedBatter:i + 1, onChoose:id=>chooseSource(i,id),
+      names, selectedSource:team.rows[i].source, selectedBatter:i + 1, onChoose:id=>chooseSource(i,id,team.rows[i].source === null),
       onDragStart(event,id) {
         if (busy || !event.dataTransfer) { event.preventDefault(); return; }
         dragging = {side,source:id};
@@ -637,9 +712,42 @@ function draw(focus, persist = true) {
   if (focus) dialog.querySelector(focus)?.focus({preventScroll:true});
   if (persist) draftChanged();
 }
-dialog.querySelector(".tourney-build").onclick = () => run(async () => {
+function readyToBuild() {
+  for (const s of sides) {
+    const team = teams[s];
+    const missing = team.rows.findIndex(row => row.source === null);
+    if (missing !== -1) {
+      side = s;
+      selected[s] = missing;
+      draw(".tourney-source");
+      editor.querySelector(".tourney-source").scrollIntoView({block:"nearest"});
+      status.textContent = s + " has " + filledCount(team) + " of 9 players. Choose a character for batting spot " + (missing + 1) + " to finish the lineup.";
+      return false;
+    }
+    if (!humanLobbyName(team.player) || (s === "Home" && team.player.trim() === teams.Away.player.trim())) {
+      side = s;
+      draw(".tourney-lobby");
+      status.textContent = s + " needs its own player's Project Rio username to build the matchup.";
+      const input = toolbar.querySelector(".tourney-lobby");
+      input.setCustomValidity(status.textContent);
+      input.reportValidity();
+      return false;
+    }
+    if (!team.rows.some(row => row.captain)) {
+      side = s;
+      const eligible = team.rows.findIndex(row => captainSlots.has(row.source));
+      if (eligible !== -1) selected[s] = eligible;
+      draw(eligible !== -1 ? ".tourney-captain" : ".tourney-source");
+      status.textContent = eligible !== -1 ? "Select a captain for " + s + ". " + title(team.rows[eligible]) + " is eligible."
+        : "Choose an eligible character such as Mario or Donkey Kong for " + s + ", then select Captain.";
+      return false;
+    }
+  }
+  return true;
+}
+dialog.querySelector(".tourney-build").onclick = () => { if (readyToBuild()) return run(buildMatchup); };
+async function buildMatchup() {
   const away = validateTeam(teams.Away), home = validateTeam(teams.Home);
-  if (away.player === home.player) throw Error("Enter different Rio lobby names for Away and Home.");
   status.textContent = "Choose your clean retail ISO and an output folder to build the matchup.";
   const stop = await window.__TAURI__.event?.listen("tournament-progress", event => {
     status.textContent = event.payload;
@@ -653,7 +761,7 @@ dialog.querySelector(".tourney-build").onclick = () => run(async () => {
     el("p","ISO SHA-256 · "+result.sha256),
     el("p","Rio lineup SHA-256 · "+result.hudSha256),
     el("p","Compare both hashes, then open the finished-game roster in Game plan. Load hud.json with the built ISO and select Use in Rio on both computers."));
-});
+}
 function setCurrentPage(active) {
   for (const button of nav.querySelectorAll("[data-open-studio],[data-open-plan],[data-open-tournament]")) {
     button.classList.toggle("on", button === active);

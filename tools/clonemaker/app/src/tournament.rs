@@ -27,16 +27,16 @@ const MAX_TEAM_PIXELS: usize = 16 * 1024 * 1024;
 
 #[derive(Clone, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
-pub(crate) struct Team {
+pub(crate) struct Team<S = usize> {
     pub(crate) format: String,
     pub(crate) player: String,
-    pub(crate) rows: Vec<Batter>,
+    pub(crate) rows: Vec<Batter<S>>,
 }
 
 #[derive(Clone, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
-pub(crate) struct Batter {
-    pub(crate) source: usize,
+pub(crate) struct Batter<S = usize> {
+    pub(crate) source: S,
     pub(crate) pos: u8,
     pub(crate) captain: bool,
     pub(crate) star: bool,
@@ -93,15 +93,28 @@ fn texture_data(name: &str, encoded: &str) -> Result<(Vec<u8>, usize), String> {
     Ok((bytes, w * h))
 }
 
+// A portable sheet can have open slots. The builder accepts only teams with concrete source IDs.
+pub(crate) type TeamSheet = Team<Option<usize>>;
+
+pub(crate) fn validate_sheet(team: &TeamSheet) -> Result<(), String> {
+    validate_roster(team, false)
+}
+
 pub(crate) fn validate(team: &Team) -> Result<(), String> {
+    validate_roster(team, true)
+}
+
+fn validate_roster<S: Copy + Into<Option<usize>>>(
+    team: &Team<S>,
+    for_match: bool,
+) -> Result<(), String> {
     if team.format != FORMAT {
         return Err("Choose a version 1 tournament team submission.".into());
     }
     let player = team.player.trim();
-    if player.is_empty()
-        || player.encode_utf16().count() > 30
-        || player.chars().any(char::is_control)
-        || ["CPU", "No Player Selected"].contains(&player)
+    if (for_match && (player.is_empty() || ["CPU", "No Player Selected"].contains(&player)))
+        || team.player.encode_utf16().count() > 30
+        || team.player.chars().any(char::is_control)
     {
         return Err("Enter the human player's Rio lobby name (up to 30 characters).".into());
     }
@@ -112,7 +125,8 @@ pub(crate) fn validate(team: &Team) -> Result<(), String> {
     let mut byte_count = 0;
     let mut pixel_count = 0;
     for (i, row) in team.rows.iter().enumerate() {
-        if row.source >= 54 || row.pos >= 9 || !positions.insert(row.pos) {
+        let source = row.source.into();
+        if source.is_some_and(|id| id >= 54) || row.pos >= 9 || !positions.insert(row.pos) {
             return Err(format!(
                 "Check the source and unique field position of batter {}.",
                 i + 1
@@ -124,7 +138,19 @@ pub(crate) fn validate(team: &Team) -> Result<(), String> {
                 i + 1
             ));
         }
-        if row.captain && !CAPTAINS.contains(&row.source) {
+        if source.is_none()
+            && (row.captain
+                || row.star
+                || !row.label.is_empty()
+                || !row.stats.is_empty()
+                || !row.textures.is_empty())
+        {
+            return Err(format!(
+                "Empty batting spot {} has player details. Choose a character first.",
+                i + 1
+            ));
+        }
+        if row.captain && !source.is_some_and(|id| CAPTAINS.contains(&id)) {
             return Err(format!(
                 "Batter {} must be a captain-eligible character.",
                 i + 1
@@ -145,7 +171,8 @@ pub(crate) fn validate(team: &Team) -> Result<(), String> {
             }
         }
     }
-    if team.rows.iter().filter(|r| r.captain).count() != 1 {
+    let captains = team.rows.iter().filter(|r| r.captain).count();
+    if captains > 1 || (for_match && captains != 1) {
         return Err("Choose exactly one captain on each team.".into());
     }
     Ok(())
