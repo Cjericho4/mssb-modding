@@ -1143,7 +1143,12 @@ async function main() {
   const options = await invoke("launch_options");
   state.selftest = options.selftest;
   $("feedback").addEventListener("click", () => invoke("open_feedback"));
-  for (const [id, pick] of [["welcome-iso", chooseIso], ["welcome-dir", chooseFolder], ["welcome-later", null]]) {
+  for (const [id, pick] of [
+    ["welcome-iso", chooseIso],
+    ["welcome-dir", chooseFolder],
+    ["welcome-plan", () => document.querySelector(".pages [data-open-plan]").click()],
+    ["welcome-later", null],
+  ]) {
     $(id).addEventListener("click", () => {
       setModal($("welcome"), false);
       pick?.();

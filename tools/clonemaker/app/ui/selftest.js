@@ -65,17 +65,44 @@ export async function run(options, app) {
     app.showWelcome();
     check(!$("welcome").hidden && document.activeElement === $("welcome-iso"), "the launch dialog asks for the game");
     await shot("welcome");
-    $("welcome-later").click();
-    check($("welcome").hidden, "Not now closes the launch dialog");
-
     const plan = $("rio-teams");
     const tournament = $("tournament-plan");
     const tournamentField = selector => tournament.querySelector(selector);
     const directTournament = document.querySelector(".pages [data-open-tournament]");
-    directTournament.click();
-    await waitFor(() => tournament.open && tournamentField(".tourney-team-picker") && !tournamentField("fieldset").disabled,
-      "Tournament mode opens directly from Studio without loading a disc");
-    check(!plan.open && !plan.querySelector(".tourney-team-picker, [data-open-tournament]"), "the ordinary Game plan stays separate");
+    const directPlan = document.querySelector(".pages [data-open-plan]");
+    const finishedRoster = tournamentField("[data-open-teams]");
+    const ready = mode => tournament.open && tournament.dataset.mode === mode && tournamentField(".tourney-source") && !tournamentField("fieldset").disabled;
+    const drop = (source, target) => {
+      const transfer = new DataTransfer();
+      const send = (el, type) => el.dispatchEvent(new DragEvent(type, {
+        dataTransfer: transfer, bubbles: true, cancelable: true
+      }));
+      send(source, "dragstart");
+      check(!send(target, "dragover"), "the target accepts this drag");
+      send(target, "drop");
+      send(source, "dragend");
+    };
+    $("welcome-plan").click();
+    await waitFor(() => ready("plan"), "one click from welcome opens the editable Game plan without a disc");
+    check($("welcome").hidden && !plan.open && !tournamentField(".tourney-team-picker") && tournamentField(".tourney-build").hidden,
+      "both roster drafts are available before tournament setup");
+    const findDK = () => tournamentField('.draft-player-choice[data-character="2"]');
+    const searchPool = tournamentField('.draft-player-pool input[type="search"]');
+    searchPool.value = "DK";
+    searchPool.dispatchEvent(new Event("input", {bubbles:true}));
+    check(findDK() && !tournamentField('.draft-player-choice[data-character="0"]'), "DK search filters the character pool");
+    choose(tournamentField(".tourney-source"),20);
+    findDK().click();
+    drop(findDK(),tournamentField('.tourney-row[data-index="1"]'));
+    drop(findDK(),tournamentField('.tourney-fielder[data-pos="2"]'));
+    check(tournament.querySelectorAll('.tourney-row[aria-pressed="true"][data-index="2"]').length === 1 &&
+      !tournamentField(".tourney-captain").checked && tournamentField(".tourney-lobby").value === "",
+      "the planner accepts repeat characters without a captain or a lobby name");
+    tournamentField(".tourney-switch-mode").click();
+    await waitFor(() => ready("tournament") && tournamentField(".tourney-team-picker"), "Game plan hands both drafts to Tournament mode");
+    check(tournamentField('.tourney-row[data-index="2"]').getAttribute("aria-pressed") === "true" &&
+      [0,1,2].every(i => tournamentField('.tourney-row[data-index="' + i + '"] .tourney-name').textContent === "Donkey Kong"),
+      "the selected batter and all three DKs survive the handoff");
     tournamentField('.tourney-tabs [data-side="Home"]').click();
     const presets = [...tournamentField(".tourney-team-picker").querySelectorAll("optgroup:first-of-type option")];
     check(presets.length >= 14, "the ASSBLAST tournament rosters are available inside the picker");
@@ -108,25 +135,30 @@ export async function run(options, app) {
     tournamentField(".tourney-confirm").click();
     check(tournamentField(".tourney-label").value === (firstTeam.rows[0].label ?? ""), "confirmed replacement restores the chosen batting order");
     tournamentField('.tourney-tabs [data-side="Away"]').click();
-    check(tournamentField(".tourney-lobby").value === "" && tournamentField(".tourney-source").value === "0",
-      "replacing Home leaves Away intact");
-    tournamentField(".tourney-close").click();
-    await waitFor(() => !tournament.open && !plan.open && document.activeElement === directTournament,
-      "closing a directly opened tournament returns to Studio");
-    const teamTriggers = document.querySelectorAll("[data-open-teams]");
-    const { showTeamImage } = await import("./rio-teams.mjs");
-    teamTriggers[0].click();
-    await waitFor(() => plan.open, "Game plan opens");
-    check(plan.querySelector(".team-actions").hidden, "team export waits for the finished ISO");
-    plan.querySelector(".team-close").click();
-    await waitFor(() => !plan.open && !tournament.open && document.activeElement === teamTriggers[0],
-      "closing Game plan returns to its own Studio navigation button");
-    directTournament.click();
-    await waitFor(() => tournament.open && tournament.querySelector(".tourney-source") && !tournamentField("fieldset").disabled,
-      "the independent tournament editor reopens");
+    check(tournamentField(".tourney-lobby").value === "" && tournamentField(".tourney-source").value === "2",
+      "replacing Home leaves the planned Away team intact");
+    tournamentField(".tourney-switch-mode").click();
+    await waitFor(() => ready("plan"), "Tournament returns to the shared Game plan");
     tournamentField('.tourney-tabs [data-side="Home"]').click();
     check(tournamentField(".tourney-lobby").value === "Local Player" && tournamentField(".tourney-label").value === (firstTeam.rows[0].label ?? ""),
-      "switching to ordinary Game plan and back preserves the tournament draft");
+      "the chosen tournament team is already visible in Game plan");
+    tournamentField(".tourney-close").click();
+    await waitFor(() => !tournament.open && !plan.open && document.activeElement === directPlan,
+      "closing a shared draft opened from welcome returns to Game plan navigation");
+    directTournament.click();
+    await waitFor(() => ready("tournament"), "Tournament mode opens independently from the top navigation");
+    check(tournamentField(".tourney-lobby").value === "Local Player", "direct Tournament entry retains the active side");
+    tournamentField(".tourney-close").click();
+    await waitFor(() => !tournament.open && document.activeElement === directTournament, "closing Tournament returns to its own navigation button");
+    directPlan.click();
+    await waitFor(() => ready("plan"), "Game plan reopens from the main navigation without an ISO");
+    const { showTeamImage } = await import("./rio-teams.mjs");
+    finishedRoster.click();
+    await waitFor(() => plan.open, "the optional finished-game roster editor opens from Game plan");
+    check(plan.querySelector(".team-actions").hidden, "finished-image export waits for its chosen ISO");
+    plan.querySelector(".team-close").click();
+    await waitFor(() => !plan.open && ready("plan") && document.activeElement === finishedRoster,
+      "closing the finished-game editor returns to the shared draft");
     tournamentField('.tourney-tabs [data-side="Away"]').click();
     for (let i = 0; i < 3; i++) {
       tournamentField(`.tourney-row[data-index="${i}"]`).click();
@@ -176,11 +208,8 @@ export async function run(options, app) {
     tournamentField(".tourney-stat-reset").click();
     applyBatterStats();
     check(!tournamentField(".tourney-stats summary"), "resetting all stats restores the original batter");
-    tournamentField(".tourney-close").click();
-    if (!plan.open) {
-      teamTriggers[0].click();
-      await waitFor(() => plan.open, "Game Plan reopens after the tournament editor");
-    }
+    finishedRoster.click();
+    await waitFor(() => plan.open, "the finished-game roster reopens for ISO-specific controls");
     // Exercise the same DOM controls that the native WebView uses for edits and drops.
     const cloneSources = Array(54).fill(null);
     cloneSources[29] = cloneSources[30] = 2;
@@ -193,16 +222,6 @@ export async function run(options, app) {
       const input = control(selector);
       input.value = text;
       input.dispatchEvent(new Event("input", {bubbles:true}));
-    };
-    const drop = (source, target) => {
-      const transfer = new DataTransfer();
-      const send = (el, type) => el.dispatchEvent(new DragEvent(type, {
-        dataTransfer: transfer, bubbles: true, cancelable: true
-      }));
-      send(source, "dragstart");
-      check(!send(target, "dragover"), "the target accepts this drag");
-      send(target, "drop");
-      send(source, "dragend");
     };
     check(plan.querySelectorAll(".plan-batter").length === 9 &&
       plan.querySelectorAll(".plan-fielder").length === 9, "nine batters and nine starting positions are visible together");
@@ -236,13 +255,14 @@ export async function run(options, app) {
       control(".character-slot").value === "29" && control(".fielding-slot").value === "5",
       "Home edits leave the Away lineup intact");
     plan.querySelector(".team-close").click();
-    directTournament.click();
-    await waitFor(() => tournament.open && !tournamentField("fieldset").disabled, "an edited regular game and the tournament can coexist");
+    tournamentField(".tourney-switch-mode").click();
+    await waitFor(() => ready("tournament"), "the shared lineup remains available alongside the finished-game editor");
     tournamentField('.tourney-tabs [data-side="Home"]').click();
-    check(tournamentField(".tourney-lobby").value === "Local Player", "ordinary team edits leave the tournament lineup intact");
-    tournamentField(".tourney-close").click();
-    teamTriggers[1].click();
-    await waitFor(() => plan.open, "the roster shortcut reopens Game Plan");
+    check(tournamentField(".tourney-lobby").value === "Local Player", "finished-game slot edits preserve the portable sources");
+    tournamentField(".tourney-switch-mode").click();
+    await waitFor(() => ready("plan"), "Game plan keeps its optional finished-game action");
+    finishedRoster.click();
+    await waitFor(() => plan.open, "the finished-game roster reopens with its own ISO-specific edits");
     teamTab("Home").click();
     check(control(".lobby-name").value === "Second player" && control(".batting-slot").value === "8" &&
       control(".fielding-slot").value === "3" && control(".character-slot").value === "9",
@@ -261,6 +281,8 @@ export async function run(options, app) {
       control(".batting-slot").value === "4" && !control(".roster-label").value,
       "carrying both drafts preserves assignments and clears the changed player's label");
     plan.querySelector(".team-close").click();
+
+    tournamentField(".tourney-close").click();
 
     // The roster becomes chips above the stage at the minimum supported width.
     await resizeTo(640, 560);

@@ -17,7 +17,8 @@
 #tournament-plan .tourney-library label { min-width:0; max-width:100%; }
 #tournament-plan .tourney-replace:not(:empty) { display:flex; flex:1 0 100%; flex-wrap:wrap; align-items:center; gap:6px; }
 #tournament-plan button { cursor:pointer; }
-#tournament-plan .tourney-close { color:var(--rail-text); background:var(--rail-2); border:1px solid var(--rail-dash); }
+#tournament-plan .tourney-header-actions { display:flex; align-items:center; justify-content:end; flex-wrap:wrap; gap:6px; }
+#tournament-plan :is(.tourney-close,.tourney-switch-mode) { color:var(--rail-text); background:var(--rail-2); border:1px solid var(--rail-dash); }
 #tournament-plan .tourney-tabs { gap:2px; border:1px solid var(--rule); border-radius:6px; background:var(--card); padding:3px; }
 #tournament-plan .tourney-tabs button { border:0; padding:5px 10px; border-radius:4px; background:transparent; }
 #tournament-plan .tourney-tabs [aria-pressed="true"] { background:var(--rail); color:var(--rail-text); }
@@ -40,6 +41,11 @@
 #tournament-plan .tourney-fielder .position-badge { display:inline-flex; align-items:center; gap:4px; }
 #tournament-plan .field-bat-num { border-left:1px solid #91a58b; padding-left:4px; }
 #tournament-plan .tourney-inspector { grid-column:1/-1; display:grid; grid-template-columns:minmax(0,1.25fr) minmax(0,1fr); gap:18px; align-items:start; }
+#tournament-plan .draft-player-pool { grid-column:1/-1; }
+#tournament-plan .draft-player-pool input { width:min(260px,100%); }
+#tournament-plan .draft-player-choices { display:grid; grid-template-columns:repeat(auto-fill,minmax(110px,1fr)); gap:4px; max-height:108px; overflow:auto; margin-top:8px; }
+#tournament-plan .draft-player-choice { text-align:left; padding:4px 6px; border:1px solid var(--rule); border-radius:4px; background:var(--card); color:var(--ink); cursor:grab; }
+#tournament-plan .draft-player-choice[aria-pressed="true"] { background:var(--ice-soft); border-color:var(--ice); }
 #tournament-plan .tourney-textures { min-width:0; border-left:1px solid var(--rule); padding-left:16px; }
 #tournament-plan .tourney-textures label { align-items:flex-start; flex-direction:column; }
 #tournament-plan .tourney-pngs { max-width:100%; }

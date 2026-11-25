@@ -11,7 +11,7 @@
 <body>
 <header class="top">
   <span class="app">MSSB Clone Maker</span>
-  <nav class="pages" aria-label="Pages"><button class="on" aria-current="page"><svg class="ic" width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="8" cy="5.5" r="2.6"/><path d="M3 14c.6-3 2.6-4.6 5-4.6s4.4 1.6 5 4.6"/></svg><span>Studio</span></button><button data-open-teams><svg class="ic" width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="2" y="2" width="5" height="5" rx="1"/><rect x="9" y="2" width="5" height="5" rx="1"/><rect x="2" y="9" width="5" height="5" rx="1"/><rect x="9" y="9" width="5" height="5" rx="1"/></svg><span>Game plan</span></button><button type="button" data-open-tournament aria-label="Tournament mode" title="Tournament mode" aria-haspopup="dialog" aria-controls="tournament-plan"><svg class="ic" width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 2h6v3a3 3 0 0 1-6 0V2ZM5 3H2v1a3 3 0 0 0 3 3M11 3h3v1a3 3 0 0 1-3 3M8 8v4M5 14h6M6 12h4"/></svg><span>Tournament mode</span></button><button id="nav-stats" disabled aria-haspopup="dialog" aria-controls="clone-stats"><svg class="ic" width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 13.5V9M8 13.5V3M13 13.5V6.5"/></svg><span>Stats</span></button></nav>
+  <nav class="pages" aria-label="Pages"><button class="on" aria-current="page"><svg class="ic" width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="8" cy="5.5" r="2.6"/><path d="M3 14c.6-3 2.6-4.6 5-4.6s4.4 1.6 5 4.6"/></svg><span>Studio</span></button><button data-open-plan aria-label="Game plan" aria-haspopup="dialog" aria-controls="tournament-plan"><svg class="ic" width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="2" y="2" width="5" height="5" rx="1"/><rect x="9" y="2" width="5" height="5" rx="1"/><rect x="2" y="9" width="5" height="5" rx="1"/><rect x="9" y="9" width="5" height="5" rx="1"/></svg><span>Game plan</span></button><button type="button" data-open-tournament aria-label="Tournament mode" title="Tournament mode" aria-haspopup="dialog" aria-controls="tournament-plan"><svg class="ic" width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 2h6v3a3 3 0 0 1-6 0V2ZM5 3H2v1a3 3 0 0 0 3 3M11 3h3v1a3 3 0 0 1-3 3M8 8v4M5 14h6M6 12h4"/></svg><span>Tournament mode</span></button><button id="nav-stats" disabled aria-haspopup="dialog" aria-controls="clone-stats"><svg class="ic" width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 13.5V9M8 13.5V3M13 13.5V6.5"/></svg><span>Stats</span></button></nav>
   <div class="game"><div class="pill" id="pill" role="status"><i></i><span>No game yet</span></div><input id="game-path" readonly tabindex="-1" aria-label="Game path"></div>
   <button id="btn-iso" class="tbtn">Choose your game (.iso)…</button>
   <button id="btn-dir" class="tbtn">or a folder…</button>
@@ -21,7 +21,7 @@
 <nav class="rail" aria-label="Clones">
   <div id="roster"></div>
   <section id="checks" class="checks" aria-live="polite"><h2>Checks<em id="checks-count"></em></h2><p id="checks-text"></p>
-    <button data-open-teams><svg class="ic" width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="2" y="2" width="5" height="5" rx="1"/><rect x="9" y="2" width="5" height="5" rx="1"/><rect x="2" y="9" width="5" height="5" rx="1"/><rect x="9" y="9" width="5" height="5" rx="1"/></svg>See the whole game plan</button></section>
+    <button data-open-plan aria-label="Game plan" aria-haspopup="dialog" aria-controls="tournament-plan"><svg class="ic" width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="2" y="2" width="5" height="5" rx="1"/><rect x="9" y="2" width="5" height="5" rx="1"/><rect x="2" y="9" width="5" height="5" rx="1"/><rect x="9" y="9" width="5" height="5" rx="1"/></svg>See the whole game plan</button></section>
   <div class="rail-foot"><button id="btn-group" class="another" title="Clone another character"><svg class="ic" width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 3v10M3 8h10"/></svg><span>Clone another character</span></button>
     <button id="btn-dock" class="tool" aria-expanded="false" title="Show names and checks"><svg class="ic" width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 3l5 5-5 5"/></svg></button></div>
 </nav>
@@ -98,9 +98,9 @@
 
 <div id="welcome" class="modal" hidden>
   <div class="dialog welcome" role="dialog" aria-modal="true" aria-labelledby="welcome-title" aria-describedby="welcome-text">
-    <header><span class="chip neutral">01</span><h2 id="welcome-title">Choose your game</h2></header>
-    <p id="welcome-text">Pick your own copy of Mario Superstar Baseball (USA): the .iso, or a folder extracted from it. The Clone Maker never changes it; it saves a new game next to it.</p>
-    <div class="line end"><button id="welcome-later">Not now</button><button id="welcome-dir">A folder…</button><button id="welcome-iso" class="primary">Choose your game (.iso)…</button></div>
+    <header><h2 id="welcome-title">Get started</h2></header>
+    <p id="welcome-text">Plan both teams now, or choose your USA game image or extracted folder to start making clones.</p>
+    <div class="line end"><button id="welcome-later">Not now</button><button id="welcome-plan">Plan a roster</button><button id="welcome-dir">A folder…</button><button id="welcome-iso" class="primary">Choose your game (.iso)…</button></div>
   </div>
 </div>
 
@@ -148,7 +148,7 @@
   </section>
 </template>
 <dialog id="rio-teams" aria-labelledby="rio-team-title">
-  <header><h2 id="rio-team-title">Game plan</h2><button type="button" class="team-close">Close</button></header>
+  <header><h2 id="rio-team-title">Finished-game roster</h2><button type="button" class="team-close">Close</button></header>
   <fieldset>
     <div class="team-game"><div class="team-pick"></div><p class="team-image">Choose the finished ISO both players will use.</p></div>
     <div class="team-actions" hidden></div>
@@ -156,19 +156,19 @@
   </fieldset>
   <p role="status" aria-live="polite"></p>
   <details class="plan-help"><summary>Load this matchup in Project Rio</summary>
-    <p>Share the saved matchup. Both players open the same finished ISO and load the matchup in Game plan.
+    <p>Share the saved matchup. Both players open the same finished ISO and load the matchup in the finished-game roster editor.
     Compare the matchup IDs. With the game closed, select <strong>Use in Rio</strong> on both computers and choose
     Rio’s <strong>HudFiles</strong> folder. Clone Maker backs up the previous HUD there.
     In a private No Game Mode lobby, enable <strong>Fast Reset from HUD</strong> to start with both teams’ batting orders and field positions.</p>
   </details>
 </dialog>
 <dialog id="tournament-plan" aria-labelledby="tourney-title">
-  <header><h2 id="tourney-title">Tournament mode</h2><button type="button" class="tourney-close">Close</button></header>
-  <p>Save each player’s nine as a portable team. Both players can build the same matchup from the two team files and their own clean retail ISO.</p>
+  <header><h2 id="tourney-title">Game plan</h2><div class="tourney-header-actions"><button type="button" class="tourney-switch-mode">Open in Tournament mode</button><button type="button" class="tourney-close">Close</button></div></header>
+  <p class="tourney-intro"></p>
   <fieldset>
     <div class="tourney-toolbar"></div>
     <div class="tourney-editor"></div>
-    <div class="tourney-footer"><button type="button" class="tourney-build">Build tournament matchup…</button></div>
+    <div class="tourney-footer"><button type="button" data-open-teams aria-haspopup="dialog" aria-controls="rio-teams">Open finished-game roster…</button><button type="button" class="tourney-build">Build tournament matchup…</button></div>
   </fieldset>
   <p role="status" aria-live="polite"></p>
   <dialog class="tourney-stat-dialog" aria-labelledby="tourney-stat-title" aria-describedby="tourney-stat-note">

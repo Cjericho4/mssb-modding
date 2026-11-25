@@ -1,4 +1,6 @@
 import {sides, positions, captainSlots, moveBatter, swapFieldPosition} from "./rio-roster.mjs";
+import {loadDraft, saveDraft} from "./game-plan-draft.mjs";
+import {playerPool} from "./game-plan-pool.mjs";
 
 const format = "mssb-tournament-team-v1";
 const MiB = 1024 * 1024;
@@ -19,6 +21,28 @@ const libraryChoice = {Away:"", Home:""};
 let side = "Away", names = new Map(), busy = false, dragging, opener;
 let statFields = new Map();
 let library = [], libraryError = "";
+let mode = "plan", initialized = false;
+let pendingDraft = false, savingDraft = false, draftTimer;
+
+function draftChanged() {
+  pendingDraft = true;
+  clearTimeout(draftTimer);
+  draftTimer = setTimeout(flushDraft, 200);
+}
+async function flushDraft() {
+  clearTimeout(draftTimer);
+  if (savingDraft || !pendingDraft) return;
+  savingDraft = true;
+  try {
+    while (pendingDraft) {
+      pendingDraft = false;
+      await saveDraft({teams, selected, side});
+    }
+  } catch (error) {
+    pendingDraft = true;
+    status.textContent = "Could not save your game plan on this device. " + errorText(error);
+  } finally { savingDraft = false; }
+}
 
 function el(tag, text = "", className = "") {
   const e = document.createElement(tag);
@@ -58,11 +82,12 @@ function errorText(error) { return typeof error === "string" ? error : error?.me
 async function run(action) {
   if (busy) return;
   busy = true;
-  fieldset.disabled = close.disabled = true;
+  const switchMode = dialog.querySelector(".tourney-switch-mode");
+  fieldset.disabled = close.disabled = switchMode.disabled = true;
   status.textContent = "";
   try { await action(); }
   catch (error) { status.textContent = errorText(error); }
-  finally { fieldset.disabled = close.disabled = busy = false; }
+  finally { fieldset.disabled = close.disabled = switchMode.disabled = busy = false; }
 }
 const integer = (v, max) => Number.isInteger(v) && v >= 0 && v <= max;
 const record = v => v !== null && typeof v === "object" && !Array.isArray(v);
@@ -102,23 +127,26 @@ function validateStats(stats, batter) {
       throw Error("Batter " + batter + "’s " + field.label + " must be a whole number from " + field.min + " to " + field.max + ".");
   }
 }
-function validateTeam(team) {
+function validateTeam(team, draft = false) {
   if (!record(team) || team.format !== format) throw Error("Choose a portable tournament team saved with Save team.");
-  const player = typeof team.player === "string" && team.player.trim();
-  if (!player || player.length > 30 || ["CPU","No Player Selected"].includes(player)) throw Error("Enter the human player's Rio lobby name (up to 30 characters).");
+  if (typeof team.player !== "string" || team.player.length > 30) throw Error("Use a Rio lobby name of up to 30 characters.");
+  const player = draft ? team.player : team.player.trim();
+  if (!draft && (!player || ["CPU","No Player Selected"].includes(player))) throw Error("Enter the human player's Rio lobby name (up to 30 characters).");
   if (!Array.isArray(team.rows) || team.rows.length !== 9) throw Error("A tournament team needs nine batters.");
   const rows = team.rows.map((r, i) => {
     if (!record(r) || !names.has(r.source) || !integer(r.pos, 8) || typeof r.captain !== "boolean" || typeof r.star !== "boolean")
       throw Error("Check the character, field position and flags for batter " + (i + 1) + ".");
     if (r.label !== undefined && (typeof r.label !== "string" || r.label.length > 64)) throw Error("Use a player label of up to 64 characters.");
     if (r.stats !== undefined) validateStats(r.stats, i + 1);
+    const label = draft ? r.label : r.label?.trim();
     return {source:r.source, pos:r.pos, captain:r.captain, star:r.star,
-      ...(r.label?.trim() ? {label:r.label.trim()} : {}), ...(r.textures !== undefined ? {textures:r.textures} : {}),
+      ...(label ? {label} : {}), ...(r.textures !== undefined ? {textures:r.textures} : {}),
       ...(r.stats && Object.keys(r.stats).length ? {stats:r.stats} : {})};
   });
   if (new Set(rows.map(r=>r.pos)).size !== 9) throw Error("Assign all nine different field positions.");
   const captains = rows.filter(r=>r.captain);
-  if (captains.length !== 1 || !captainSlots.has(captains[0].source)) throw Error("Choose one captain from the twelve captain characters.");
+  if ((!draft && captains.length !== 1) || captains.length > 1 || captains.some(r => !captainSlots.has(r.source)))
+    throw Error("Choose one captain from the twelve captain characters.");
   validateTextures(rows);
   return {format, player, rows};
 }
@@ -200,7 +228,7 @@ function libraryPicker() {
 function makeToolbar() {
   const tabs = el("div", "", "tourney-tabs");
   tabs.setAttribute("role","group");
-  tabs.setAttribute("aria-label","Tournament team to edit");
+  tabs.setAttribute("aria-label","Team to edit");
   for (const s of sides) {
     const tab = button(s, () => { side = s; status.textContent = ""; draw('.tourney-tabs [data-side="' + s + '"]'); });
     tab.dataset.side = s;
@@ -211,7 +239,7 @@ function makeToolbar() {
   name.maxLength = 30;
   name.placeholder = "Your Rio lobby name";
   name.value = teams[side].player;
-  name.oninput = () => { teams[side].player = name.value; status.textContent = ""; };
+  name.oninput = () => { teams[side].player = name.value; status.textContent = ""; draftChanged(); };
   const input = el("input");
   input.type = "file";
   input.accept = ".json,application/json";
@@ -233,17 +261,22 @@ function makeToolbar() {
     const path = await invoke("save_tournament_team",{team:validateTeam(teams[side])});
     if (path) {
       saved[side] = {player:teams[side].player, rows:JSON.stringify(teams[side].rows)};
-      await refreshLibrary();
+      if (mode === "tournament") await refreshLibrary();
       makeToolbar();
       status.textContent = "Saved " + side + " team to " + path + ".";
     }
   }), "tourney-save");
-  toolbar.replaceChildren(tabs, labeled("Rio lobby name",name), load, save, libraryPicker());
+  toolbar.replaceChildren(tabs, labeled("Rio lobby name",name), load, save);
+  if (mode === "tournament") toolbar.append(libraryPicker());
 }
 function move(team, from, to) {
   moveBatter(team,from,to);
   selected[side] = to;
   draw('.tourney-row[data-index="' + to + '"]');
+}
+function endDrag() {
+  dragging = undefined;
+  for (const target of editor.querySelectorAll(".drag-over")) target.classList.remove("drag-over");
 }
 function playerDrag(elem, index, dropPlayer) {
   elem.draggable = true;
@@ -256,19 +289,18 @@ function playerDrag(elem, index, dropPlayer) {
   elem.ondragover = event => {
     if (busy || dragging?.side !== side) return;
     event.preventDefault();
+    event.dataTransfer.dropEffect = dragging.source === undefined ? "move" : "copy";
     elem.classList.add("drag-over");
   };
   elem.ondragleave = event => {
     if (!elem.contains(event.relatedTarget)) elem.classList.remove("drag-over");
   };
-  elem.ondragend = () => {
-    dragging = undefined;
-    for (const target of editor.querySelectorAll(".drag-over")) target.classList.remove("drag-over");
-  };
+  elem.ondragend = endDrag;
   elem.ondrop = event => {
     if (busy || dragging?.side !== side) return;
     event.preventDefault();
-    dropPlayer(dragging.index);
+    if (dragging.source !== undefined) chooseSource(index, dragging.source);
+    else dropPlayer(dragging.index);
   };
 }
 function fieldPanel(team) {
@@ -383,6 +415,26 @@ function editStats(row, i) {
   };
   statDialog.showModal();
 }
+function chooseSource(i, id) {
+  const row = teams[side].rows[i];
+  selected[side] = i;
+  endDrag();
+  if (row.source === id) { draw(".tourney-source"); return; }
+  const change = () => {
+    row.source = id;
+    if (!captainSlots.has(id)) row.captain = false;
+    delete row.textures;
+    delete row.stats;
+    draw(".tourney-source");
+  };
+  if (!Object.keys(row.textures||{}).length && !Object.keys(row.stats||{}).length) { change(); return; }
+  draw();
+  const confirmation = editor.querySelector(".source-change");
+  const keep = button("Keep character",()=>{confirmation.replaceChildren(); editor.querySelector(".tourney-source").focus();});
+  confirmation.replaceChildren(el("p","Switch to " + names.get(id) + " and clear the previous character’s custom textures and stat overrides?"),
+    button("Switch character",change),keep);
+  keep.focus();
+}
 function inspector(team) {
   const i = selected[side], row = team.rows[i];
   const panel = el("section","","tourney-inspector");
@@ -390,26 +442,14 @@ function inspector(team) {
   member.append(el("h3","Edit batter " + (i + 1)));
   const fields = el("div","","tourney-fields");
   const confirmation = el("div","","source-change");
-  const changeSource = id => {
-    row.source = id;
-    if (!captainSlots.has(id)) row.captain = false;
-    delete row.textures;
-    delete row.stats;
-    draw(".tourney-source");
-  };
-  const source = select(names,row.source,"tourney-source",id => {
-    if (id === row.source) return;
-    if (!Object.keys(row.textures||{}).length && !Object.keys(row.stats||{}).length) { changeSource(id); return; }
-    source.value = String(row.source);
-    confirmation.replaceChildren(el("p","Switch to " + names.get(id) + " and clear the previous character’s custom textures and stat overrides?"),
-      button("Switch character",()=>changeSource(id)),button("Keep character",()=>{confirmation.replaceChildren(); source.focus();}));
-  });
+  const source = select(names,row.source,"tourney-source",id=>chooseSource(i,id));
   const label = el("input","","tourney-label");
   label.maxLength = 64;
   label.placeholder = "Optional";
   label.value = row.label || "";
   label.oninput = () => {
     row.label = label.value;
+    draftChanged();
     for (const name of editor.querySelectorAll('[data-index="' + i + '"] .tourney-name')) name.textContent = title(row);
   };
   const bat = select(positions.map((_,n)=>[n,String(n+1)]),i,"tourney-bat",to=>move(team,i,to));
@@ -442,12 +482,27 @@ function inspector(team) {
   customization.append(stats);
   return panel;
 }
-function draw(focus) {
+function draw(focus, persist = true) {
   dragging = undefined;
   makeToolbar();
   const team = teams[side];
-  editor.replaceChildren(fieldPanel(team),orderPanel(team),inspector(team));
+  editor.replaceChildren(fieldPanel(team),orderPanel(team));
+  if (mode === "plan") {
+    const i = selected[side];
+    editor.append(playerPool({
+      names, selectedSource:team.rows[i].source, selectedBatter:i + 1, onChoose:id=>chooseSource(i,id),
+      onDragStart(event,id) {
+        if (busy || !event.dataTransfer) { event.preventDefault(); return; }
+        dragging = {side,source:id};
+        event.dataTransfer.setData("text/plain",names.get(id));
+        event.dataTransfer.effectAllowed = "copy";
+      },
+      onDragEnd:endDrag
+    }));
+  }
+  editor.append(inspector(team));
   if (focus) dialog.querySelector(focus)?.focus({preventScroll:true});
+  if (persist) draftChanged();
 }
 dialog.querySelector(".tourney-build").onclick = () => run(async () => {
   const away = validateTeam(teams.Away), home = validateTeam(teams.Home);
@@ -464,25 +519,49 @@ dialog.querySelector(".tourney-build").onclick = () => run(async () => {
   status.replaceChildren(el("strong","Matchup built"),el("p",location),
     el("p","ISO SHA-256 · "+result.sha256),
     el("p","Rio lineup SHA-256 · "+result.hudSha256),
-    el("p","Both players use the same Away and Home teams. Compare both hashes, then load hud.json with the built ISO in Game plan and select Use in Rio on both computers."));
+    el("p","Compare both hashes, then open the finished-game roster in Game plan. Load hud.json with the built ISO and select Use in Rio on both computers."));
 });
 close.onclick = () => dialog.close();
 dialog.oncancel = event => {if (busy) event.preventDefault();};
-dialog.onclose = () => {dragging=undefined; opener?.focus();};
+dialog.onclose = () => {dragging=undefined; flushDraft(); opener?.focus();};
+window.addEventListener("pagehide", flushDraft);
 editor.addEventListener("input", () => { status.textContent = ""; });
-for (const trigger of document.querySelectorAll("[data-open-tournament]")) {
-  trigger.onclick = async () => {
-    if (dialog.open || busy) return;
+async function openMode(nextMode, trigger) {
+  if (busy) return;
+  if (!dialog.open) {
     opener = trigger;
     dialog.showModal();
-    await run(async () => {
-      if (!names.size) {
-        const [sources, fields] = await Promise.all([invoke("sources"), invoke("stat_schema")]);
-        names = new Map(sources.map(s=>[s.id,s.name]));
-        statFields = new Map(fields.map(f=>[f.key,f]));
-      }
-      await refreshLibrary();
-      draw();
-    });
-  };
+  }
+  mode = nextMode;
+  const planning = mode === "plan";
+  dialog.dataset.mode = mode;
+  dialog.querySelector("#tourney-title").textContent = planning ? "Game plan" : "Tournament mode";
+  dialog.querySelector(".tourney-intro").textContent = planning
+    ? "Choose your nine batters and their starting positions. Both teams are saved on this device as you edit."
+    : "Load a tournament team or build a matchup from both lineups and your clean retail ISO.";
+  dialog.querySelector(".tourney-switch-mode").textContent = planning ? "Open in Tournament mode" : "Back to Game plan";
+  dialog.querySelector("[data-open-teams]").hidden = !planning;
+  dialog.querySelector(".tourney-build").hidden = planning;
+  await run(async () => {
+    if (!initialized) {
+      const [sources, fields] = await Promise.all([invoke("sources"), invoke("stat_schema")]);
+      names = new Map(sources.map(s=>[s.id,s.name]));
+      statFields = new Map(fields.map(f=>[f.key,f]));
+      try {
+        const draft = await loadDraft();
+        if (draft) {
+          const restored = sides.map(s => validateTeam(draft.teams[s], true));
+          sides.forEach((s,i) => {teams[s] = restored[i]; selected[s] = integer(draft.selected?.[s],8) ? draft.selected[s] : 0;});
+          side = sides.includes(draft.side) ? draft.side : "Away";
+        }
+      } catch (error) {status.textContent = "Could not restore your game plan. " + errorText(error);}
+      initialized = true;
+    }
+    if (!planning) await refreshLibrary();
+    draw(null, false);
+  });
+}
+dialog.querySelector(".tourney-switch-mode").onclick = () => openMode(mode === "plan" ? "tournament" : "plan");
+for (const trigger of document.querySelectorAll("[data-open-tournament],[data-open-plan]")) {
+  trigger.onclick = () => openMode(trigger.hasAttribute("data-open-plan") ? "plan" : "tournament", trigger);
 }
