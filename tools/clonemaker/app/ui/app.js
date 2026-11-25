@@ -1148,6 +1148,7 @@ async function main() {
     ["welcome-iso", chooseIso],
     ["welcome-dir", chooseFolder],
     ["welcome-plan", () => document.querySelector(".pages [data-open-plan]").click()],
+    ["welcome-tournament", () => document.querySelector(".pages [data-open-tournament]").click()],
     ["welcome-later", null],
   ]) {
     $(id).addEventListener("click", () => {
@@ -1318,7 +1319,7 @@ function setMode(mode) {
 function showWelcome() {
   if (state.game) return;
   setModal($("welcome"), true);
-  $("welcome-iso").focus();
+  $("welcome-plan").focus();
 }
 
 /** Show a header button when GitHub has a newer release; quietly does nothing offline. */

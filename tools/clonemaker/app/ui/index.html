@@ -7,6 +7,7 @@
 <link rel="stylesheet" href="theme.css">
 <link rel="stylesheet" href="rio-teams.css">
 <link rel="stylesheet" href="tournament.css">
+<link rel="stylesheet" href="planner-guide.css">
 </head>
 <body>
 <header class="top">
@@ -99,8 +100,10 @@
 <div id="welcome" class="modal" hidden>
   <div class="dialog welcome" role="dialog" aria-modal="true" aria-labelledby="welcome-title" aria-describedby="welcome-text">
     <header><h2 id="welcome-title">Get started</h2></header>
-    <p id="welcome-text">Plan both teams now, or choose your USA game image or extracted folder to start making clones.</p>
-    <div class="line end"><button id="welcome-later">Not now</button><button id="welcome-plan">Plan a roster</button><button id="welcome-dir">A folder…</button><button id="welcome-iso" class="primary">Choose your game (.iso)…</button></div>
+    <p id="welcome-text">Plan two lineups or edit a saved tournament team. You can start either mode without a game disc.</p>
+    <div class="line"><button id="welcome-plan" class="primary">Plan a roster</button><button id="welcome-tournament">Open Tournament Mode</button></div>
+    <p>To make clones in Studio, open your original USA game.</p>
+    <div class="line end"><button id="welcome-later">Not now</button><button id="welcome-dir">Open game folder…</button><button id="welcome-iso">Choose game image (.iso)…</button></div>
   </div>
 </div>
 
@@ -164,6 +167,21 @@
 </dialog>
 <dialog id="tournament-plan" aria-labelledby="tourney-title">
   <h2 id="tourney-title" class="offscreen">Game plan</h2>
+  <section class="planner-guide" aria-label="Lineup help">
+    <div class="planner-guide-head">
+      <strong class="planner-guide-lead"></strong>
+      <span class="planner-guide-hint"></span>
+      <button type="button" class="planner-guide-save-help" aria-controls="planner-guide-panel">How to save</button>
+      <button type="button" class="planner-guide-start" aria-controls="planner-guide-panel" aria-expanded="false">Game Plan walkthrough</button>
+    </div>
+    <div id="planner-guide-panel" hidden>
+      <div aria-live="polite" aria-atomic="true">
+        <div class="planner-guide-step"><span class="planner-guide-progress"></span><h3 class="planner-guide-title" tabindex="-1"></h3></div>
+        <p class="planner-guide-body"></p>
+      </div>
+      <div class="planner-guide-controls"><button type="button" class="planner-guide-close">Close guide</button><button type="button" class="planner-guide-prev">Back</button><button type="button" class="planner-guide-next">Next</button></div>
+    </div>
+  </section>
   <fieldset>
     <div class="tourney-toolbar"></div>
     <div class="tourney-editor"></div>

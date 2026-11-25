@@ -63,7 +63,8 @@ export async function run(options, app) {
     check($("btn-go").disabled && $("source").disabled && $("btn-export").disabled && $("btn-blender").disabled && !$("btn-iso").disabled, "inputs wait for a game");
     await shot("empty");
     app.showWelcome();
-    check(!$("welcome").hidden && document.activeElement === $("welcome-iso"), "the launch dialog asks for the game");
+    check(!$("welcome").hidden && document.activeElement === $("welcome-plan") && !$("welcome-tournament").disabled,
+      "both planners are available from launch before choosing a game");
     await shot("welcome");
     const plan = $("rio-teams");
     const tournament = $("tournament-plan");
@@ -118,20 +119,126 @@ export async function run(options, app) {
     findDK().click();
     drop(findDK(),tournamentField('.tourney-row[data-index="1"]'));
     drop(findDK(),tournamentField('.tourney-fielder[data-pos="2"]'));
-    check(tournament.querySelectorAll('.tourney-row[aria-pressed="true"][data-index="2"]').length === 1 &&
+    check(tournamentField('.tourney-row[data-index="2"] .tourney-pick').getAttribute("aria-pressed") === "true" &&
       !tournamentField(".tourney-captain").checked && tournamentField(".tourney-lobby").value === "",
       "the planner accepts repeat characters without a captain or a lobby name");
+    const slot = (area, i) => tournamentField(`.tourney-${area}[data-index="${i}"]`);
+    const slotName = (area, i) => slot(area, i).querySelector(".tourney-name");
+    const editName = (area, i) => {
+      slotName(area, i).click();
+      return slot(area, i).querySelector("input.tourney-name-edit");
+    };
+    const inputName = (input, value) => {
+      input.value = value;
+      input.dispatchEvent(new Event("input", {bubbles:true}));
+    };
+    const pressNameKey = (input, key) => input.dispatchEvent(new KeyboardEvent("keydown", {key, bubbles:true, cancelable:true}));
+    const inspectorShows = (label, display) => tournamentField(".tourney-label").value === label &&
+      tournamentField(".tourney-batter-caption h3").textContent === display;
+    const guidePanel = () => tournamentField("#planner-guide-panel");
+    const guideText = selector => guidePanel().querySelector(selector).textContent.trim();
+    const guideAction = selector => guidePanel().querySelector(selector).click();
+    const openGuide = () => tournamentField(".planner-guide-start").click();
+    const checkGuide = mode => {
+      const rosterNames = () => [...tournament.querySelectorAll(".tourney-row .tourney-name")].map(name => name.textContent).join("|");
+      const before = rosterNames();
+      check(guidePanel().hidden, mode + " lets the player choose whether to start its walkthrough");
+      openGuide();
+      const first = guideText(".planner-guide-title");
+      const progress = guideText(".planner-guide-progress");
+      guideAction(".planner-guide-next");
+      check(!guidePanel().hidden && guideText(".planner-guide-title") !== first && guideText(".planner-guide-progress") !== progress,
+        mode + " advances the walkthrough title and progress");
+      guideAction(".planner-guide-prev");
+      check(guideText(".planner-guide-title") === first && guideText(".planner-guide-progress") === progress,
+        mode + " can return to the previous step");
+      guideAction(".planner-guide-close");
+      check(guidePanel().hidden, mode + " permits early dismissal");
+      openGuide();
+      const steps = new Set();
+      while (!guidePanel().hidden && steps.size < 20) {
+        const title = guideText(".planner-guide-title");
+        if (!title || steps.has(title)) break;
+        steps.add(title);
+        guideAction(".planner-guide-next");
+      }
+      check(guidePanel().hidden && steps.size >= 4 && rosterNames() === before,
+        mode + " completes its walkthrough without editing the roster");
+      return first;
+    };
+    const firstPlanStep = checkGuide("Game Plan");
+    // The Lobsters preset contains its stock "Birdo" name as an explicit label.
+    // An actual nickname, unlike that stock label, should survive a substitution.
+    slot("row",3).querySelector(".tourney-pick").click();
+    const originalSource = tournamentField(".tourney-source").value;
+    choose(tournamentField(".tourney-source"), 17);
+    inputName(tournamentField(".tourney-label"), "Birdo");
+    choose(tournamentField(".tourney-source"), 15);
+    check(slotName("row",3).textContent === "Toadette" && slotName("fielder",3).textContent === "Toadette" &&
+      inspectorShows("", "Toadette"), "substituting Toadette for a preset labeled Birdo updates both default names");
+    inputName(tournamentField(".tourney-label"), "Slugger");
+    choose(tournamentField(".tourney-source"), originalSource);
+    check(inspectorShows("Slugger", "Slugger"), "an intentional nickname survives changing character");
+    inputName(tournamentField(".tourney-label"), "");
+    tournamentField(".tourney-save").click();
+    check(document.activeElement === tournamentField(".tourney-lobby") && tournamentField(".tourney-lobby").validity.customError,
+      "saving an unnamed team focuses the missing Rio username");
+    inputName(tournamentField(".tourney-lobby"), "Practice");
+    tournamentField(".tourney-save").click();
+    check(document.activeElement === tournamentField(".tourney-captain") &&
+      tournamentField('[role="status"]').textContent.includes("needs a captain"), "saving a team without a captain points to an eligible player");
+    inputName(tournamentField(".tourney-lobby"), "");
+    openGuide();
+    const fieldName = editName("fielder", 1);
+    check(document.activeElement === fieldName && fieldName.maxLength === 64, "clicking the name of an unselected fielder focuses its name editor");
+    inputName(fieldName, "Blu DK");
+    fieldName.setRangeText("e", 3, 3, "end");
+    fieldName.dispatchEvent(new Event("input", {bubbles:true}));
+    check(document.activeElement === fieldName && fieldName.selectionStart === 4 && fieldName.selectionEnd === 4 &&
+      slotName("row",1).textContent === "Blue DK" && inspectorShows("Blue DK","Blue DK") &&
+      slotName("row",0).textContent === "Donkey Kong",
+      "Game Plan mirrors a mid-string field edit in the lineup and inspector without moving the caret or renaming the other DK");
+    pressNameKey(fieldName, "Enter");
+    check(document.activeElement === slotName("fielder",1), "Enter finishes the edit and returns keyboard focus to the field name");
+    check(!guidePanel().hidden && guideText(".planner-guide-title") === firstPlanStep,
+      "the walkthrough stays open while the user renames an actual fielder");
+    guideAction(".planner-guide-next");
+    slot("row",2).querySelector(".tourney-pick").click();
     tournamentField(".tourney-switch-mode").click();
     await waitFor(() => ready("tournament") && tournamentField(".tourney-team-picker"), "Game plan hands both drafts to Tournament mode");
+    checkGuide("Tournament");
+    say("checked both opt-in walkthroughs, real roster editing, mode switching, and finishing or closing each guide");
     if (cachedFaces.length) {
       await waitFor(() => batterFaces().length === 9 && batterFaces().slice(0,3).every(face =>
         Number(face.dataset.source) === 2 && hasSourceImage(face)), "Tournament mode shows a DK head for each of the three DK batters");
     }
-    check(tournamentField('.tourney-row[data-index="2"]').getAttribute("aria-pressed") === "true" &&
-      [0,1,2].every(i => tournamentField('.tourney-row[data-index="' + i + '"] .tourney-name').textContent === "Donkey Kong"),
-      "the selected batter and all three DKs survive the handoff");
+    check(slot("row",2).querySelector(".tourney-pick").getAttribute("aria-pressed") === "true" &&
+      ["Donkey Kong","Blue DK","Donkey Kong"].every((name,i) => slotName("row",i).textContent === name),
+      "the selected batter and independently named DKs survive the mode switch");
+    const lineupName = editName("row",1);
+    inputName(lineupName, "");
+    check(slotName("fielder",1).textContent === "Donkey Kong" && inspectorShows("","Donkey Kong"),
+      "clearing a nickname immediately restores the character name");
+    inputName(lineupName, "Away DK");
+    check(document.activeElement === lineupName && slotName("fielder",1).textContent === "Away DK" && inspectorShows("Away DK","Away DK"),
+      "Tournament mirrors the batting order edit on the field and in the inspector while the editor retains focus");
+    lineupName.blur();
+    const canceledName = editName("fielder",1);
+    inputName(canceledName, "Temporary");
+    pressNameKey(canceledName, "Escape");
+    check(ready("tournament") && slotName("row",1).textContent === "Away DK" && inspectorShows("Away DK","Away DK"),
+      "Escape restores the prior field name and keeps the tournament open");
+    drop(slot("row",1), slot("row",2));
+    check(slotName("row",2).textContent === "Away DK" && slotName("fielder",2).textContent === "Away DK" &&
+      slot("fielder",2).dataset.pos === "1", "the nickname follows the clone to its new batting spot");
+    drop(slot("row",2), slot("row",1));
+    drop(slot("fielder",1), slot("fielder",0));
+    check(slot("fielder",1).dataset.pos === "0" && slotName("fielder",1).textContent === "Away DK" &&
+      slotName("row",1).textContent === "Away DK", "a field swap moves the named clone and preserves its batting spot");
+    drop(slot("fielder",1), slot("fielder",0));
+    slot("row",2).querySelector(".tourney-pick").click();
     if (cachedFaces.length && await invoke("prepare_custom_portraits", {sourcePath:null})) {
-      tournamentField('.tourney-row[data-index="1"]').click();
+      slot("row",1).querySelector(".tourney-pick").click();
       const texture = document.createElement("canvas");
       texture.width = texture.height = 128;
       const ctx = texture.getContext("2d");
@@ -179,7 +286,7 @@ export async function run(options, app) {
         const face = batterFaces()[1];
         say("DK portrait state " + face?.dataset.appearance + ", " + (face?.title || tournamentField('[role="status"]').textContent));
       }
-      tournamentField('.tourney-row[data-index="2"]').click();
+      slot("row",2).querySelector(".tourney-pick").click();
     }
     tournamentField('.tourney-tabs [data-side="Home"]').click();
     const presets = [...tournamentField(".tourney-team-picker").querySelectorAll("optgroup:first-of-type option")];
@@ -209,6 +316,8 @@ export async function run(options, app) {
     const labelEdit = tournamentField(".tourney-label");
     labelEdit.value = "My batter";
     labelEdit.dispatchEvent(new Event("input", {bubbles:true}));
+    check(slotName("row",0).textContent === "My batter" && slotName("fielder",0).textContent === "My batter",
+      "editing the Home inspector immediately updates both on-field and lineup names");
     pickPreset(presets[0].value);
     await waitFor(() => tournamentField(".tourney-keep") && !tournamentField("fieldset").disabled, "replacing an edited roster asks first");
     tournamentField(".tourney-keep").click();
@@ -218,7 +327,8 @@ export async function run(options, app) {
     tournamentField(".tourney-confirm").click();
     check(tournamentField(".tourney-label").value === (firstTeam.rows[0].label ?? ""), "confirmed replacement restores the chosen batting order");
     tournamentField('.tourney-tabs [data-side="Away"]').click();
-    check(tournamentField(".tourney-lobby").value === "" && tournamentField(".tourney-source").value === "2",
+    check(tournamentField(".tourney-lobby").value === "" && tournamentField(".tourney-source").value === "2" &&
+      slotName("row",1).textContent === "Away DK",
       "replacing Home leaves the planned Away team intact");
     tournamentField(".tourney-switch-mode").click();
     await waitFor(() => ready("plan"), "Tournament returns to the shared Game plan");
@@ -228,6 +338,10 @@ export async function run(options, app) {
     tournamentField(".tourney-close").click();
     await waitFor(() => !tournament.open && !plan.open && document.activeElement === directPlan,
       "closing a shared draft opened from welcome returns to Game plan navigation");
+    const {loadDraft} = await import("./game-plan-draft.mjs");
+    const savedPlan = await loadDraft();
+    check(savedPlan?.teams.Away.rows[1].label === "Away DK" && !savedPlan.teams.Away.rows[0].label,
+      "the saved draft retains the nickname on the correct duplicate");
     directTournament.click();
     await waitFor(() => ready("tournament"), "Tournament mode opens independently from the top navigation");
     check(tournamentField(".tourney-lobby").value === "Local Player", "direct Tournament entry retains the active side");
@@ -243,8 +357,14 @@ export async function run(options, app) {
     await waitFor(() => !plan.open && ready("plan") && document.activeElement === finishedRoster,
       "closing the finished-game editor returns to the shared draft");
     tournamentField('.tourney-tabs [data-side="Away"]').click();
+    const restoredName = editName("row",1);
+    inputName(restoredName, "");
+    restoredName.blur();
+    check(slotName("row",1).textContent === "Donkey Kong" && slotName("fielder",1).textContent === "Donkey Kong",
+      "a cleared saved nickname returns to the original character in Game Plan");
+    say("checked live name edits in both planners, independent DK clones, batting and field moves, and the saved draft");
     for (let i = 0; i < 3; i++) {
-      tournamentField(`.tourney-row[data-index="${i}"]`).click();
+      slot("row",i).querySelector(".tourney-pick").click();
       choose(tournamentField(".tourney-source"), 2);
     }
     const threeDKs = () => [...tournament.querySelectorAll(".tourney-row .tourney-name")]
@@ -272,11 +392,11 @@ export async function run(options, app) {
     check(!threeDKs(), "Home has its own portable lineup");
     tournamentField('.tourney-tabs [data-side="Away"]').click();
     check(threeDKs(), "Away keeps all three DKs after switching back");
-    tournamentField('.tourney-row[data-index="1"]').click();
+    slot("row",1).querySelector(".tourney-pick").click();
     editBatterStats();
     check(statInput("speed").value === "", "a second DK keeps its original running speed");
     tournamentField(".tourney-stat-cancel").click();
-    tournamentField('.tourney-row[data-index="2"]').click();
+    slot("row",2).querySelector(".tourney-pick").click();
     editBatterStats();
     check(statInput("speed").value === "0" && statInput("running_bar").value === "10",
       "the edited DK retains zero and the upper bound across team changes");

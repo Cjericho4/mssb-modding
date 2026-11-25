@@ -1,0 +1,27 @@
+#tournament-plan .planner-guide {
+  flex: none; border-bottom: 1px solid var(--rule); background: var(--paper); padding: 7px 16px;
+}
+.planner-guide-head, .planner-guide-controls { display: flex; align-items: center; gap: 8px; }
+.planner-guide-head { flex-wrap: wrap; }
+.planner-guide-lead { font: 700 17px/1.1 var(--display); }
+#tournament-plan .planner-guide-save-help { background: transparent; border-color: transparent; color: var(--ink); text-decoration: underline; text-underline-offset: 3px; }
+.planner-guide-hint { flex: 1; color: var(--ink-2); font: 12px/1.35 var(--sans); }
+#tournament-plan .planner-guide-start { color: var(--ice-2); border-color: var(--rule); font-weight: 600; }
+#tournament-plan .planner-guide-start:hover { border-color: var(--ice); }
+#planner-guide-panel:not([hidden]) {
+  display: grid; grid-template-columns: minmax(0,1fr) auto; align-items: center; gap: 7px 18px;
+  border-left: 3px solid var(--ice); margin: 6px 0 2px; padding: 2px 0 2px 10px;
+}
+.planner-guide-step { display: flex; align-items: baseline; flex-wrap: wrap; gap: 3px 9px; }
+#tournament-plan .planner-guide-title { font: 700 20px/1.1 var(--display); }
+.planner-guide-progress { color: var(--ink-2); font: 11px/1.35 var(--mono); }
+#tournament-plan .planner-guide-body { margin: 4px 0 0; font: 13px/1.35 var(--sans); }
+#tournament-plan .planner-guide-next { background: var(--ice-2); border-color: var(--ice-2); color: var(--on-accent); }
+#tournament-plan .guide-highlight { outline: 2px solid var(--ice-2); outline-offset: -2px; }
+#tournament-plan :is(button,input,select).guide-highlight:focus-visible { outline-offset: 2px; }
+@media (max-width: 800px) {
+  #tournament-plan .planner-guide { padding: 6px 9px; }
+  #planner-guide-panel:not([hidden]) { grid-template-columns: 1fr; gap: 5px; }
+  .planner-guide-controls { justify-content: flex-end; }
+  .planner-guide:has(#planner-guide-panel:not([hidden])) .planner-guide-head { display: none; }
+}

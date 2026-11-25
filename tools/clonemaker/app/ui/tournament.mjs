@@ -2,6 +2,7 @@ import {sides, positions, captainSlots, moveBatter, swapFieldPosition} from "./r
 import {loadDraft, saveDraft} from "./game-plan-draft.mjs";
 import {playerPool} from "./game-plan-pool.mjs";
 import {initPortraits, lineupFaces} from "./roster-portraits.mjs";
+import {initPlannerGuide} from "./planner-guide.mjs";
 
 const format = "mssb-tournament-team-v1";
 const MiB = 1024 * 1024;
@@ -14,6 +15,7 @@ const close = dialog.querySelector(".tourney-close");
 const nav = document.querySelector(".pages");
 const studioButton = nav.querySelector("[data-open-studio]");
 const showPortraits = initPortraits(dialog.querySelector(".portrait-tools"));
+const guide = initPlannerGuide(dialog);
 const statDialog = dialog.querySelector(".tourney-stat-dialog");
 const invoke = window.__TAURI__.core.invoke;
 const teams = Object.fromEntries(sides.map((s, t) => [s, {format, player:"", rows:positions.map((_,i) => ({
@@ -96,6 +98,7 @@ async function run(action) {
 const integer = (v, max) => Number.isInteger(v) && v >= 0 && v <= max;
 const record = v => v !== null && typeof v === "object" && !Array.isArray(v);
 const title = row => row.label?.trim() || names.get(row.source);
+const humanLobbyName = name => Boolean(name.trim()) && !["CPU","No Player Selected"].includes(name.trim());
 function textureSize(name, encoded) {
   const match = /^t(\d{2,})_([1-9]\d*)x([1-9]\d*)\.png$/.exec(name);
   if (!match || match[1] !== String(Number(match[1])).padStart(2,"0") || +match[1] >= 256 || +match[2] > 1024 || +match[3] > 1024)
@@ -135,7 +138,7 @@ function validateTeam(team, draft = false) {
   if (!record(team) || team.format !== format) throw Error("Choose a portable tournament team saved with Save team.");
   if (typeof team.player !== "string" || team.player.length > 30) throw Error("Use a Rio lobby name of up to 30 characters.");
   const player = draft ? team.player : team.player.trim();
-  if (!draft && (!player || ["CPU","No Player Selected"].includes(player))) throw Error("Enter the human player's Rio lobby name (up to 30 characters).");
+  if (!draft && !humanLobbyName(player)) throw Error("Enter the human player's Rio lobby name (up to 30 characters).");
   if (!Array.isArray(team.rows) || team.rows.length !== 9) throw Error("A tournament team needs nine batters.");
   const rows = team.rows.map((r, i) => {
     if (!record(r) || !names.has(r.source) || !integer(r.pos, 8) || typeof r.captain !== "boolean" || typeof r.star !== "boolean")
@@ -241,9 +244,9 @@ function makeToolbar() {
   }
   const name = el("input","","tourney-lobby");
   name.maxLength = 30;
-  name.placeholder = "Your Rio lobby name";
+  name.placeholder = side + " player’s Rio username";
   name.value = teams[side].player;
-  name.oninput = () => { teams[side].player = name.value; status.textContent = ""; draftChanged(); };
+  name.oninput = () => { teams[side].player = name.value; name.setCustomValidity(""); status.textContent = ""; draftChanged(); };
   const input = el("input");
   input.type = "file";
   input.accept = ".json,application/json";
@@ -261,22 +264,48 @@ function makeToolbar() {
   });
   const load = el("span","","tourney-import");
   load.append(button("Import team file…",()=>input.click()),input);
-  const save = button("Save " + side + " team…", () => run(async () => {
+  const save = button("Save " + side + " team…", () => {
+    if (!humanLobbyName(name.value)) {
+      const message = "Enter the " + side + " player’s Project Rio username here, then save this team.";
+      status.textContent = message;
+      name.setCustomValidity(message);
+      name.focus();
+      name.reportValidity();
+      return;
+    }
+    const rows = teams[side].rows;
+    if (!rows.some(row => row.captain)) {
+      const current = selected[side];
+      const eligible = captainSlots.has(rows[current].source) ? current : rows.findIndex(row => captainSlots.has(row.source));
+      if (eligible !== -1) {
+        selected[side] = eligible;
+        draw(".tourney-captain");
+        status.textContent = "The " + side + " team needs a captain. Select Captain for " + title(rows[eligible]) + ", or choose another eligible player, then save again.";
+      } else {
+        editor.querySelector(".tourney-source").focus();
+        status.textContent = "The " + side + " team needs a captain. Choose a character such as Mario or Donkey Kong, select Captain, then save again.";
+      }
+      return;
+    }
+    return run(writeTeam);
+  }, "tourney-save");
+  async function writeTeam() {
     const path = await invoke("save_tournament_team",{team:validateTeam(teams[side])});
     if (path) {
       saved[side] = {player:teams[side].player, rows:JSON.stringify(teams[side].rows)};
       if (mode === "tournament") await refreshLibrary();
       makeToolbar();
-      status.textContent = "Saved " + side + " team to " + path + ".";
+      status.textContent = "Saved " + side + " team to " + path + ". Reopen it in Tournament mode under Team library → My saved teams.";
     }
-  }), "tourney-save");
-  toolbar.replaceChildren(tabs, labeled("Rio lobby name",name), load, save);
+  }
+  toolbar.replaceChildren(el("span","Edit team","tourney-side-label"), tabs, labeled("Rio lobby name",name), load, save);
   if (mode === "tournament") toolbar.append(libraryPicker());
+  guide.update(side);
 }
 function move(team, from, to) {
   moveBatter(team,from,to);
   selected[side] = to;
-  draw('.tourney-row[data-index="' + to + '"]');
+  draw('.tourney-row[data-index="' + to + '"] .tourney-pick');
 }
 function endDrag() {
   dragging = undefined;
@@ -307,23 +336,105 @@ function playerDrag(elem, index, dropPlayer) {
     else dropPlayer(dragging.index);
   };
 }
+function showCardName(card, row, i) {
+  const name = title(row);
+  const player = name + ", batter " + (i + 1) + ", " + positions[row.pos];
+  const label = card.querySelector(".tourney-name");
+  label.textContent = name;
+  label.setAttribute("aria-label", "Rename " + player);
+  label.title = "Rename " + name;
+  card.querySelector(".tourney-pick").setAttribute("aria-label", "Select " + player);
+}
+function setPlayerName(row, i, value) {
+  if (value) row.label = value;
+  else delete row.label;
+  for (const card of editor.querySelectorAll('.tourney-row[data-index="' + i + '"], .tourney-fielder[data-index="' + i + '"]')) {
+    showCardName(card, row, i);
+  }
+  if (selected[side] === i) {
+    editor.querySelector(".tourney-batter-caption h3").textContent = title(row);
+    const label = editor.querySelector(".tourney-label");
+    if (label.value !== value) label.value = value;
+  }
+  draftChanged();
+}
+function editPlayerName(selector, i) {
+  status.textContent = "";
+  if (selected[side] !== i) {
+    selected[side] = i;
+    draw();
+  }
+  const card = editor.querySelector(selector);
+  const slot = card.querySelector(".tourney-name-slot");
+  const trigger = slot.querySelector(".tourney-name");
+  const row = teams[side].rows[i];
+  const original = row.label || "";
+  const input = el("input", "", "tourney-name-edit");
+  input.type = "text";
+  input.maxLength = 64;
+  input.placeholder = names.get(row.source);
+  input.value = original;
+  input.setAttribute("aria-label", "Player name for batter " + (i + 1) + ", " + positions[row.pos]);
+  input.oninput = () => setPlayerName(row, i, input.value);
+  input.onblur = () => {
+    input.remove();
+    slot.classList.remove("editing");
+    card.draggable = true;
+  };
+  input.onkeydown = event => {
+    if (event.key !== "Escape" && event.key !== "Enter") return;
+    event.stopPropagation();
+    if (event.isComposing || event.keyCode === 229) return;
+    event.preventDefault();
+    if (event.key === "Escape") setPlayerName(row, i, original);
+    input.blur();
+    trigger.focus({preventScroll:true});
+  };
+  // A draggable ancestor captures text selection gestures in WebKit.
+  card.draggable = false;
+  slot.classList.add("editing");
+  slot.append(input);
+  input.focus({preventScroll:true});
+  input.select();
+}
+function playerCard(row, i, type) {
+  const field = type === "tourney-fielder";
+  const selector = "." + type + '[data-index="' + i + '"]';
+  const card = el("div", "", type);
+  card.dataset.index = i;
+  if (field) {
+    card.classList.add("plan-fielder");
+    card.dataset.pos = row.pos;
+  }
+  const pick = el("button", "", "tourney-pick");
+  pick.type = "button";
+  pick.setAttribute("aria-pressed", String(selected[side] === i));
+  card.classList.toggle("is-selected", selected[side] === i);
+  const slot = el("span", "", field ? "tourney-name-slot bat-name" : "tourney-name-slot");
+  slot.append(button("", () => editPlayerName(selector, i), "tourney-name"));
+  card.append(pick, slot);
+  showCardName(card, row, i);
+  card.onclick = event => {
+    if (event.target.closest(".tourney-name-slot")) return;
+    selected[side] = i;
+    draw(selector + " .tourney-pick");
+  };
+  return card;
+}
 function fieldPanel(team, faceFor) {
   const panel = el("section", "", "tourney-field-panel");
-  panel.append(el("h3","Starting field positions"), el("p","Drag one fielder onto another to swap positions."));
+  panel.append(el("h3","Starting field positions"), el("p","Drag to swap positions. Click a name to edit."));
   const diamond = el("div","","plan-diamond");
   team.rows.forEach((row, i) => {
     const selector = '.tourney-fielder[data-pos="' + row.pos + '"]';
-    const marker = button("", () => { selected[side] = i; draw(selector); }, "plan-fielder tourney-fielder");
-    marker.dataset.pos = String(row.pos);
-    marker.dataset.index = String(i);
-    marker.setAttribute("aria-pressed",String(selected[side] === i));
+    const marker = playerCard(row, i, "tourney-fielder");
     const badge = el("b",positions[row.pos],"position-badge");
     badge.append(el("span","#" + (i + 1), "field-bat-num"));
-    marker.append(faceFor(row),badge,el("span",title(row),"bat-name tourney-name"));
+    marker.append(faceFor(row),badge);
     playerDrag(marker,i,from => {
       swapFieldPosition(team,from,row.pos);
       selected[side] = from;
-      draw(selector);
+      draw(selector + " .tourney-pick");
     });
     diamond.append(marker);
   });
@@ -332,13 +443,11 @@ function fieldPanel(team, faceFor) {
 }
 function orderPanel(team, faceFor) {
   const panel = el("section","","tourney-order-panel");
-  panel.append(el("h3","Batting order"), el("p","Drag a batter to move their spot."));
+  panel.append(el("h3","Batting order"), el("p","Drag to reorder. Click a name to edit."));
   const ol = el("ol","","tourney-order");
   team.rows.forEach((row,i) => {
     const li = el("li");
-    const b = button("", () => { selected[side] = i; draw('.tourney-row[data-index="' + i + '"]'); }, "tourney-row");
-    b.dataset.index = String(i);
-    b.setAttribute("aria-pressed",String(selected[side] === i));
+    const card = playerCard(row, i, "tourney-row");
     const flags = el("span","","tourney-flags");
     if (row.captain) flags.append(el("small","Captain","tourney-captain-flag"));
     if (row.star) {
@@ -346,10 +455,10 @@ function orderPanel(team, faceFor) {
       star.setAttribute("aria-label","Superstar");
       flags.append(star);
     }
-    b.append(el("span",String(i+1),"tourney-number"),faceFor(row),
-      el("strong",title(row),"tourney-name"),flags,el("b",positions[row.pos],"tourney-position"));
-    playerDrag(b,i,from => move(team,from,i));
-    li.append(b);
+    card.append(el("span",String(i+1),"tourney-number"),faceFor(row),
+      flags,el("b",positions[row.pos],"tourney-position"));
+    playerDrag(card,i,from => move(team,from,i));
+    li.append(card);
     ol.append(li);
   });
   panel.append(ol);
@@ -434,11 +543,15 @@ function chooseSource(i, id) {
   endDrag();
   if (row.source === id) { draw(".tourney-source"); return; }
   const change = () => {
+    // Presets often spell out the default character name as a label. A substitution should
+    // change that name too; a nickname the player chose stays with the roster spot.
+    if (row.label?.trim().toLowerCase() === names.get(row.source).toLowerCase()) delete row.label;
     row.source = id;
     if (!captainSlots.has(id)) row.captain = false;
     delete row.textures;
     delete row.stats;
     draw(".tourney-source");
+    if (row.label?.trim()) status.textContent = names.get(id) + " now plays as " + row.label.trim() + ". Click the name to change it.";
   };
   if (!Object.keys(row.textures||{}).length && !Object.keys(row.stats||{}).length) { change(); return; }
   draw();
@@ -469,12 +582,7 @@ function inspector(team, faceFor) {
   label.maxLength = 64;
   label.placeholder = "Optional";
   label.value = row.label || "";
-  label.oninput = () => {
-    row.label = label.value;
-    activeName.textContent = title(row);
-    draftChanged();
-    for (const name of editor.querySelectorAll('[data-index="' + i + '"] .tourney-name')) name.textContent = title(row);
-  };
+  label.oninput = () => setPlayerName(row, i, label.value);
   const bat = select(positions.map((_,n)=>[n,String(n+1)]),i,"tourney-bat",to=>move(team,i,to));
   const pos = select(positions.map((p,n)=>[n,p]),row.pos,"tourney-pos",to=>{swapFieldPosition(team,i,to); draw(".tourney-pos");});
   const captain = checkbox("Captain","radio",row.captain,!captainSlots.has(row.source),"tourney-captain",()=>{
@@ -525,6 +633,7 @@ function draw(focus, persist = true) {
     }));
   }
   editor.append(inspector(team,faceFor));
+  guide.update(side);
   if (focus) dialog.querySelector(focus)?.focus({preventScroll:true});
   if (persist) draftChanged();
 }
@@ -583,6 +692,7 @@ async function openMode(nextMode, trigger) {
     dialog.show();
   }
   mode = nextMode;
+  guide.openMode(mode);
   const planning = mode === "plan";
   dialog.dataset.mode = mode;
   dialog.querySelector("#tourney-title").textContent = planning ? "Game plan" : "Tournament mode";
