@@ -85,6 +85,20 @@ export async function run(options, app) {
     const threeDKs = () => [...tournament.querySelectorAll(".tourney-row .tourney-name")]
       .filter(row => row.textContent === "Donkey Kong").length === 3;
     check(threeDKs(), "three independent DK batters can be entered without picking donor slots");
+    const editBatterStats = () => tournamentField(".tourney-edit-stats").click();
+    const statInput = key => tournamentField('.tourney-stat-fields input[name="' + key + '"]');
+    const applyBatterStats = () => tournamentField(".tourney-stat-apply").click();
+    editBatterStats();
+    const speed = statInput("speed"), runBar = statInput("running_bar");
+    check(speed.value === "" && speed.min === "0" && runBar.min === "1" && runBar.max === "10",
+      "tournament stats share Studio’s per-field ranges before loading a disc");
+    speed.value = "0";
+    runBar.value = "0";
+    applyBatterStats();
+    check(tournamentField(".tourney-stat-dialog").open && !runBar.validity.valid, "a zero display bar cannot be saved");
+    runBar.value = "10";
+    applyBatterStats();
+    check(tournamentField(".tourney-stats summary").textContent === "2 stat overrides", "both overrides apply to this DK");
     choose(tournamentField(".tourney-pos"), 7);
     check(tournamentField('.tourney-row[data-index="2"] b').textContent === "CF" &&
       tournamentField('.tourney-row[data-index="7"] b').textContent === "1B",
@@ -93,6 +107,25 @@ export async function run(options, app) {
     check(!threeDKs(), "Home has its own portable lineup");
     tournamentField('.tourney-tabs [data-side="Away"]').click();
     check(threeDKs(), "Away keeps all three DKs after switching back");
+    tournamentField('.tourney-row[data-index="1"]').click();
+    editBatterStats();
+    check(statInput("speed").value === "", "a second DK keeps its original running speed");
+    tournamentField(".tourney-stat-cancel").click();
+    tournamentField('.tourney-row[data-index="2"]').click();
+    editBatterStats();
+    check(statInput("speed").value === "0" && statInput("running_bar").value === "10",
+      "the edited DK retains zero and the upper bound across team changes");
+    statInput("running_bar").value = "";
+    applyBatterStats();
+    editBatterStats();
+    tournamentField(".tourney-stat-reset").click();
+    tournamentField(".tourney-stat-cancel").click();
+    editBatterStats();
+    check(statInput("speed").value === "0" && statInput("running_bar").value === "",
+      "clearing one field keeps the other after a canceled reset");
+    tournamentField(".tourney-stat-reset").click();
+    applyBatterStats();
+    check(!tournamentField(".tourney-stats summary"), "resetting all stats restores the original batter");
     tournamentField(".tourney-close").click();
     if (!plan.open) {
       teamTriggers[0].click();

@@ -171,6 +171,18 @@
     <div class="tourney-footer"><button type="button" class="tourney-build">Build tournament matchup…</button></div>
   </fieldset>
   <p role="status" aria-live="polite"></p>
+  <dialog class="tourney-stat-dialog" aria-labelledby="tourney-stat-title" aria-describedby="tourney-stat-note">
+    <form>
+      <header><h2 id="tourney-stat-title">Batter stats</h2></header>
+      <p id="tourney-stat-note"></p>
+      <div class="tourney-stat-fields"></div>
+      <div class="tourney-stat-actions">
+        <button type="button" class="tourney-stat-reset">Reset all</button>
+        <button type="button" class="tourney-stat-cancel">Cancel</button>
+        <button type="submit" class="tourney-stat-apply">Apply</button>
+      </div>
+    </form>
+  </dialog>
 </dialog>
 <script type="module" src="tournament.mjs"></script>
 <script src="app.js"></script>

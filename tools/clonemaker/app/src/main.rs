@@ -42,6 +42,11 @@ async fn source_info(app: AppHandle, source: usize) -> Result<SourceInfo, ApiErr
 }
 
 #[tauri::command]
+fn stat_schema() -> Vec<mssb_clone_core::stats::StatDefinition> {
+    mssb_clone_core::stats::schema()
+}
+
+#[tauri::command]
 async fn character_stats(
     app: AppHandle,
     character: usize,
@@ -202,6 +207,7 @@ fn main() {
             open_game,
             sources,
             source_info,
+            stat_schema,
             character_stats,
             anim_choices,
             next_free_slot,

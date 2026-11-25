@@ -71,6 +71,28 @@ const FIELDS: &[(&str, &str, usize, u8, u8)] = &[
     ("fielding_bar", "Fielding display bar", 0x3a, 1, 10),
 ];
 
+/// The editable range of a tournament stat before a player selects a disc.
+#[derive(Serialize)]
+pub struct StatDefinition {
+    key: &'static str,
+    label: &'static str,
+    min: u8,
+    max: u8,
+}
+
+/// Return the same fields and bounds used to validate and apply clone edits.
+pub fn schema() -> Vec<StatDefinition> {
+    FIELDS
+        .iter()
+        .map(|&(key, label, _, min, max)| StatDefinition {
+            key,
+            label,
+            min,
+            max,
+        })
+        .collect()
+}
+
 /// Check that each override names an editable stat and fits its supported range.
 pub fn validate(edits: &Overrides) -> Result<()> {
     for (key, &value) in edits {

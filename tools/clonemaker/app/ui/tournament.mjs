@@ -8,12 +8,14 @@ const editor = dialog.querySelector(".tourney-editor");
 const status = dialog.querySelector("[role=status]");
 const fieldset = dialog.querySelector("fieldset");
 const close = dialog.querySelector(".tourney-close");
+const statDialog = dialog.querySelector(".tourney-stat-dialog");
 const invoke = window.__TAURI__.core.invoke;
 const teams = Object.fromEntries(sides.map((s, t) => [s, {format, player:"", rows:positions.map((_,i) => ({
   source:i + t * 9, pos:i, captain:i === 0, star:false
 }))}]));
 const selected = {Away:0, Home:0};
 let side = "Away", names = new Map(), busy = false, dragging, opener;
+let statFields = new Map();
 
 function el(tag, text = "", className = "") {
   const e = document.createElement(tag);
@@ -88,6 +90,15 @@ function validateTextures(rows) {
     }
   }
 }
+function validateStats(stats, batter) {
+  if (!record(stats)) throw Error("Check the stat overrides for batter " + batter + ".");
+  for (const [key, value] of Object.entries(stats)) {
+    const field = statFields.get(key);
+    if (!field) throw Error("Unknown stat “" + key + "” for batter " + batter + ".");
+    if (!Number.isInteger(value) || value < field.min || value > field.max)
+      throw Error("Batter " + batter + "’s " + field.label + " must be a whole number from " + field.min + " to " + field.max + ".");
+  }
+}
 function validateTeam(team) {
   if (!record(team) || team.format !== format) throw Error("Choose a portable tournament team saved with Save team.");
   const player = typeof team.player === "string" && team.player.trim();
@@ -97,11 +108,10 @@ function validateTeam(team) {
     if (!record(r) || !names.has(r.source) || !integer(r.pos, 8) || typeof r.captain !== "boolean" || typeof r.star !== "boolean")
       throw Error("Check the character, field position and flags for batter " + (i + 1) + ".");
     if (r.label !== undefined && (typeof r.label !== "string" || r.label.length > 64)) throw Error("Use a player label of up to 64 characters.");
-    if (r.stats !== undefined && (!record(r.stats) || Object.values(r.stats).some(v => !integer(v,255))))
-      throw Error("Each imported stat override needs a whole-number value from 0 to 255.");
+    if (r.stats !== undefined) validateStats(r.stats, i + 1);
     return {source:r.source, pos:r.pos, captain:r.captain, star:r.star,
       ...(r.label?.trim() ? {label:r.label.trim()} : {}), ...(r.textures !== undefined ? {textures:r.textures} : {}),
-      ...(r.stats !== undefined ? {stats:r.stats} : {})};
+      ...(r.stats && Object.keys(r.stats).length ? {stats:r.stats} : {})};
   });
   if (new Set(rows.map(r=>r.pos)).size !== 9) throw Error("Assign all nine different field positions.");
   const captains = rows.filter(r=>r.captain);
@@ -271,6 +281,37 @@ function texturePanel(team, row, i) {
   }
   return area;
 }
+function editStats(row, i) {
+  const form = statDialog.querySelector("form");
+  const fields = statDialog.querySelector(".tourney-stat-fields");
+  statDialog.querySelector("h2").textContent = "Stats for " + title(row) + " · Batter " + (i + 1);
+  statDialog.querySelector("#tourney-stat-note").textContent = "Empty fields inherit " + names.get(row.source) + "’s original stats.";
+  fields.replaceChildren();
+  for (const {key, label, min, max} of statFields.values()) {
+    const input = el("input");
+    Object.assign(input, {type:"number", name:key, min, max, step:1, placeholder:"Original", value:row.stats?.[key] ?? ""});
+    const field = labeled(label, input);
+    field.append(el("small", min + "–" + max));
+    fields.append(field);
+  }
+  statDialog.querySelector(".tourney-stat-reset").onclick = () => {
+    for (const input of fields.querySelectorAll("input")) input.value = "";
+  };
+  statDialog.querySelector(".tourney-stat-cancel").onclick = () => statDialog.close();
+  form.onsubmit = event => {
+    event.preventDefault();
+    if (!form.reportValidity()) return;
+    const overrides = {};
+    for (const input of fields.querySelectorAll("input")) {
+      if (input.value !== "") overrides[input.name] = input.valueAsNumber;
+    }
+    if (Object.keys(overrides).length) row.stats = overrides;
+    else delete row.stats;
+    statDialog.close();
+    draw(".tourney-edit-stats");
+  };
+  statDialog.showModal();
+}
 function inspector(team) {
   const i = selected[side], row = team.rows[i];
   const panel = el("section","","tourney-inspector");
@@ -311,14 +352,23 @@ function inspector(team) {
   member.append(fields,confirmation);
   const customization = texturePanel(team,row,i);
   panel.append(member,customization);
-  if (Object.keys(row.stats||{}).length) {
+  const stats = el("div","","tourney-stats");
+  const overrides = Object.entries(row.stats || {});
+  stats.append(el("h4","Character stats"));
+  if (overrides.length) {
     const details = el("details");
-    details.append(el("summary",Object.keys(row.stats).length + " imported stat overrides"));
+    details.append(el("summary", overrides.length + " stat override" + (overrides.length === 1 ? "" : "s")));
     const list = el("ul");
-    for (const [key,value] of Object.entries(row.stats)) list.append(el("li",key+" · "+value));
+    for (const [key,value] of overrides) list.append(el("li",statFields.get(key).label + " · " + value));
     details.append(list);
-    customization.append(details);
+    stats.append(details);
+  } else {
+    stats.append(el("p","Using the character’s original stats."));
   }
+  const edit = button("Edit stats…", () => editStats(row,i), "tourney-edit-stats");
+  edit.setAttribute("aria-haspopup","dialog");
+  stats.append(edit);
+  customization.append(stats);
   return panel;
 }
 function draw(focus) {
@@ -355,7 +405,11 @@ for (const trigger of document.querySelectorAll("[data-open-tournament]")) {
     opener = trigger;
     dialog.showModal();
     await run(async () => {
-      if (!names.size) names = new Map((await invoke("sources")).map(s=>[s.id,s.name]));
+      if (!names.size) {
+        const [sources, fields] = await Promise.all([invoke("sources"), invoke("stat_schema")]);
+        names = new Map(sources.map(s=>[s.id,s.name]));
+        statFields = new Map(fields.map(f=>[f.key,f]));
+      }
       draw();
     });
   };
