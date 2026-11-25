@@ -148,8 +148,7 @@ fn read_at(f: &mut File, off: u64, size: usize, path: &Path) -> Result<Vec<u8>> 
     })?;
     Ok(b)
 }
-type SystemFiles = (Vec<u8>, Vec<u8>, Vec<u8>, Vec<u8>, Vec<u8>);
-fn read_system(f: &mut File, path: &Path) -> Result<SystemFiles> {
+fn read_boot(f: &mut File, path: &Path) -> Result<Vec<u8>> {
     let boot = read_at(f, 0, 0x440, path)?;
     if u32_at(&boot, 0x1c)? != 0xc2339f3d {
         return Err(Error::new(format!(
@@ -157,12 +156,64 @@ fn read_system(f: &mut File, path: &Path) -> Result<SystemFiles> {
             path.display()
         )));
     }
+    Ok(boot)
+}
+
+fn read_fst(f: &mut File, path: &Path, boot: &[u8]) -> Result<Vec<u8>> {
+    let offset = u32_at(boot, 0x424)? as u64;
+    let size = u32_at(boot, 0x428)? as usize;
+    if offset + size as u64 > f.metadata()?.len() {
+        return Err(Error::new(format!(
+            "{} has a truncated file system table",
+            path.display()
+        )));
+    }
+    read_at(f, offset, size, path)
+}
+
+/// Read a resource range from the caller's open USA revision 0 ISO.
+pub(crate) fn read_usa_iso_range(
+    f: &mut File,
+    path: &Path,
+    name: &str,
+    offset: u64,
+    size: usize,
+) -> Result<Vec<u8>> {
+    let boot = read_boot(f, path)?;
+    if &boot[..6] != b"GYQE01" || boot[7] != 0 {
+        return Err(Error::new(
+            "Choose a USA revision 0 Mario Superstar Baseball ISO.".into(),
+        ));
+    }
+    let fst = read_fst(f, path, &boot)?;
+    let entries = fst_paths(&fst)?;
+    let length = f.metadata()?.len();
+    if entries
+        .iter()
+        .any(|(e, _)| u64::from(e.offset) + u64::from(e.size) > length)
+    {
+        return Err(Error::new(format!("{} is truncated", path.display())));
+    }
+    let (entry, _) = entries
+        .iter()
+        .find(|(_, p)| p == name)
+        .ok_or_else(|| Error::new(format!("{name} not in fst.bin")))?;
+    if offset
+        .checked_add(size as u64)
+        .is_none_or(|end| end > u64::from(entry.size))
+    {
+        return Err(Error::new(format!("{name} is truncated")));
+    }
+    read_at(f, u64::from(entry.offset) + offset, size, path)
+}
+
+type SystemFiles = (Vec<u8>, Vec<u8>, Vec<u8>, Vec<u8>, Vec<u8>);
+fn read_system(f: &mut File, path: &Path) -> Result<SystemFiles> {
+    let boot = read_boot(f, path)?;
     let dol_off = u32_at(&boot, 0x420)? as u64;
-    let fst_off = u32_at(&boot, 0x424)? as u64;
-    let fst_size = u32_at(&boot, 0x428)? as usize;
+    let fst = read_fst(f, path, &boot)?;
     let ah = read_at(f, 0x2440, 0x20, path)?;
     let apl_size = 0x20 + u32_at(&ah, 0x14)? as usize + u32_at(&ah, 0x18)? as usize;
-    let fst = read_at(f, fst_off, fst_size, path)?;
     let dh = read_at(f, dol_off, 0x100, path)?;
     let dol = read_at(f, dol_off, dol_size(&dh)?, path)?;
     Ok((
@@ -481,5 +532,15 @@ mod tests {
         .unwrap_err();
         assert_eq!(err.message, "cancelled");
         assert_eq!(fs::read(root.join("files/x")).unwrap(), b"hello");
+
+        // The team inspector must keep reading the selected ISO if a later build replaces its path.
+        let mut selected = File::open(&iso).unwrap();
+        let next = tempfile::NamedTempFile::new_in(temp.path()).unwrap();
+        next.persist(&iso).unwrap();
+        assert_eq!(
+            read_usa_iso_range(&mut selected, &iso, "x", 1, 3).unwrap(),
+            b"ell"
+        );
+        assert!(read_usa_iso_range(&mut selected, &iso, "x", 4, 2).is_err());
     }
 }

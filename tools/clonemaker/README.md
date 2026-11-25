@@ -73,7 +73,7 @@ under **Advanced options**, or in the right-click menu, shows it again.
   the character (for example **Mario · 4 clones**), is about the character these clones copy.
 - **Right-click** a clone, a character or the stage for shortcuts (remove a clone, export, turn the
   model, …). **Start over…** clears every clone and choice after asking; your game is never touched.
-- **Stats** edits the selected clone.
+- **Stats** edits the selected clone. **Game plan** saves teams for a private Project Rio matchup.
 
 ## 3. Set up your clones
 
@@ -153,6 +153,45 @@ Use the stats checkbox in **Advanced options** to select that baseline.
 Each clone keeps its own overrides, including clones with painted textures.
 The four display bars control the menu. Edit the corresponding gameplay fields to change play.
 Use **Reset all** and **Apply** to clear overrides for the selected clone.
+
+## Save two teams for Project Rio
+
+Use [Project Rio 2.2.0](https://github.com/ProjectRio/ProjectRio/releases/tag/2.2.0) for this workflow.
+Both players need the same finished game image on their own machines.
+
+1. Open **Game plan** in Clone Maker.
+2. Select **Choose finished ISO** and choose the game you will play.
+3. Enter each player's Rio lobby name.
+4. Select nine character slots in batting order for each team.
+5. Assign each fielding position once.
+6. Choose one captain from the game's captain slots.
+7. The picker shows each slot’s original character. Enter a label if a clone occupies that slot in your finished ISO.
+8. Select **Save both for Rio** and share the resulting matchup JSON with the other player.
+
+To prepare teams independently, each player selects **Save team** for their own nine players.
+Use **Load team** on each side to assemble the matchup.
+Clone Maker verifies each saved team's ISO SHA-256 before loading it.
+Slot numbers identify clones. The finished ISO supplies their handedness, textures and gameplay stats.
+
+On each computer:
+
+1. Open **Game plan** and choose the finished ISO.
+2. Select **Load both teams** and open the shared matchup.
+3. Compare the displayed matchup ID with the other player's ID.
+4. Close the game in Rio.
+5. Select **Use in Rio** and choose the **HudFiles** directory in Rio's user folder.
+
+Clone Maker saves the previous `hud.json` beside the new file before replacing it.
+Keep the shared matchup separately because Rio updates its HUD file during play.
+To reuse teams from an existing Rio game, open its `hud.json` with **Load both teams**.
+Check the slots before saving. Rio does not record the Clone Maker ISO hash in its own files.
+The import starts a fresh game and reads handedness from the selected ISO.
+
+In Rio, host an unlisted private lobby with **No Game Mode**.
+Assign the two players to controller ports and enable **Fast Reset from HUD**.
+Check the lobby acknowledgement on both machines before starting Exhibition.
+Compare the lineup, fielding positions and clone artwork during play.
+Rio's [release notes](https://www.projectrio.online/version-history) describe temporary menu graphics during Fast Reset.
 
 ## Your own textures
 
@@ -236,7 +275,8 @@ with several characters, each clone follows the character it copies.
 - **On the select screen, the big 3D character behind the team shows the cloned character in
   its own colours**, not the clone's colour (those menu models can't be recoloured yet).
 - **Not every character has been played as a clone in Rio yet.** Mario, Peach, King Boo and DK have.
-- **Rio's online and ranked modes** expect the original game. Play the clones game offline.
+- The paired-team workflow targets private **No Game Mode** play. Ranked modes expect the original game.
+  The Rio 2.2.0 loader and lineup generator have been checked. Live netplay with custom artwork still needs two-player verification.
 
 ## Troubleshooting
 

@@ -86,9 +86,11 @@ pub(crate) fn validate(edits: &Overrides) -> Result<()> {
     Ok(())
 }
 
-/// Read [batting hand, throwing hand] for all 54 roster IDs from the final game.
-pub fn roster_hands(disc: &crate::disc::Disc) -> Result<Vec<[u8; 2]>> {
-    hands_from_table(&disc.read("ZZZZ.dat", OFFSET, SIZE)?)
+/// Read [batting hand, throwing hand] for all 54 roster IDs from the caller's open final ISO.
+pub fn roster_hands(file: &mut std::fs::File, path: &std::path::Path) -> Result<Vec<[u8; 2]>> {
+    hands_from_table(&crate::disc::read_usa_iso_range(
+        file, path, "ZZZZ.dat", OFFSET, SIZE,
+    )?)
 }
 
 fn hands_from_table(table: &[u8]) -> Result<Vec<[u8; 2]>> {

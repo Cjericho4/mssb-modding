@@ -1,0 +1,16 @@
+#rio-teams { color:var(--text, #eee); background:var(--panel,#20212a); border:1px solid var(--border,#555); border-radius:12px; width:min(88rem,95vw); max-height:90vh; padding:1.2rem; overflow:auto; }
+#rio-teams::backdrop { background: rgb(0 0 0 / 70%); }
+#rio-teams header,#rio-teams .team-actions { display:flex; align-items:center; gap:.7rem; flex-wrap:wrap; }
+#rio-teams header { justify-content:space-between; }
+#rio-teams fieldset { border:0; padding:0; min-width:0; }
+#rio-teams p,#rio-teams label { margin:.55rem 0; }
+#rio-teams .team-image { overflow-wrap:anywhere; font-family:monospace; }
+#rio-teams .team-sheets { display:grid; gap:1rem; grid-template-columns:repeat(auto-fit,minmax(min(100%,27rem),1fr)); }
+#rio-teams table { width:100%; border-collapse:collapse; margin:.65rem 0; }
+#rio-teams th,#rio-teams td { text-align:left; padding:.15rem; }
+#rio-teams select,#rio-teams .roster-label { max-width:100%; width:100%; }
+#rio-teams .roster-label { margin-top:.15rem; }
+#rio-teams .team-actions { margin-top:1rem; }
+#rio-teams [hidden] { display:none; }
+#rio-teams .team-close { margin-left:auto; }
+#rio-teams [role=status] { min-height:1.4em; overflow-wrap:anywhere; }

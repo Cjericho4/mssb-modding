@@ -5,11 +5,12 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>MSSB Clone Maker</title>
 <link rel="stylesheet" href="theme.css">
+<link rel="stylesheet" href="rio-teams.css">
 </head>
 <body>
 <header class="top">
   <span class="app">MSSB Clone Maker</span>
-  <nav class="pages" aria-label="Pages"><button class="on" aria-current="page"><svg class="ic" width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="8" cy="5.5" r="2.6"/><path d="M3 14c.6-3 2.6-4.6 5-4.6s4.4 1.6 5 4.6"/></svg><span>Studio</span></button><button disabled title="Coming in a later version"><svg class="ic" width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="2" y="2" width="5" height="5" rx="1"/><rect x="9" y="2" width="5" height="5" rx="1"/><rect x="2" y="9" width="5" height="5" rx="1"/><rect x="9" y="9" width="5" height="5" rx="1"/></svg><span>Game plan</span><em class="soon">Later</em></button><button id="nav-stats" disabled aria-haspopup="dialog" aria-controls="clone-stats"><svg class="ic" width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 13.5V9M8 13.5V3M13 13.5V6.5"/></svg><span>Stats</span></button></nav>
+  <nav class="pages" aria-label="Pages"><button class="on" aria-current="page"><svg class="ic" width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="8" cy="5.5" r="2.6"/><path d="M3 14c.6-3 2.6-4.6 5-4.6s4.4 1.6 5 4.6"/></svg><span>Studio</span></button><button data-open-teams><svg class="ic" width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="2" y="2" width="5" height="5" rx="1"/><rect x="9" y="2" width="5" height="5" rx="1"/><rect x="2" y="9" width="5" height="5" rx="1"/><rect x="9" y="9" width="5" height="5" rx="1"/></svg><span>Game plan</span></button><button id="nav-stats" disabled aria-haspopup="dialog" aria-controls="clone-stats"><svg class="ic" width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 13.5V9M8 13.5V3M13 13.5V6.5"/></svg><span>Stats</span></button></nav>
   <div class="game"><div class="pill" id="pill" role="status"><i></i><span>No game yet</span></div><input id="game-path" readonly tabindex="-1" aria-label="Game path"></div>
   <button id="btn-iso" class="tbtn">Choose your game (.iso)…</button>
   <button id="btn-dir" class="tbtn">or a folder…</button>
@@ -19,7 +20,7 @@
 <nav class="rail" aria-label="Clones">
   <div id="roster"></div>
   <section id="checks" class="checks" aria-live="polite"><h2>Checks<em id="checks-count"></em></h2><p id="checks-text"></p>
-    <button disabled title="Coming in a later version"><svg class="ic" width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="2" y="2" width="5" height="5" rx="1"/><rect x="9" y="2" width="5" height="5" rx="1"/><rect x="2" y="9" width="5" height="5" rx="1"/><rect x="9" y="9" width="5" height="5" rx="1"/></svg>See the whole game plan<em class="soon">Later</em></button></section>
+    <button data-open-teams><svg class="ic" width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="2" y="2" width="5" height="5" rx="1"/><rect x="9" y="2" width="5" height="5" rx="1"/><rect x="2" y="9" width="5" height="5" rx="1"/><rect x="9" y="9" width="5" height="5" rx="1"/></svg>See the whole game plan</button></section>
   <div class="rail-foot"><button id="btn-group" class="another" title="Clone another character"><svg class="ic" width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 3v10M3 8h10"/></svg><span>Clone another character</span></button>
     <button id="btn-dock" class="tool" aria-expanded="false" title="Show names and checks"><svg class="ic" width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 3l5 5-5 5"/></svg></button></div>
 </nav>
@@ -145,6 +146,18 @@
     </section>
   </section>
 </template>
+<dialog id="rio-teams" aria-labelledby="rio-team-title">
+  <header><h2 id="rio-team-title">Teams for Project Rio</h2><button class="team-close">Close</button></header>
+  <fieldset><p>Choose the finished .iso that both players will open in Rio.</p>
+    <div class="team-pick"></div><p class="team-image"></p><div class="team-sheets"></div>
+    <div class="team-actions" hidden></div>
+  </fieldset><p role="status" aria-live="polite"></p>
+  <p>Share the same matchup file. Both players load it here to check their ISO and lineups.
+  Compare the matchup IDs, then select <strong>Use in Rio</strong> on both computers with the game closed.
+  Choose Rio’s <strong>HudFiles</strong> folder. Clone Maker saves the previous HUD there.
+  In a private No Game Mode lobby, enable Fast Reset from HUD. Confirm the lineups when play begins.</p>
+</dialog>
 <script src="app.js"></script>
+<script type="module" src="rio-teams.mjs"></script>
 </body>
 </html>

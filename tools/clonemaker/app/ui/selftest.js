@@ -68,6 +68,33 @@ export async function run(options, app) {
     $("welcome-later").click();
     check($("welcome").hidden, "Not now closes the launch dialog");
 
+    const plan = $("rio-teams");
+    const teamTriggers = document.querySelectorAll("[data-open-teams]");
+    const { showTeamImage } = await import("./rio-teams.mjs");
+    teamTriggers[0].click();
+    await waitFor(() => plan.open, "Game plan opens");
+    check(plan.querySelector(".team-actions").hidden, "team export waits for the finished ISO");
+    // Supply the native picker's result, then edit both teams through the regular controls.
+    showTeamImage({ name: "Team test.iso", sha256: "a".repeat(64), hands: Array(54).fill(0) });
+    const sheets = plan.querySelectorAll(".team-sheets section");
+    check(sheets.length === 2 && [...sheets].every((side) => side.querySelectorAll("tbody tr").length === 9),
+      "Game plan has nine batters for each side");
+    const away = sheets[0].querySelector("select");
+    const nickname = sheets[0].querySelector(".roster-label");
+    nickname.value = "Blue Mario";
+    nickname.dispatchEvent(new Event("input"));
+    choose(away, 42);
+    check(nickname.value === "", "changing a character slot clears its previous clone label");
+    sheets[1].querySelector("label input").value = "Second player";
+    sheets[1].querySelector("label input").dispatchEvent(new Event("input"));
+    plan.querySelector(".team-close").click();
+    teamTriggers[1].click();
+    await waitFor(() => plan.open, "the roster shortcut reopens Game plan");
+    check(plan.querySelector(".team-sheets section select").value === "42" &&
+      plan.querySelectorAll(".team-sheets section")[1].querySelector("label input").value === "Second player",
+      "both players keep their team edits when Game plan reopens");
+    plan.querySelector(".team-close").click();
+
     // The roster becomes chips above the stage at the minimum supported width.
     await resizeTo(640, 560);
     check(chips() && fits(), "640 px window uses chips without horizontal overflow");

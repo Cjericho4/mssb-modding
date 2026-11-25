@@ -2,6 +2,7 @@
 //! core (`tools/clonemaker/core`, `api::Core`) as described in `tools/clonemaker/API.md`.
 #![cfg_attr(windows, windows_subsystem = "windows")]
 
+mod rio_teams;
 mod selftest;
 
 use std::path::PathBuf;
@@ -191,6 +192,9 @@ fn main() {
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
+            rio_teams::rio_team_image,
+            rio_teams::save_rio_roster,
+            rio_teams::install_rio_matchup,
             open_game,
             sources,
             source_info,
