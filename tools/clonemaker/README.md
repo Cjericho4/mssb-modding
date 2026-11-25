@@ -30,6 +30,8 @@ changes your original game. It saves a new `.iso` next to it.
 
 ## What you need
 
+Game Plan and Tournament Mode can exchange team sheets using only the app. To build and play a game, you need:
+
 - Your own copy of **Mario Superstar Baseball (USA)** as an `.iso` file (game ID GYQE01).
 - **Project Rio** or **Dolphin** to play it.
 - About **3.5 GB of free disk space** while the new game is being made (it ends up using 1.5 GB).
@@ -50,7 +52,7 @@ changes your original game. It saves a new `.iso` next to it.
 
 ## 2. Choose your game
 
-The first time you open the app it asks for your game. Click **Choose your game (.iso)…** and pick
+Clone Maker opens in Studio. Choose **Game Plan → Plan my team** to start a team sheet. To make clones in Studio, choose **Choose game image (.iso)…** and pick
 your Mario Superstar Baseball `.iso` (an extracted game folder works too: **A folder…**). The dot at
 the top turns green, **GYQE01 ready**, or the app says what's wrong (wrong file, not the USA version,
 already patched, …). You can choose a different game later from the top bar.
@@ -73,7 +75,7 @@ under **Advanced options**, or in the right-click menu, shows it again.
   the character (for example **Mario · 4 clones**), is about the character these clones copy.
 - **Right-click** a clone, a character or the stage for shortcuts (remove a clone, export, turn the
   model, …). **Start over…** clears every clone and choice after asking; your game is never touched.
-- **Game plan** and **Stats** are marked *Later*: they're coming in a future version.
+- **Stats** edits the selected clone. **Game plan** saves teams for a private Project Rio matchup.
 
 ## 3. Set up your clones
 
@@ -139,6 +141,50 @@ colours and a green Bowser on a Shy Guy slot.
 A slot can only be used once in the whole game, and a character you clone can't also be replaced.
 Slots another character's clones already use are greyed out with *(used by another character)*.
 **Advanced options** apply to every character.
+
+## Edit one clone's stats
+
+1. Select the clone in the dock.
+2. Open **Stats**.
+3. Enter the values you want to change.
+4. Select **Apply**.
+5. Build the game with **Create Patched Game**.
+
+Each blank field inherits its value from the source character or the replaced slot.
+Use the stats checkbox in **Advanced options** to select that baseline.
+Each clone keeps its own overrides, including clones with painted textures.
+The four display bars control the menu. Edit the corresponding gameplay fields to change play.
+Use **Reset all** and **Apply** to clear overrides for the selected clone.
+
+## Save two teams for Project Rio
+
+### Send your team to a tournament organizer
+
+1. Open **Game Plan** and choose **Plan my team**. Pick characters in batting order or drop them onto field positions.
+2. Click a player's name in the lineup or on the field to edit it. Both views update together.
+3. To give a player a custom look, select their portrait and add your painted Studio PNGs under **Custom textures**.
+4. Choose **Export team…**, name your team in the save dialog, and send the resulting `.team.json` file to the organizer.
+
+You can export an unfinished lineup. The file contains only the selected team’s character choices, batting order, positions, names, captain and superstar choices, optional stat edits, and custom texture pixels. Each player supplies their own original game when it is time to build.
+
+### Add a player's team to a matchup
+
+1. Open **Tournament Mode** and choose **Away** or **Home**.
+2. Choose **Import team into Away…** or **Import team into Home…**. Open the player's `.team.json` file.
+3. If the selected side already has a team, review the replacement prompt. The other side keeps its lineup.
+4. To reuse an imported team later, choose it from **Team library** and load it into either side.
+
+For a file that contains both lineups, choose **Matchup files → Import matchup…**.
+
+### Play the matchup in Project Rio
+
+1. Fill all nine spots on each side, choose a captain for each team, and enter both Rio lobby names.
+2. Save the matchup under **Matchup files** and share it. On each computer, use **Build tournament matchup…** with the same clean USA ISO.
+3. Open **Game Plan → Open finished-game roster…**. Choose the built `matchup.iso`, select **Load matchup…**, and open the generated `hud.json`.
+4. Compare the matchup IDs. Close Rio. Choose **Use in Rio…** and select the **HudFiles** folder on each computer. Clone Maker backs up the previous HUD there.
+5. Have both players join a private **No Game Mode** lobby in Project Rio 2.2.0. Assign controller ports before enabling **Fast Reset**. If the ports change, turn Fast Reset off and on again.
+
+Rio updates its HUD during play. Keep the portable matchup file to reuse both starting lineups.
 
 ## Your own textures
 
@@ -222,7 +268,9 @@ with several characters, each clone follows the character it copies.
 - **On the select screen, the big 3D character behind the team shows the cloned character in
   its own colours**, not the clone's colour (those menu models can't be recoloured yet).
 - **Not every character has been played as a clone in Rio yet.** Mario, Peach, King Boo and DK have.
-- **Rio's online and ranked modes** expect the original game. Play the clones game offline.
+- The paired-team workflow targets private **No Game Mode** play. Ranked modes expect the original game.
+  A live Rio 2.2.0 test verified all 18 lineup slots and positions on Mac and Linux.
+  Both players saw the blue and green Mario clones. Both games loaded each clone's running speed, running bar and handedness.
 
 ## Troubleshooting
 

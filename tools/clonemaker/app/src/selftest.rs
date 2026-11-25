@@ -23,6 +23,13 @@ pub struct Options {
 }
 
 impl Options {
+    pub(crate) fn scratch_dir(&self) -> Result<Option<&std::path::Path>, String> {
+        if self.selftest && self.dir.is_none() {
+            return Err("Could not create the self-test scratch directory.".into());
+        }
+        Ok(self.dir.as_deref())
+    }
+
     pub fn from_args() -> Self {
         let args: Vec<String> = std::env::args().collect();
         if !args.iter().any(|a| a == "--selftest") {

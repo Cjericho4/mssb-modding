@@ -50,7 +50,7 @@ exactly the source's defaults (`region_selection`). `fraction` is 0..1 of the wh
 | `create` | `job` | starts the job; results come as events | `run_job` |
 | `cancel` | | stops the running job at its next progress step | `run_job(cancel=)` |
 
-`job` = `{ game, output, source, clones: [{ slot, colour, textures?, anims?, source?, regions? }], keeplum, regions: [index],
+`job` = `{ game, output, source, clones: [{ slot, colour, textures?, anims?, source?, regions?, stats? }], keeplum, regions: [index],
 ui_source, copy_stats, keep_colour_word, keep_work }` (`keep_colour_word`: keep the donors' retail name-box colour, #19).
 
 `export_gltf` writes the same file as the Python reference given the same character and options
@@ -68,6 +68,11 @@ a slot that is also one of the job's cloned characters ("X is being cloned, so i
 replaced"). With `ui_source: false`, a donor family bank used by clones of several characters gets
 all of their voices (one merge per character, one ARAM check for the whole set). The `done` hint
 has one sentence per character.
+
+Each `clones[].stats` object contains sparse integer overrides keyed by field name.
+For example, `{"speed":85,"charge_power":90}` changes two bytes on that clone.
+Use `character_stats(character)` for field names, labels, bounds and inherited values.
+When `copy_stats` is enabled, query the source. Otherwise query the destination slot.
 
 `clones[].textures` (optional, #37; no Python reference) is a folder of painted PNGs made by
 `export_textures` for the job's source. Each edited PNG replaces that body texture in every copy

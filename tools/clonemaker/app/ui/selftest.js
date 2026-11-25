@@ -9,7 +9,7 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const painted = () => new Promise((r) => requestAnimationFrame(() => setTimeout(r, 0)));
 
 const WIDGETS = ["pill", "btn-iso", "btn-dir", "game-path", "status", "source", "regions-box", "rows", "btn-add",
-  "btn-export", "btn-blender", "blender", "blender-source", "blender-all", "blender-go", "blender-cancel", "btn-adv", "adv", "chk-ui", "chk-colour", "chk-stats", "keeplum", "chk-keep", "out-path", "btn-out", "btn-go",
+  "btn-export", "btn-blender", "blender", "blender-source", "blender-all", "blender-go", "blender-cancel", "btn-stats", "nav-stats", "stats-fields", "btn-adv", "adv", "chk-ui", "chk-colour", "chk-stats", "keeplum", "chk-keep", "out-path", "btn-out", "btn-go",
   "roster", "clone-name", "btn-log", "log-drawer", "btn-enlarge", "run-box", "progress-bar", "btn-cancel", "preview-chip", "preview-caption", "img-before", "img-after", "log"];
 
 export async function run(options, app) {
@@ -62,11 +62,482 @@ export async function run(options, app) {
     say(`window ${innerWidth}x${innerHeight}, device pixel ratio ${devicePixelRatio}, screen ${screen.availWidth}x${screen.availHeight}`);
     check($("btn-go").disabled && $("source").disabled && $("btn-export").disabled && $("btn-blender").disabled && !$("btn-iso").disabled, "inputs wait for a game");
     await shot("empty");
-    app.showWelcome();
-    check(!$("welcome").hidden && document.activeElement === $("welcome-iso"), "the launch dialog asks for the game");
+    const plan = $("rio-teams");
+    const tournament = $("tournament-plan");
+    const tournamentField = selector => tournament.querySelector(selector);
+    const directTournament = document.querySelector(".pages [data-open-tournament]");
+    const directPlan = document.querySelector(".pages [data-open-plan]");
+    const finishedRoster = tournamentField("[data-open-teams]");
+    const ready = mode => tournament.open && tournament.dataset.mode === mode && tournamentField(".tourney-source") && !tournamentField("fieldset").disabled;
+    check(!$("welcome").open && !tournament.open && !plan.open && document.querySelector(".pages [data-open-studio]").getAttribute("aria-current") === "page",
+      "Clone Maker starts in Studio with no planning prompt");
+    directPlan.click();
+    check($("welcome").open && document.activeElement === $("welcome-plan") && !$("welcome-tournament").disabled,
+      "entering Game Plan opens the team setup chooser without a game disc");
     await shot("welcome");
     $("welcome-later").click();
-    check($("welcome").hidden, "Not now closes the launch dialog");
+    await waitFor(() => !$("welcome").open && !tournament.open && document.activeElement === directPlan,
+      "dismissing team setup returns to Studio and the Game Plan button");
+    directPlan.click();
+    $("welcome-tournament").click();
+    await waitFor(() => ready("tournament") && !$("welcome").open, "Tournament opens from the Game Plan chooser");
+    tournamentField(".tourney-close").click();
+    await waitFor(() => !tournament.open && document.activeElement === directPlan, "return to Studio");
+    directPlan.click();
+    const drop = (source, target) => {
+      const transfer = new DataTransfer();
+      const send = (el, type) => el.dispatchEvent(new DragEvent(type, {
+        dataTransfer: transfer, bubbles: true, cancelable: true
+      }));
+      send(source, "dragstart");
+      check(!send(target, "dragover"), "the target accepts this drag");
+      send(target, "drop");
+      send(source, "dragend");
+    };
+    $("welcome-plan").click();
+    await waitFor(() => ready("plan"), "one click from welcome opens the editable Game plan without a disc");
+    check(!$("welcome").open && !plan.open && !tournamentField(".tourney-team-picker") && tournamentField(".tourney-build").hidden,
+      "both roster drafts are available before tournament setup");
+    const cachedFaces = await invoke("load_roster_portraits", {sourcePath:null});
+    const faceSlots = selector => [...tournament.querySelectorAll(selector + " .roster-face")];
+    const hasSourceImage = face => {
+      const img = face.querySelector("img");
+      const encoded = cachedFaces[Number(face.dataset.source)];
+      return img?.complete && img.naturalWidth === 50 && img.naturalHeight === 50 &&
+        img.src === "data:image/png;base64," + encoded;
+    };
+    const fieldFaces = () => faceSlots(".tourney-fielder");
+    const batterFaces = () => faceSlots(".tourney-row");
+    const openSlots = () => tournament.querySelectorAll(".tourney-row .tourney-open-face").length;
+    const switchSide = side => tournamentField('.tourney-tabs [data-side="' + side + '"]').click();
+    const confirmReplacement = async () => {
+      tournamentField(".tourney-confirm").click();
+      await waitFor(() => !tournamentField("fieldset").disabled, "the confirmed roster operation to finish");
+    };
+    const importSheet = async (sheet, name = "Practice.team.json", selector = ".tourney-import input") => {
+      const files = tournamentField(selector);
+      const transfer = new DataTransfer();
+      transfer.items.add(new File([JSON.stringify(sheet)], name, {type:"application/json"}));
+      files.files = transfer.files;
+      files.dispatchEvent(new Event("change", {bubbles:true}));
+      await waitFor(() => !tournamentField("fieldset").disabled, "the sheet import to finish reading");
+    };
+    check(openSlots() === 9 && fieldFaces().length === 9 && !tournamentField(".tourney-lobby").value,
+      "a new Away sheet has nine unassigned spots and a blank Rio name");
+    switchSide("Home");
+    check(openSlots() === 9, "a fresh Home sheet is also empty");
+    switchSide("Away");
+    const firstPick = () => tournamentField('.draft-player-choice[data-character="0"]').click();
+    firstPick(); firstPick();
+    check(openSlots() === 7 && tournamentField('.tourney-row[data-index="2"] .tourney-pick').getAttribute("aria-pressed") === "true",
+      "choosing two players from the pool fills consecutive spots, including a repeat character");
+    tournamentField(".tourney-new-team").click();
+    tournamentField(".tourney-keep").click();
+    check(openSlots() === 7, "canceling a new sheet preserves the existing roster");
+    tournamentField(".tourney-new-team").click();
+    await confirmReplacement();
+    check(openSlots() === 9, "starting a new team restores nine empty spots");
+    await shot("empty_team_sheet");
+    for (let i = 0; i < 9; i++) {
+      tournamentField('.tourney-row[data-index="' + i + '"] .tourney-pick').click();
+      choose(tournamentField(".tourney-source"), i);
+    }
+    tournamentField('.tourney-row[data-index="0"] .tourney-pick').click();
+    check(fieldFaces().length === 9 && batterFaces().length === 9 &&
+      faceSlots(".draft-player-choice").length === 54 && faceSlots(".tourney-inspector").length === 1,
+      "the field, batting order, character pool and selected batter each have a portrait slot");
+    if (cachedFaces.length) {
+      await waitFor(() => [...fieldFaces(), ...batterFaces(), ...faceSlots(".draft-player-choice"), ...faceSlots(".tourney-inspector")].every(hasSourceImage),
+        "all locally cached headshots decode in the correct character slots");
+    }
+    await shot("game_plan_faces");
+    await resizeTo(640, 560);
+    check(fits() && tournament.scrollWidth <= tournament.clientWidth + 1,
+      "Game Plan fits the minimum window width");
+    await shot("game_plan_narrow");
+    await resizeTo(1320, 780);
+    const findDK = () => tournamentField('.draft-player-choice[data-character="2"]');
+    const searchPool = tournamentField('.draft-player-pool input[type="search"]');
+    searchPool.value = "DK";
+    searchPool.dispatchEvent(new Event("input", {bubbles:true}));
+    check(findDK() && !tournamentField('.draft-player-choice[data-character="0"]'), "DK search filters the character pool");
+    choose(tournamentField(".tourney-source"),20);
+    findDK().click();
+    drop(findDK(),tournamentField('.tourney-row[data-index="1"]'));
+    drop(findDK(),tournamentField('.tourney-fielder[data-pos="2"]'));
+    check(tournamentField('.tourney-row[data-index="2"] .tourney-pick').getAttribute("aria-pressed") === "true" &&
+      !tournamentField(".tourney-captain").checked && tournamentField(".tourney-lobby").value === "",
+      "the planner accepts repeat characters without a captain or a lobby name");
+    const slot = (area, i) => tournamentField(`.tourney-${area}[data-index="${i}"]`);
+    const slotName = (area, i) => slot(area, i).querySelector(".tourney-name");
+    const editName = (area, i) => {
+      slotName(area, i).click();
+      return slot(area, i).querySelector("input.tourney-name-edit");
+    };
+    const inputName = (input, value) => {
+      input.value = value;
+      input.dispatchEvent(new Event("input", {bubbles:true}));
+    };
+    const pressNameKey = (input, key) => input.dispatchEvent(new KeyboardEvent("keydown", {key, bubbles:true, cancelable:true}));
+    const inspectorShows = (label, display) => tournamentField(".tourney-label").value === label &&
+      tournamentField(".tourney-batter-caption h3").textContent === display;
+    const guidePanel = () => tournamentField("#planner-guide-panel");
+    const guideText = selector => guidePanel().querySelector(selector).textContent.trim();
+    const guideAction = selector => guidePanel().querySelector(selector).click();
+    const openGuide = () => tournamentField(".planner-guide-start").click();
+    const checkGuide = mode => {
+      const rosterNames = () => [...tournament.querySelectorAll(".tourney-row .tourney-name")].map(name => name.textContent).join("|");
+      const before = rosterNames();
+      check(guidePanel().hidden, mode + " lets the player choose whether to start its walkthrough");
+      openGuide();
+      const first = guideText(".planner-guide-title");
+      const progress = guideText(".planner-guide-progress");
+      guideAction(".planner-guide-next");
+      check(!guidePanel().hidden && guideText(".planner-guide-title") !== first && guideText(".planner-guide-progress") !== progress,
+        mode + " advances the walkthrough title and progress");
+      guideAction(".planner-guide-prev");
+      check(guideText(".planner-guide-title") === first && guideText(".planner-guide-progress") === progress,
+        mode + " can return to the previous step");
+      guideAction(".planner-guide-close");
+      check(guidePanel().hidden, mode + " permits early dismissal");
+      openGuide();
+      const steps = new Set();
+      while (!guidePanel().hidden && steps.size < 20) {
+        const title = guideText(".planner-guide-title");
+        if (!title || steps.has(title)) break;
+        steps.add(title);
+        guideAction(".planner-guide-next");
+      }
+      check(guidePanel().hidden && steps.size >= 4 && rosterNames() === before,
+        mode + " completes its walkthrough without editing the roster");
+      return first;
+    };
+    const firstPlanStep = checkGuide("Game Plan");
+    // A previously exported team can spell out a stock name as an explicit label.
+    // An actual nickname, unlike that stock label, should survive a substitution.
+    slot("row",3).querySelector(".tourney-pick").click();
+    const originalSource = tournamentField(".tourney-source").value;
+    choose(tournamentField(".tourney-source"), 17);
+    inputName(tournamentField(".tourney-label"), "Birdo");
+    choose(tournamentField(".tourney-source"), 15);
+    check(slotName("row",3).textContent === "Toadette" && slotName("fielder",3).textContent === "Toadette" &&
+      inspectorShows("", "Toadette"), "substituting Toadette for a roster labeled Birdo updates both default names");
+    inputName(tournamentField(".tourney-label"), "Slugger");
+    choose(tournamentField(".tourney-source"), originalSource);
+    check(inspectorShows("Slugger", "Slugger"), "an intentional nickname survives changing character");
+    inputName(tournamentField(".tourney-label"), "");
+    openGuide();
+    const fieldName = editName("fielder", 1);
+    check(document.activeElement === fieldName && fieldName.maxLength === 64, "clicking the name of an unselected fielder focuses its name editor");
+    inputName(fieldName, "Blu DK");
+    fieldName.setRangeText("e", 3, 3, "end");
+    fieldName.dispatchEvent(new Event("input", {bubbles:true}));
+    check(document.activeElement === fieldName && fieldName.selectionStart === 4 && fieldName.selectionEnd === 4 &&
+      slotName("row",1).textContent === "Blue DK" && inspectorShows("Blue DK","Blue DK") &&
+      slotName("row",0).textContent === "Donkey Kong",
+      "Game Plan mirrors a mid-string field edit in the lineup and inspector without moving the caret or renaming the other DK");
+    pressNameKey(fieldName, "Enter");
+    check(document.activeElement === slotName("fielder",1), "Enter finishes the edit and returns keyboard focus to the field name");
+    check(!guidePanel().hidden && guideText(".planner-guide-title") === firstPlanStep,
+      "the walkthrough stays open while the user renames an actual fielder");
+    guideAction(".planner-guide-next");
+    slot("row",2).querySelector(".tourney-pick").click();
+    tournamentField(".tourney-switch-mode").click();
+    await waitFor(() => ready("tournament") && tournamentField(".tourney-team-picker"), "Game plan hands both drafts to Tournament mode");
+    checkGuide("Tournament");
+    say("checked both opt-in walkthroughs, real roster editing, mode switching, and finishing or closing each guide");
+    if (cachedFaces.length) {
+      await waitFor(() => batterFaces().length === 9 && batterFaces().slice(0,3).every(face =>
+        Number(face.dataset.source) === 2 && hasSourceImage(face)), "Tournament mode shows a DK head for each of the three DK batters");
+    }
+    check(slot("row",2).querySelector(".tourney-pick").getAttribute("aria-pressed") === "true" &&
+      ["Donkey Kong","Blue DK","Donkey Kong"].every((name,i) => slotName("row",i).textContent === name),
+      "the selected batter and independently named DKs survive the mode switch");
+    const lineupName = editName("row",1);
+    inputName(lineupName, "");
+    check(slotName("fielder",1).textContent === "Donkey Kong" && inspectorShows("","Donkey Kong"),
+      "clearing a nickname immediately restores the character name");
+    inputName(lineupName, "Away DK");
+    check(document.activeElement === lineupName && slotName("fielder",1).textContent === "Away DK" && inspectorShows("Away DK","Away DK"),
+      "Tournament mirrors the batting order edit on the field and in the inspector while the editor retains focus");
+    lineupName.blur();
+    const canceledName = editName("fielder",1);
+    inputName(canceledName, "Temporary");
+    pressNameKey(canceledName, "Escape");
+    check(ready("tournament") && slotName("row",1).textContent === "Away DK" && inspectorShows("Away DK","Away DK"),
+      "Escape restores the prior field name and keeps the tournament open");
+    drop(slot("row",1), slot("row",2));
+    check(slotName("row",2).textContent === "Away DK" && slotName("fielder",2).textContent === "Away DK" &&
+      slot("fielder",2).dataset.pos === "1", "the nickname follows the clone to its new batting spot");
+    drop(slot("row",2), slot("row",1));
+    drop(slot("fielder",1), slot("fielder",0));
+    check(slot("fielder",1).dataset.pos === "0" && slotName("fielder",1).textContent === "Away DK" &&
+      slotName("row",1).textContent === "Away DK", "a field swap moves the named clone and preserves its batting spot");
+    drop(slot("fielder",1), slot("fielder",0));
+    slot("row",2).querySelector(".tourney-pick").click();
+    if (cachedFaces.length && await invoke("prepare_custom_portraits", {sourcePath:null})) {
+      slot("row",1).querySelector(".tourney-pick").click();
+      const texture = document.createElement("canvas");
+      texture.width = texture.height = 128;
+      const ctx = texture.getContext("2d");
+      ctx.fillStyle = "#00e7e7";
+      ctx.fillRect(0, 0, 128, 128);
+      const upload = new DataTransfer();
+      upload.items.add(new File([await new Promise(resolve => texture.toBlob(resolve))], "t08_128x128.png", {type:"image/png"}));
+      const files = tournamentField(".tourney-pngs");
+      files.files = upload.files;
+      files.dispatchEvent(new Event("change", {bubbles:true}));
+      const customSelector = '.roster-face[data-appearance="custom"] img.roster-portrait';
+      const editedHead = () => tournamentField('.tourney-row[data-index="1"] ' + customSelector);
+      const matchingHeads = () => {
+        const img = editedHead();
+        return img?.complete && img.naturalWidth > 0 && img.src !== "data:image/png;base64," + cachedFaces[2] &&
+          hasSourceImage(batterFaces()[0]) &&
+          ['.tourney-fielder[data-index="1"]', '.tourney-inspector'].every(selector =>
+            tournamentField(selector + ' ' + customSelector)?.src === img.src);
+      };
+      if (await waitFor(matchingHeads, "Tournament to show the same painted DK on the field, lineup and inspector", 25000)) {
+        const img = editedHead();
+        const sample = document.createElement("canvas");
+        sample.width = img.naturalWidth;
+        sample.height = img.naturalHeight;
+        const pixels = sample.getContext("2d");
+        pixels.drawImage(img, 0, 0);
+        const rgba = pixels.getImageData(0, 0, sample.width, sample.height).data;
+        let cyan = 0;
+        for (let p = 0; p < rgba.length; p += 4) {
+          if (rgba[p + 3] > 160 && rgba[p + 1] > rgba[p] + 40 && rgba[p + 2] > rgba[p] + 40) cyan++;
+        }
+        check(cyan > sample.width * sample.height * 0.015, "the custom head contains the actual cyan DK paint");
+        const tournamentPortrait = img.src;
+        tournamentField(".tourney-switch-mode").click();
+        check($("welcome").open, "entering Game Plan from Tournament shows the team setup chooser");
+        $("welcome-plan").click();
+        await waitFor(() => ready("plan") && matchingHeads() && editedHead().src === tournamentPortrait,
+          "Game plan to use the same painted DK on the field and in the batting order");
+        check(hasSourceImage(findDK().querySelector(".roster-face")), "the character pool keeps the original DK");
+        tournamentField(".tourney-remove-png").click();
+        await waitFor(() => [batterFaces()[1], fieldFaces()[1], ...faceSlots(".tourney-inspector")].every(hasSourceImage),
+          "removing the paint restores stock DK everywhere");
+        tournamentField(".tourney-switch-mode").click();
+        await waitFor(() => ready("tournament"), "return to the Tournament team library after the texture edit");
+        say("checked painted DK pixels and stock DK in both planners, then restored the original portrait");
+      } else {
+        const face = batterFaces()[1];
+        say("DK portrait state " + face?.dataset.appearance + ", " + (face?.title || tournamentField('[role="status"]').textContent));
+      }
+      slot("row",2).querySelector(".tourney-pick").click();
+    }
+    tournamentField('.tourney-tabs [data-side="Home"]').click();
+    check(openSlots() === 9 && !(await invoke("list_tournament_teams")).some(entry => entry.kind !== "saved"),
+      "the second team starts blank and the library contains only user saves");
+    const firstTeam = {format:"mssb-tournament-team-v1", player:"Local Player", rows:Array.from({length:9},
+      (_,i) => ({source:i === 0 ? 2 : null,pos:i,captain:false,star:false,...(i === 0 ? {label:"Our cleanup hitter"} : {})}))};
+    await importSheet(firstTeam);
+    check(openSlots() === 8 && tournamentField(".tourney-lobby").value === "Local Player" &&
+      tournamentField(".tourney-label").value === firstTeam.rows[0].label, "importing an unfinished sheet keeps every open spot and the correct active team");
+    const labelEdit = tournamentField(".tourney-label");
+    inputName(labelEdit, "My batter");
+    check(slotName("row",0).textContent === "My batter" && slotName("fielder",0).textContent === "My batter",
+      "editing the Home inspector immediately updates both on-field and lineup names");
+    await importSheet(firstTeam);
+    tournamentField(".tourney-keep").click();
+    check(tournamentField(".tourney-label").value === "My batter", "canceling an import retains the edited sheet");
+    await importSheet(firstTeam);
+    await confirmReplacement();
+    check(tournamentField(".tourney-label").value === firstTeam.rows[0].label, "confirmed import restores the saved sheet");
+    const library = await invoke("list_tournament_teams");
+    check(library.length === 1 && (await invoke("load_tournament_team", {id:library[0].id})).rows[0].label === firstTeam.rows[0].label,
+      "imported team is reusable from the receiver's library and importing it twice keeps one copy");
+    const {loadDraft} = await import("./game-plan-draft.mjs");
+    await sleep(300);
+    const snapshot = await loadDraft();
+    const bothSheets = {format:"mssb-tournament-matchup-v1", away:snapshot.teams.Away, home:firstTeam};
+    await importSheet(bothSheets, "Opponent.matchup.json");
+    check(!tournamentField(".tourney-confirm") && tournamentField(".tourney-lobby").value === "Local Player",
+      "the team-only import refuses a two-team matchup without prompting to replace either side");
+    const importMatchup = (data, filename) => importSheet(data, filename, ".tourney-matchup-import input");
+    await importMatchup({...bothSheets, home:{...firstTeam, rows:[]}}, "Broken.matchup.json");
+    check(!tournamentField(".tourney-confirm") && tournamentField(".tourney-lobby").value === "Local Player",
+      "a bad second sheet cannot replace either team");
+    tournamentField(".tourney-new-matchup").click();
+    await confirmReplacement();
+    check(openSlots() === 9, "new matchup starts Away blank");
+    switchSide("Home");
+    check(openSlots() === 9, "new matchup also clears Home");
+    tournamentField(".tourney-build").click();
+    check(document.activeElement === tournamentField(".tourney-source") && openSlots() === 9 &&
+      tournamentField('[role="status"]').textContent.includes("0 of 9"), "Build highlights the first unassigned slot before opening a disc picker");
+    await importMatchup(bothSheets, "Practice.matchup.json");
+    check(slotName("row",1).textContent === "Away DK", "matchup import restores Away's named clone");
+    switchSide("Home");
+    check(openSlots() === 8 && tournamentField(".tourney-label").value === firstTeam.rows[0].label, "matchup import restores Home's unfinished sheet");
+    say("verified blank-first drafting, no bundled teams, partial team and two-sided matchup imports, and protected replacement");
+    tournamentField('.tourney-tabs [data-side="Away"]').click();
+    check(tournamentField(".tourney-lobby").value === "" && tournamentField(".tourney-source").value === "2" &&
+      slotName("row",1).textContent === "Away DK",
+      "replacing Home leaves the planned Away team intact");
+    tournamentField(".tourney-switch-mode").click();
+    check($("welcome").open, "entering Game Plan from Tournament shows the team setup chooser");
+    $("welcome-plan").click();
+    await waitFor(() => ready("plan"), "Tournament returns to the shared Game plan");
+    tournamentField('.tourney-tabs [data-side="Home"]').click();
+    check(tournamentField(".tourney-lobby").value === "Local Player" && tournamentField(".tourney-label").value === (firstTeam.rows[0].label ?? ""),
+      "the chosen tournament team is already visible in Game plan");
+    tournamentField(".tourney-close").click();
+    await waitFor(() => !tournament.open && !plan.open && document.activeElement === directPlan,
+      "closing a shared draft opened from welcome returns to Game plan navigation");
+    const savedPlan = await loadDraft();
+    check(savedPlan?.teams.Away.rows[1].label === "Away DK" && !savedPlan.teams.Away.rows[0].label,
+      "the saved draft retains the nickname on the correct duplicate");
+    directTournament.click();
+    await waitFor(() => ready("tournament"), "Tournament mode opens independently from the top navigation");
+    check(tournamentField(".tourney-lobby").value === "Local Player", "direct Tournament entry retains the active side");
+    tournamentField(".tourney-close").click();
+    await waitFor(() => !tournament.open && document.activeElement === directTournament, "closing Tournament returns to its own navigation button");
+    directPlan.click();
+    check($("welcome").open, "returning to Game Plan through Studio presents the team setup choices again");
+    $("welcome-plan").click();
+    await waitFor(() => ready("plan"), "Game plan reopens from the main navigation without an ISO");
+    const { showTeamImage } = await import("./rio-teams.mjs");
+    finishedRoster.click();
+    await waitFor(() => plan.open, "the optional finished-game roster editor opens from Game plan");
+    check(plan.querySelector(".team-actions").hidden, "finished-image export waits for its chosen ISO");
+    plan.querySelector(".team-close").click();
+    await waitFor(() => !plan.open && ready("plan") && document.activeElement === finishedRoster,
+      "closing the finished-game editor returns to the shared draft");
+    tournamentField('.tourney-tabs [data-side="Away"]').click();
+    const restoredName = editName("row",1);
+    inputName(restoredName, "");
+    restoredName.blur();
+    check(slotName("row",1).textContent === "Donkey Kong" && slotName("fielder",1).textContent === "Donkey Kong",
+      "a cleared saved nickname returns to the original character in Game Plan");
+    say("checked live name edits in both planners, independent DK clones, batting and field moves, and the saved draft");
+    for (let i = 0; i < 3; i++) {
+      slot("row",i).querySelector(".tourney-pick").click();
+      choose(tournamentField(".tourney-source"), 2);
+    }
+    const threeDKs = () => [...tournament.querySelectorAll(".tourney-row .tourney-name")]
+      .filter(row => row.textContent === "Donkey Kong").length === 3;
+    check(threeDKs(), "three independent DK batters can be entered without picking donor slots");
+    const editBatterStats = () => tournamentField(".tourney-edit-stats").click();
+    const statInput = key => tournamentField('.tourney-stat-fields input[name="' + key + '"]');
+    const applyBatterStats = () => tournamentField(".tourney-stat-apply").click();
+    editBatterStats();
+    const speed = statInput("speed"), runBar = statInput("running_bar");
+    check(speed.value === "" && speed.min === "0" && runBar.min === "1" && runBar.max === "10",
+      "tournament stats share Studio’s per-field ranges before loading a disc");
+    speed.value = "0";
+    runBar.value = "0";
+    applyBatterStats();
+    check(tournamentField(".tourney-stat-dialog").open && !runBar.validity.valid, "a zero display bar cannot be saved");
+    runBar.value = "10";
+    applyBatterStats();
+    check(tournamentField(".tourney-stats summary").textContent === "2 stat overrides", "both overrides apply to this DK");
+    choose(tournamentField(".tourney-pos"), 7);
+    check(tournamentField('.tourney-row[data-index="2"] b').textContent === "CF" &&
+      tournamentField('.tourney-row[data-index="7"] b').textContent === "1B",
+      "tournament defense swaps both fielders");
+    tournamentField('.tourney-tabs [data-side="Home"]').click();
+    check(!threeDKs(), "Home has its own portable lineup");
+    tournamentField('.tourney-tabs [data-side="Away"]').click();
+    check(threeDKs(), "Away keeps all three DKs after switching back");
+    slot("row",1).querySelector(".tourney-pick").click();
+    editBatterStats();
+    check(statInput("speed").value === "", "a second DK keeps its original running speed");
+    tournamentField(".tourney-stat-cancel").click();
+    slot("row",2).querySelector(".tourney-pick").click();
+    editBatterStats();
+    check(statInput("speed").value === "0" && statInput("running_bar").value === "10",
+      "the edited DK retains zero and the upper bound across team changes");
+    statInput("running_bar").value = "";
+    applyBatterStats();
+    editBatterStats();
+    tournamentField(".tourney-stat-reset").click();
+    tournamentField(".tourney-stat-cancel").click();
+    editBatterStats();
+    check(statInput("speed").value === "0" && statInput("running_bar").value === "",
+      "clearing one field keeps the other after a canceled reset");
+    tournamentField(".tourney-stat-reset").click();
+    applyBatterStats();
+    check(!tournamentField(".tourney-stats summary"), "resetting all stats restores the original batter");
+    finishedRoster.click();
+    await waitFor(() => plan.open, "the finished-game roster reopens for ISO-specific controls");
+    // Exercise the same DOM controls that the native WebView uses for edits and drops.
+    const cloneSources = Array(54).fill(null);
+    cloneSources[29] = cloneSources[30] = 2;
+    showTeamImage({ name: "Team test.iso", sha256: "a".repeat(64), hands: Array(54).fill([0, 1]), cloneSources });
+    const control = selector => plan.querySelector(selector);
+    const batter = i => control(`.plan-batter[data-index="${i}"]`);
+    const fielder = pos => control(`.plan-fielder[data-pos="${pos}"]`);
+    const teamTab = side => control(`.plan-tabs [data-side="${side}"]`);
+    const inputText = (selector, text) => {
+      const input = control(selector);
+      input.value = text;
+      input.dispatchEvent(new Event("input", {bubbles:true}));
+    };
+    check(plan.querySelectorAll(".plan-batter").length === 9 &&
+      plan.querySelectorAll(".plan-fielder").length === 9, "nine batters and nine starting positions are visible together");
+    inputText(".lobby-name", "First player");
+    inputText(".roster-label", "Old clone label");
+    inputText(".pool-search", "DK");
+    const cloneTile = id => control(`.pool-options [data-character="${id}"]`);
+    check(cloneTile(29) && cloneTile(30), "both DK copies can be found by source name");
+    drop(cloneTile(29), batter(0));
+    drop(cloneTile(30), batter(1));
+    batter(0).click();
+    check(control(".roster-label").value === "" && control(".character-slot").value === "29",
+      "changing a character clears the old label and keeps the new slot");
+    inputText(".roster-label", "Blue DK");
+    drop(batter(0), batter(4));
+    check(control(".batting-slot").value === "4" && control(".fielding-slot").value === "0" &&
+      control(".character-slot").value === "29" && control(".roster-label").value === "Blue DK",
+      "dragging a batter keeps their identity, label and field position");
+    drop(fielder(0), fielder(5));
+    check(batter(4).querySelector(".bat-name").textContent === "Blue DK" &&
+      fielder(5).querySelector(".bat-name").textContent === "Blue DK" && fielder(0).dataset.index === "5",
+      "swapping starting fielders keeps batting order and exchanges both defensive assignments");
+    teamTab("Home").click();
+    check(plan.querySelectorAll(".plan-batter").length === 9 && control(".character-slot").value === "9",
+      "Home has a separate nine-player lineup");
+    inputText(".lobby-name", "Second player");
+    choose(control(".batting-slot"), 8);
+    choose(control(".fielding-slot"), 3);
+    teamTab("Away").click();
+    check(control(".lobby-name").value === "First player" &&
+      control(".character-slot").value === "29" && control(".fielding-slot").value === "5",
+      "Home edits leave the Away lineup intact");
+    plan.querySelector(".team-close").click();
+    tournamentField(".tourney-switch-mode").click();
+    await waitFor(() => ready("tournament"), "the shared lineup remains available alongside the finished-game editor");
+    tournamentField('.tourney-tabs [data-side="Home"]').click();
+    check(tournamentField(".tourney-lobby").value === "Local Player", "finished-game slot edits preserve the portable sources");
+    tournamentField(".tourney-switch-mode").click();
+    check($("welcome").open, "entering Game Plan from Tournament shows the team setup chooser");
+    $("welcome-plan").click();
+    await waitFor(() => ready("plan"), "Game plan keeps its optional finished-game action");
+    finishedRoster.click();
+    await waitFor(() => plan.open, "the finished-game roster reopens with its own ISO-specific edits");
+    teamTab("Home").click();
+    check(control(".lobby-name").value === "Second player" && control(".batting-slot").value === "8" &&
+      control(".fielding-slot").value === "3" && control(".character-slot").value === "9",
+      "both views retain Home edits when the plan is reopened");
+    const nextSources = [...cloneSources];
+    nextSources[29] = 0;
+    const revised = {name:"Updated.iso", sha256:"b".repeat(64), hands:Array(54).fill([0,1]), cloneSources:nextSources};
+    showTeamImage(revised);
+    check(control('.changed-slots li[data-side="Away"][data-index="4"]'), "a changed occupied clone is identified");
+    control(".keep-iso").click();
+    teamTab("Away").click();
+    check(control(".roster-label").value === "Blue DK", "cancel keeps the previous clone label");
+    showTeamImage(revised);
+    control(".carry-teams").click();
+    check(control(".character-slot").value === "29" && control(".fielding-slot").value === "5" &&
+      control(".batting-slot").value === "4" && !control(".roster-label").value,
+      "carrying both drafts preserves assignments and clears the changed player's label");
+    plan.querySelector(".team-close").click();
+
+    tournamentField(".tourney-close").click();
 
     // The roster becomes chips above the stage at the minimum supported width.
     await resizeTo(640, 560);
@@ -260,6 +731,42 @@ export async function run(options, app) {
     textures().querySelector(".clear").click();
     check(!textures().classList.contains("set") && textures().querySelector(".pick").textContent === "My textures…", "clear");
     app.setRowTextures(app.state.groups[0].rows[0], exported.folder);
+
+    // A painted clone and a recoloured clone can carry different stats in one build.
+    const editStats = async (row, button) => {
+      app.state.groups[0].rows[row].entry.click();
+      $(button).click();
+      await waitFor(() => !$("clone-stats").hidden && !$("stats-save").disabled, "the stats editor");
+      return $("stats-fields").querySelector('[name="speed"]');
+    };
+    const firstSpeed = await editStats(0, "btn-stats");
+    check(firstSpeed.value === "" && firstSpeed.placeholder !== "", "unedited stats show inherited values");
+    firstSpeed.value = String(Number(firstSpeed.max) + 1);
+    $("stats-save").click();
+    check(!$("clone-stats").hidden && !firstSpeed.validity.valid, "invalid speed keeps the editor open");
+    firstSpeed.value = "87";
+    $("stats-save").click();
+    $("chk-stats").click();
+    const secondSpeed = await editStats(1, "nav-stats");
+    const secondRow = app.state.groups[0].rows[1];
+    const donorStats = await invoke("character_stats", { character: secondRow.slot });
+    check(secondSpeed.value === "" && secondSpeed.placeholder === String(donorStats.fields.find((f) => f.key === "speed").value),
+      "another clone inherits its donor's stats when source stats are off");
+    secondSpeed.value = "61";
+    $("stats-save").click();
+    $("chk-stats").click();
+    check(app.makeJob().clones[0].stats.speed === 87 && app.makeJob().clones[0].textures === exported.folder &&
+      app.makeJob().clones[1].stats.speed === 61, "distinct overrides travel with both clones, including painted textures");
+    await editStats(1, "btn-stats");
+    $("stats-reset").click();
+    $("stats-cancel").click();
+    check(app.makeJob().clones[1].stats.speed === 61, "Cancel preserves saved edits after Reset");
+    await editStats(1, "btn-stats");
+    $("stats-reset").click();
+    $("stats-save").click();
+    check(!app.makeJob().clones[1].stats && app.makeJob().clones[0].stats.speed === 87,
+      "reset restores inheritance for only the selected clone");
+    app.state.groups[0].rows[0].entry.click();
 
     // Export 3D Model: the button opens the choice (the shown character, all animations); Cancel
     // closes it. Then an export to a known path (no save dialog) that must parse as glTF.

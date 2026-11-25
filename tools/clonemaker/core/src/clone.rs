@@ -8,10 +8,12 @@ use crate::disc::{Disc, open_disc, preflight, write_iso};
 use crate::lzss;
 use crate::menu::*;
 use crate::sound::*;
+use crate::stats::{self, Overrides};
 use crate::texture::Gpc;
 use crate::{Error, Result, align};
+use std::collections::BTreeMap;
 use std::fs::{self, OpenOptions};
-use std::io::{Read, Seek, SeekFrom, Write};
+use std::io::{Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
 
 /// CLI patch options; the window's job adapter uses the same patch path.
@@ -37,6 +39,8 @@ pub struct CloneArgs {
     pub relocate_menu_art: bool,
     /// Preserve donor stats.
     pub no_stats: bool,
+    /// Per-donor stat values applied after choosing the source or donor baseline.
+    pub stats: BTreeMap<usize, Overrides>,
     /// Preserve donor gameplay tables.
     pub no_gameplay: bool,
     /// Replace an existing output extraction.
@@ -75,6 +79,7 @@ impl Default for CloneArgs {
             colour_word: ColourWord::Clone,
             relocate_menu_art: false,
             no_stats: false,
+            stats: BTreeMap::new(),
             no_gameplay: false,
             force: false,
             dry_run: false,
@@ -296,6 +301,10 @@ pub fn clone(
             ));
         }
     }
+    if !args.stats.is_empty() {
+        let slots = donor_slots(&args.slots)?;
+        stats::validate_slots(&slots, &args.stats)?;
+    }
     let from_iso = args.disc.is_file();
     let mut temp = None;
     let src_disc = if from_iso && args.dry_run {
@@ -388,6 +397,13 @@ pub fn clone(
             )
         }));
     }
+    let stat_table = if !args.no_stats || !args.stats.is_empty() {
+        let mut table = disc.read("ZZZZ.dat", stats::OFFSET, stats::SIZE)?;
+        stats::patch(&mut table, &slots, &srcs, !args.no_stats, &args.stats)?;
+        Some(table)
+    } else {
+        None
+    };
     let use_overlay = !args.no_aram_overlay;
     let default_case = dol.u32(ADDR_JUMPTABLE)?;
     let case_of = |c: usize| -> Result<u32> {
@@ -1080,42 +1096,31 @@ pub fn clone(
     let new_size = align(end, 0x8000);
     zz.write_all(&vec![0; new_size - end])?;
     log(&format!("ZZZZ.dat: {start} -> {new_size} bytes"));
-    if !args.no_stats {
-        zz.seek(SeekFrom::Start(0x6cf8800))?;
-        let mut stats = vec![0; 54 * 0xa0];
-        zz.read_exact(&mut stats)?;
-        let stat_ids: Vec<_> = (0..54)
-            .map(|i| u16_at(&stats, i * 0xa0 + 0x24).map(|v| v as i16))
-            .collect::<Result<_>>()?;
-        if stat_ids != (0..54).collect::<Vec<_>>() {
-            return Err(Error::new(format!(
-                "stat block at ZZZZ.dat+0x6CF8800 does not look right (CharIDs {:?}...)",
-                &stat_ids[..5]
-            )));
-        }
-        // Rows first, then chemistry columns, so a clone's chemistry with another character's
-        // clone reads that character's (sources are never slots, so their rows stay clean).
-        for (s, c) in slots.iter().zip(&srcs) {
-            let src = stats[c * 0xa0..(c + 1) * 0xa0].to_vec();
-            stats[*s * 0xa0..(*s + 1) * 0xa0].copy_from_slice(&src);
-            stats[*s * 0xa0 + 0x24..*s * 0xa0 + 0x26].copy_from_slice(&(*s as u16).to_be_bytes());
-        }
-        for (s, c) in slots.iter().zip(&srcs) {
-            for j in 0..54 {
-                stats[j * 0xa0 + 0x3b + *s] = stats[j * 0xa0 + 0x3b + c];
+    if let Some(table) = stat_table {
+        zz.seek(SeekFrom::Start(stats::OFFSET))?;
+        zz.write_all(&table)?;
+        if !args.no_stats {
+            for &c in &sources {
+                log(&format!(
+                    "stats: copied {}'s row and chemistry to {}",
+                    CHAR_NAMES[c],
+                    group(c)
+                        .iter()
+                        .map(|s| CHAR_NAMES[*s])
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                ));
             }
         }
-        zz.seek(SeekFrom::Start(0x6cf8800))?;
-        zz.write_all(&stats)?;
-        for &c in &sources {
+        for (slot, fields) in &args.stats {
             log(&format!(
-                "stats: copied {}'s row and chemistry to {}",
-                CHAR_NAMES[c],
-                group(c)
-                    .iter()
-                    .map(|s| CHAR_NAMES[*s])
+                "stats: customized {} on {}",
+                fields
+                    .keys()
+                    .map(String::as_str)
                     .collect::<Vec<_>>()
-                    .join(", ")
+                    .join(", "),
+                CHAR_NAMES[*slot]
             ));
         }
     }

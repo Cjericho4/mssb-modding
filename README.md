@@ -29,8 +29,10 @@ clones you design. Play it in Project Rio or Dolphin.
   Guy colours, all at once.
 - **Your own textures.** Export a character's textures as pictures, paint them in any paint
   program, and give a clone your version.
-- **The real thing, not just a skin.** Each clone gets its character's voice, size, stats and
-  chemistry, and its name and picture in the menus.
+- **Character identity.** Each clone can use the source character’s voice, size, chemistry,
+  menu name and picture.
+- **Stats for each clone.** Give two copies of the same character different gameplay ratings.
+  A clone can also inherit the source character’s stats or the original slot’s stats.
 - **Animations from another character.** Make a clone move like someone else (characters whose
   skeleton fits are offered; not well tested yet).
 - **Open characters in Blender.** Export any character's textured model, skeleton and animations
@@ -51,9 +53,13 @@ The [user guide](tools/clonemaker/README.md) walks through every option, with tr
 The app shows a **New version** button when an update is out, and a **Feedback** button to report
 problems or ideas.
 
-You need your own copy of the game. Nothing here contains game files, and the Clone Maker never
-uploads or shares yours. Play the patched game offline: Rio's online and ranked modes expect the
-original game.
+You need your own copy of the game. Share team JSON files and keep your game image on your own machine.
+
+For private matches in Project Rio 2.2.0, open **Game plan** in Clone Maker.
+Both players need identical finished game images. Exchange the saved matchup, compare the matchup IDs,
+and use **Fast Reset from HUD** in a **No Game Mode** lobby. Use the original game for ranked play.
+A private Mac-to-Linux match showed both players the same blue and green Mario clones. See the
+[guide to saving two teams for Rio](tools/clonemaker/README.md#save-two-teams-for-project-rio).
 
 ---
 

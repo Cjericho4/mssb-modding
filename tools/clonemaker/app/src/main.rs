@@ -2,7 +2,13 @@
 //! core (`tools/clonemaker/core`, `api::Core`) as described in `tools/clonemaker/API.md`.
 #![cfg_attr(windows, windows_subsystem = "windows")]
 
+mod portrait_assets;
+mod portraits;
+mod rio_teams;
 mod selftest;
+mod tournament;
+mod tournament_files;
+mod tournament_library;
 
 use std::path::PathBuf;
 
@@ -36,6 +42,19 @@ fn sources(core: State<Core>) -> Vec<Source> {
 #[tauri::command]
 async fn source_info(app: AppHandle, source: usize) -> Result<SourceInfo, ApiError> {
     blocking(move |core| core.source_info(source), app).await
+}
+
+#[tauri::command]
+fn stat_schema() -> Vec<mssb_clone_core::stats::StatDefinition> {
+    mssb_clone_core::stats::schema()
+}
+
+#[tauri::command]
+async fn character_stats(
+    app: AppHandle,
+    character: usize,
+) -> Result<mssb_clone_core::api::CharacterStats, ApiError> {
+    blocking(move |core| core.character_stats(character), app).await
 }
 
 #[tauri::command]
@@ -183,9 +202,24 @@ fn main() {
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
+            rio_teams::rio_team_image,
+            portraits::load_roster_portraits,
+            portrait_assets::prepare_custom_portraits,
+            portrait_assets::load_custom_portrait_asset,
+            rio_teams::save_rio_roster,
+            rio_teams::install_rio_matchup,
+            tournament_files::save_tournament_team,
+            tournament_files::save_tournament_matchup_sheet,
+            tournament_library::list_tournament_teams,
+            tournament_library::load_tournament_team,
+            tournament_library::remember_imported_team,
+            tournament::prepare_team_sheet,
+            tournament_files::build_tournament_matchup,
             open_game,
             sources,
             source_info,
+            stat_schema,
+            character_stats,
             anim_choices,
             next_free_slot,
             preview,

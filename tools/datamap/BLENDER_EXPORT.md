@@ -6,7 +6,8 @@ that Blender opens: the textured body, its skeleton and its animations.
 **Using the Clone Maker app (0.3.0-beta or newer)?** Its **Export 3D Model** button does the
 same without Python ([guide](https://github.com/Cjericho4/mssb-modding/blob/main/tools/clonemaker/README.md#open-a-character-in-blender)).
 This script is for Linux, and for the extra options (one clip, other animation banks, the
-skeleton only).
+skeleton only). It is no longer attached to releases as a zip (the last one was 0.4.0-beta):
+run it from a copy of this repository.
 
 ## What you need
 
@@ -16,8 +17,9 @@ skeleton only).
 
 ## Export a character
 
-Unzip this folder, open a terminal in it (on Windows: right-click the folder, **Open in Terminal**)
-and run, with your own game path:
+Get a copy of this repository (**Code > Download ZIP** on GitHub, then unzip it), open a terminal
+in its top folder (on Windows: right-click the folder, **Open in Terminal**) and run, with your own
+game path:
 
 ```powershell
 py tools/datamap/export_gltf.py --disc "C:\Games\MSSB.iso" --character mario --all-animations --out mario.gltf
