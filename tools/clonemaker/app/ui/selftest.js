@@ -130,6 +130,57 @@ export async function run(options, app) {
     check(tournamentField('.tourney-row[data-index="2"]').getAttribute("aria-pressed") === "true" &&
       [0,1,2].every(i => tournamentField('.tourney-row[data-index="' + i + '"] .tourney-name').textContent === "Donkey Kong"),
       "the selected batter and all three DKs survive the handoff");
+    if (cachedFaces.length && await invoke("prepare_custom_portraits", {sourcePath:null})) {
+      tournamentField('.tourney-row[data-index="1"]').click();
+      const texture = document.createElement("canvas");
+      texture.width = texture.height = 128;
+      const ctx = texture.getContext("2d");
+      ctx.fillStyle = "#00e7e7";
+      ctx.fillRect(0, 0, 128, 128);
+      const upload = new DataTransfer();
+      upload.items.add(new File([await new Promise(resolve => texture.toBlob(resolve))], "t08_128x128.png", {type:"image/png"}));
+      const files = tournamentField(".tourney-pngs");
+      files.files = upload.files;
+      files.dispatchEvent(new Event("change", {bubbles:true}));
+      const customSelector = '.roster-face[data-appearance="custom"] img.roster-portrait';
+      const editedHead = () => tournamentField('.tourney-row[data-index="1"] ' + customSelector);
+      const matchingHeads = () => {
+        const img = editedHead();
+        return img?.complete && img.naturalWidth > 0 && img.src !== "data:image/png;base64," + cachedFaces[2] &&
+          hasSourceImage(batterFaces()[0]) &&
+          ['.tourney-fielder[data-index="1"]', '.tourney-inspector'].every(selector =>
+            tournamentField(selector + ' ' + customSelector)?.src === img.src);
+      };
+      if (await waitFor(matchingHeads, "Tournament to show the same painted DK on the field, lineup and inspector", 25000)) {
+        const img = editedHead();
+        const sample = document.createElement("canvas");
+        sample.width = img.naturalWidth;
+        sample.height = img.naturalHeight;
+        const pixels = sample.getContext("2d");
+        pixels.drawImage(img, 0, 0);
+        const rgba = pixels.getImageData(0, 0, sample.width, sample.height).data;
+        let cyan = 0;
+        for (let p = 0; p < rgba.length; p += 4) {
+          if (rgba[p + 3] > 160 && rgba[p + 1] > rgba[p] + 40 && rgba[p + 2] > rgba[p] + 40) cyan++;
+        }
+        check(cyan > sample.width * sample.height * 0.015, "the custom head contains the actual cyan DK paint");
+        const tournamentPortrait = img.src;
+        tournamentField(".tourney-switch-mode").click();
+        await waitFor(() => ready("plan") && matchingHeads() && editedHead().src === tournamentPortrait,
+          "Game plan to use the same painted DK on the field and in the batting order");
+        check(hasSourceImage(findDK().querySelector(".roster-face")), "the character pool keeps the original DK");
+        tournamentField(".tourney-remove-png").click();
+        await waitFor(() => [batterFaces()[1], fieldFaces()[1], ...faceSlots(".tourney-inspector")].every(hasSourceImage),
+          "removing the paint restores stock DK everywhere");
+        tournamentField(".tourney-switch-mode").click();
+        await waitFor(() => ready("tournament"), "return to the Tournament team library after the texture edit");
+        say("checked painted DK pixels and stock DK in both planners, then restored the original portrait");
+      } else {
+        const face = batterFaces()[1];
+        say("DK portrait state " + face?.dataset.appearance + ", " + (face?.title || tournamentField('[role="status"]').textContent));
+      }
+      tournamentField('.tourney-row[data-index="2"]').click();
+    }
     tournamentField('.tourney-tabs [data-side="Home"]').click();
     const presets = [...tournamentField(".tourney-team-picker").querySelectorAll("optgroup:first-of-type option")];
     check(presets.length >= 14, "the ASSBLAST tournament rosters are available inside the picker");

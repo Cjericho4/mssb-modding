@@ -1,7 +1,7 @@
 import {sides, positions, captainSlots, moveBatter, swapFieldPosition} from "./rio-roster.mjs";
 import {loadDraft, saveDraft} from "./game-plan-draft.mjs";
 import {playerPool} from "./game-plan-pool.mjs";
-import {initPortraits, rosterFace} from "./roster-portraits.mjs";
+import {initPortraits, lineupFaces} from "./roster-portraits.mjs";
 
 const format = "mssb-tournament-team-v1";
 const MiB = 1024 * 1024;
@@ -307,7 +307,7 @@ function playerDrag(elem, index, dropPlayer) {
     else dropPlayer(dragging.index);
   };
 }
-function fieldPanel(team) {
+function fieldPanel(team, faceFor) {
   const panel = el("section", "", "tourney-field-panel");
   panel.append(el("h3","Starting field positions"), el("p","Drag one fielder onto another to swap positions."));
   const diamond = el("div","","plan-diamond");
@@ -319,7 +319,7 @@ function fieldPanel(team) {
     marker.setAttribute("aria-pressed",String(selected[side] === i));
     const badge = el("b",positions[row.pos],"position-badge");
     badge.append(el("span","#" + (i + 1), "field-bat-num"));
-    marker.append(rosterFace(row.source,names.get(row.source)),badge,el("span",title(row),"bat-name tourney-name"));
+    marker.append(faceFor(row),badge,el("span",title(row),"bat-name tourney-name"));
     playerDrag(marker,i,from => {
       swapFieldPosition(team,from,row.pos);
       selected[side] = from;
@@ -330,7 +330,7 @@ function fieldPanel(team) {
   panel.append(diamond);
   return panel;
 }
-function orderPanel(team) {
+function orderPanel(team, faceFor) {
   const panel = el("section","","tourney-order-panel");
   panel.append(el("h3","Batting order"), el("p","Drag a batter to move their spot."));
   const ol = el("ol","","tourney-order");
@@ -346,7 +346,7 @@ function orderPanel(team) {
       star.setAttribute("aria-label","Superstar");
       flags.append(star);
     }
-    b.append(el("span",String(i+1),"tourney-number"),rosterFace(row.source,names.get(row.source)),
+    b.append(el("span",String(i+1),"tourney-number"),faceFor(row),
       el("strong",title(row),"tourney-name"),flags,el("b",positions[row.pos],"tourney-position"));
     playerDrag(b,i,from => move(team,from,i));
     li.append(b);
@@ -383,8 +383,10 @@ function texturePanel(team, row, i) {
     for (const name of entries) {
       const li = el("li");
       const remove = button("Remove", () => {
-        delete row.textures[name];
-        if (!Object.keys(row.textures).length) delete row.textures;
+        const next = {...row.textures};
+        delete next[name];
+        if (Object.keys(next).length) row.textures = next;
+        else delete row.textures;
         draw(".tourney-pngs");
       }, "tourney-remove-png");
       remove.setAttribute("aria-label","Remove " + name);
@@ -446,7 +448,7 @@ function chooseSource(i, id) {
     button("Switch character",change),keep);
   keep.focus();
 }
-function inspector(team) {
+function inspector(team, faceFor) {
   const i = selected[side], row = team.rows[i];
   const panel = el("section","","tourney-inspector");
   const member = el("div", "", "tourney-member");
@@ -454,7 +456,11 @@ function inspector(team) {
   const caption = el("div","","tourney-batter-caption");
   const activeName = el("h3", title(row));
   caption.append(el("small","Batter " + (i + 1) + " · " + positions[row.pos]), activeName);
-  head.append(rosterFace(row.source,names.get(row.source)),caption);
+  const notice = el("p","","tourney-portrait-note");
+  notice.hidden = true;
+  notice.setAttribute("aria-live","polite");
+  caption.append(notice);
+  head.append(faceFor(row,notice),caption);
   member.append(head);
   const fields = el("div","","tourney-fields");
   const confirmation = el("div","","source-change");
@@ -503,7 +509,8 @@ function draw(focus, persist = true) {
   dragging = undefined;
   makeToolbar();
   const team = teams[side];
-  editor.replaceChildren(fieldPanel(team),orderPanel(team));
+  const faceFor = lineupFaces(team.rows,names);
+  editor.replaceChildren(fieldPanel(team,faceFor),orderPanel(team,faceFor));
   if (mode === "plan") {
     const i = selected[side];
     editor.append(playerPool({
@@ -517,7 +524,7 @@ function draw(focus, persist = true) {
       onDragEnd:endDrag
     }));
   }
-  editor.append(inspector(team));
+  editor.append(inspector(team,faceFor));
   if (focus) dialog.querySelector(focus)?.focus({preventScroll:true});
   if (persist) draftChanged();
 }

@@ -460,6 +460,32 @@ pub fn roster_portraits_from_resource(data: Vec<u8>) -> Result<Vec<String>> {
         .collect()
 }
 
+/// Geometry and original material pictures used to render a clone's offline planner portrait.
+#[derive(Serialize, Deserialize)]
+pub struct PortraitAsset {
+    /// Base64 encoded stage GLB with game texture indices in material extras.
+    pub model: String,
+    /// Base64 encoded RGBA PNGs in the effective body's texture archive order.
+    pub textures: Vec<String>,
+}
+
+/// Prepare one source's assets from the same in-match body and field pose as the studio stage.
+pub fn portrait_asset(disc: &Disc, dol: &Dol, source: usize) -> Result<PortraitAsset> {
+    check_id(source)?;
+    let body = Gpc::new(disc.effective_body(dol, source)?)?;
+    let base64 = base64::engine::general_purpose::STANDARD;
+    let model = base64.encode(crate::gltf::stage_model(disc, dol, source, &body.data)?);
+    let textures = body
+        .textures
+        .iter()
+        .map(|t| {
+            let rgba = crate::texture_encode::decode_texture_rgba(&t.bytes(&body.data)?, t)?;
+            Ok(base64.encode(custom_textures::rgba_png(t.w, t.h, &rgba)?))
+        })
+        .collect::<Result<_>>()?;
+    Ok(PortraitAsset { model, textures })
+}
+
 /// Texture placements and atlas height for the window's before/after previews.
 pub fn atlas_layout(g: &Gpc) -> (Vec<(usize, usize, usize)>, usize) {
     let mut order: Vec<_> = g.textures.iter().collect();

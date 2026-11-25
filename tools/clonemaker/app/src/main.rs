@@ -2,6 +2,7 @@
 //! core (`tools/clonemaker/core`, `api::Core`) as described in `tools/clonemaker/API.md`.
 #![cfg_attr(windows, windows_subsystem = "windows")]
 
+mod portrait_assets;
 mod portraits;
 mod rio_teams;
 mod selftest;
@@ -203,6 +204,8 @@ fn main() {
         .invoke_handler(tauri::generate_handler![
             rio_teams::rio_team_image,
             portraits::load_roster_portraits,
+            portrait_assets::prepare_custom_portraits,
+            portrait_assets::load_custom_portrait_asset,
             rio_teams::save_rio_roster,
             rio_teams::install_rio_matchup,
             tournament_files::save_tournament_team,
