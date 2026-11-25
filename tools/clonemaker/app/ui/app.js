@@ -91,6 +91,7 @@ function log(line) {
 /** Inputs that wait for a game and are locked while one is being made. */
 function setEnabled(on) {
   state.inputsEnabled = on;
+  updateStatsButtons(allRows().find((r) => r.id === state.previewRow));
   const inputs = ["btn-group", "chk-ui", "chk-colour", "chk-stats", "keeplum", "chk-keep", "out-path", "btn-out", "btn-go"]
     .map($)
     .concat([...document.querySelectorAll("#groups input, #groups select, #groups button, #roster button")]);
@@ -386,7 +387,7 @@ async function rebuildRows(g, reset) {
       const slot = valid.has(r.slot) && !used.includes(r.slot)
         ? r.slot : await invoke("next_free_slot", { source: g.source, used });
       if (slot !== null) {
-        wanted.push({ slot, colour: r.colour, anims: r.anims });
+        wanted.push({ slot, colour: r.colour, anims: r.anims, stats: r.stats, textures: r.textures });
         used.push(slot);
       }
     }
@@ -401,6 +402,8 @@ async function rebuildRows(g, reset) {
     fillSlots(row);
     setRow(row, wanted[i].slot, wanted[i].colour);
     setRowAnims(row, wanted[i].anims ?? null);
+    row.stats = wanted[i].stats ?? {};
+    if (row.textures !== (wanted[i].textures ?? null)) setRowTextures(row, wanted[i].textures ?? null);
   });
   for (const w of wanted.slice(g.rows.length)) await addRow(g, w.slot, w.colour);
   if (!allRows().some((r) => r.id === state.previewRow) && g.rows.length) selectPreviewRow(g.rows[0]);
@@ -481,7 +484,7 @@ async function addRow(g, slot = null, colour = null) {
     const taken = new Set(g.rows.map((r) => r.colour));
     colour = NEW_ROW_COLOURS.find((c) => !taken.has(c)) || "blue";
   }
-  const row = { id: ++state.rowSeq, group: g };
+  const row = { id: ++state.rowSeq, group: g, stats: {} };
   row.radio = el("input", { type: "radio", name: "preview-row", title: "Show this clone in the preview" });
   row.slotSelect = el("select", { ariaLabel: "Slot it takes over" });
   row.colourSelect = el("select", { ariaLabel: "Colour" });
@@ -604,6 +607,7 @@ function selectPreviewRow(row, refresh = false) {
 function renderRoster() {
   const rows = allRows(), selected = rows.find((r) => r.id === state.previewRow);
   const activeGroup = selected?.group || state.selectedGroup || state.groups[0];
+  updateStatsButtons(selected);
   const conflicts = new Set();
   for (const g of state.groups) {
     g.ui.root.hidden = g !== activeGroup;
@@ -690,6 +694,78 @@ function colourChanged(row) {
   const at = row.swatches?.querySelector(".sw.custom")?.getBoundingClientRect();
   if (at) Object.assign(picker.style, { left: at.left + "px", top: at.bottom + "px" });
   picker.click();
+}
+
+// ---------------------------------------------------------------- clone stats
+let statsEditor = null;
+
+function updateStatsButtons(row) {
+  const count = row ? Object.keys(row.stats).length : 0;
+  for (const id of ["nav-stats", "btn-stats"]) {
+    const button = $(id);
+    button.disabled = !state.inputsEnabled || !row;
+    button.title = row ? (count ? "Edit clone stats (" + count + " changed)" : "Edit this clone's stats") : "Select a clone to edit its stats";
+  }
+}
+
+function closeCloneStats() {
+  statsEditor = null;
+  setModal($("clone-stats"), false);
+}
+
+async function openCloneStats() {
+  const row = allRows().find((r) => r.id === state.previewRow);
+  if (!state.inputsEnabled || !row) return;
+  const character = $("chk-stats").checked ? row.group.source : row.slot;
+  const editor = { row };
+  statsEditor = editor;
+  $("stats-title").textContent = "Stats for " + $("clone-name").textContent;
+  $("stats-note").textContent = "Loading " + sourceName(character) + "'s stats…";
+  $("stats-fields").replaceChildren();
+  $("stats-save").disabled = $("stats-reset").disabled = true;
+  setModal($("clone-stats"), true);
+  $("stats-cancel").focus();
+  try {
+    const { fields } = await invoke("character_stats", { character });
+    if (statsEditor !== editor) return;
+    for (const { key, label, min, max, value } of fields) {
+      const input = el("input", { type: "number", name: key, min, max, step: 1,
+        placeholder: String(value), value: row.stats[key] ?? "" });
+      $("stats-fields").append(el("label", { className: "field" }, [
+        el("span", { className: "lab", textContent: label }),
+        input, el("small", { className: "hint", textContent: "Inherited " + value + " · Range " + min + "–" + max })
+      ]));
+    }
+    $("stats-note").textContent = "Empty fields inherit " + sourceName(character) + "'s stats.";
+    $("stats-save").disabled = $("stats-reset").disabled = false;
+  } catch (e) {
+    if (statsEditor === editor) $("stats-note").textContent = "Could not load stats. " + (e.error ?? String(e));
+  }
+}
+
+function bindCloneStats() {
+  for (const id of ["nav-stats", "btn-stats"]) $(id).addEventListener("click", openCloneStats);
+  $("stats-cancel").addEventListener("click", closeCloneStats);
+  $("clone-stats").addEventListener("keydown", (event) => {
+    if (event.key === "Escape") {
+      event.preventDefault();
+      closeCloneStats();
+    }
+  });
+  $("stats-reset").addEventListener("click", () => {
+    for (const input of $("stats-fields").querySelectorAll("input")) input.value = "";
+  });
+  $("clone-stats").querySelector("form").addEventListener("submit", (event) => {
+    event.preventDefault();
+    if (!statsEditor || $("stats-save").disabled || !event.target.reportValidity()) return;
+    const overrides = {};
+    for (const input of $("stats-fields").querySelectorAll("input")) {
+      if (input.value !== "") overrides[input.name] = input.valueAsNumber;
+    }
+    statsEditor.row.stats = overrides;
+    closeCloneStats();
+    renderRoster();
+  });
 }
 
 // ---------------------------------------------------------------- painted textures
@@ -901,6 +977,7 @@ function makeJob() {
   const clones = (g, extra) => g.rows.map((r) => {
     const clone = { slot: r.slot, colour: r.colour, ...extra };
     if (r.textures) clone.textures = r.textures;
+    if (Object.keys(r.stats).length) clone.stats = { ...r.stats };
     if (r.anims !== null) clone.anims = r.anims;
     return clone;
   });
@@ -1009,6 +1086,7 @@ async function main() {
     if (!$("log-drawer").hidden) $("log-drawer").scrollIntoView({ block: "nearest" });
   });
   $("btn-enlarge").addEventListener("click", () => setMode("tex"));
+  bindCloneStats();
   $("chk-ui").addEventListener("change", () => { $("chk-colour").disabled = !$("chk-ui").checked || state.busy || !state.game; });
   $("keeplum").addEventListener("input", () => {
     $("keeplum-value").textContent = Number($("keeplum").value).toFixed(2);
@@ -1076,7 +1154,7 @@ async function main() {
     showWelcome();
   }
   if (options.selftest) {
-    await import("./selftest.js").then((m) => m.run(options, { state, startLoad, exportTextures, exportBlender, setRowTextures, showInfo, showWelcome, stage }));
+    await import("./selftest.js").then((m) => m.run(options, { state, makeJob, startLoad, exportTextures, exportBlender, setRowTextures, showInfo, showWelcome, stage }));
   }
 }
 

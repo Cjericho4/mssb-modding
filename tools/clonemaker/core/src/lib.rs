@@ -15,6 +15,7 @@ pub mod gltf;
 pub mod lzss;
 pub mod menu;
 pub mod sound;
+pub mod stats;
 pub mod texture;
 pub mod texture_encode;
 

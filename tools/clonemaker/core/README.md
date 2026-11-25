@@ -13,6 +13,12 @@ cargo build --release --manifest-path tools/clonemaker/core/Cargo.toml
   --out .scratch/luigi --iso .scratch/luigi.iso
 ```
 
+Use one `--stat SLOT:FIELD=VALUE` argument for each override. For example, add
+`--stat 29:speed=85 --stat 30:speed=31` to give the two clones different running speeds.
+Other values come from the source by default. Add `--no-stats` to inherit the donor's values.
+Display bars and gameplay stats have separate controls. See the field names in
+[`src/stats.rs`](src/stats.rs).
+
 The CLI accepts the Python patcher's flags and retains its help, planned-edit,
 listing and patch messages. `mssb-clone-probe` is a file-oriented interface for
 local differential tests, separate from the user CLI.

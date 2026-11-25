@@ -39,6 +39,14 @@ async fn source_info(app: AppHandle, source: usize) -> Result<SourceInfo, ApiErr
 }
 
 #[tauri::command]
+async fn character_stats(
+    app: AppHandle,
+    character: usize,
+) -> Result<mssb_clone_core::api::CharacterStats, ApiError> {
+    blocking(move |core| core.character_stats(character), app).await
+}
+
+#[tauri::command]
 async fn anim_choices(app: AppHandle, source: usize) -> Result<Vec<AnimChoice>, ApiError> {
     blocking(move |core| core.anim_choices(source), app).await
 }
@@ -186,6 +194,7 @@ fn main() {
             open_game,
             sources,
             source_info,
+            character_stats,
             anim_choices,
             next_free_slot,
             preview,

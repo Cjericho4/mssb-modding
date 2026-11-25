@@ -9,7 +9,7 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const painted = () => new Promise((r) => requestAnimationFrame(() => setTimeout(r, 0)));
 
 const WIDGETS = ["pill", "btn-iso", "btn-dir", "game-path", "status", "source", "regions-box", "rows", "btn-add",
-  "btn-export", "btn-blender", "blender", "blender-source", "blender-all", "blender-go", "blender-cancel", "btn-adv", "adv", "chk-ui", "chk-colour", "chk-stats", "keeplum", "chk-keep", "out-path", "btn-out", "btn-go",
+  "btn-export", "btn-blender", "blender", "blender-source", "blender-all", "blender-go", "blender-cancel", "btn-stats", "nav-stats", "stats-fields", "btn-adv", "adv", "chk-ui", "chk-colour", "chk-stats", "keeplum", "chk-keep", "out-path", "btn-out", "btn-go",
   "roster", "clone-name", "btn-log", "log-drawer", "btn-enlarge", "run-box", "progress-bar", "btn-cancel", "preview-chip", "preview-caption", "img-before", "img-after", "log"];
 
 export async function run(options, app) {
@@ -260,6 +260,42 @@ export async function run(options, app) {
     textures().querySelector(".clear").click();
     check(!textures().classList.contains("set") && textures().querySelector(".pick").textContent === "My textures…", "clear");
     app.setRowTextures(app.state.groups[0].rows[0], exported.folder);
+
+    // A painted clone and a recoloured clone can carry different stats in one build.
+    const editStats = async (row, button) => {
+      app.state.groups[0].rows[row].entry.click();
+      $(button).click();
+      await waitFor(() => !$("clone-stats").hidden && !$("stats-save").disabled, "the stats editor");
+      return $("stats-fields").querySelector('[name="speed"]');
+    };
+    const firstSpeed = await editStats(0, "btn-stats");
+    check(firstSpeed.value === "" && firstSpeed.placeholder !== "", "unedited stats show inherited values");
+    firstSpeed.value = String(Number(firstSpeed.max) + 1);
+    $("stats-save").click();
+    check(!$("clone-stats").hidden && !firstSpeed.validity.valid, "invalid speed keeps the editor open");
+    firstSpeed.value = "87";
+    $("stats-save").click();
+    $("chk-stats").click();
+    const secondSpeed = await editStats(1, "nav-stats");
+    const secondRow = app.state.groups[0].rows[1];
+    const donorStats = await invoke("character_stats", { character: secondRow.slot });
+    check(secondSpeed.value === "" && secondSpeed.placeholder === String(donorStats.fields.find((f) => f.key === "speed").value),
+      "another clone inherits its donor's stats when source stats are off");
+    secondSpeed.value = "61";
+    $("stats-save").click();
+    $("chk-stats").click();
+    check(app.makeJob().clones[0].stats.speed === 87 && app.makeJob().clones[0].textures === exported.folder &&
+      app.makeJob().clones[1].stats.speed === 61, "distinct overrides travel with both clones, including painted textures");
+    await editStats(1, "btn-stats");
+    $("stats-reset").click();
+    $("stats-cancel").click();
+    check(app.makeJob().clones[1].stats.speed === 61, "Cancel preserves saved edits after Reset");
+    await editStats(1, "btn-stats");
+    $("stats-reset").click();
+    $("stats-save").click();
+    check(!app.makeJob().clones[1].stats && app.makeJob().clones[0].stats.speed === 87,
+      "reset restores inheritance for only the selected clone");
+    app.state.groups[0].rows[0].entry.click();
 
     // Export 3D Model: the button opens the choice (the shown character, all animations); Cancel
     // closes it. Then an export to a known path (no save dialog) that must parse as glTF.

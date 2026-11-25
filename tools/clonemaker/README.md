@@ -73,7 +73,7 @@ under **Advanced options**, or in the right-click menu, shows it again.
   the character (for example **Mario · 4 clones**), is about the character these clones copy.
 - **Right-click** a clone, a character or the stage for shortcuts (remove a clone, export, turn the
   model, …). **Start over…** clears every clone and choice after asking; your game is never touched.
-- **Game plan** and **Stats** are marked *Later*: they're coming in a future version.
+- **Stats** edits the selected clone.
 
 ## 3. Set up your clones
 
@@ -139,6 +139,20 @@ colours and a green Bowser on a Shy Guy slot.
 A slot can only be used once in the whole game, and a character you clone can't also be replaced.
 Slots another character's clones already use are greyed out with *(used by another character)*.
 **Advanced options** apply to every character.
+
+## Edit one clone's stats
+
+1. Select the clone in the dock.
+2. Open **Stats**.
+3. Enter the values you want to change.
+4. Select **Apply**.
+5. Build the game with **Create Patched Game**.
+
+Each blank field inherits its value from the source character or the replaced slot.
+Use the stats checkbox in **Advanced options** to select that baseline.
+Each clone keeps its own overrides, including clones with painted textures.
+The four display bars control the menu. Edit the corresponding gameplay fields to change play.
+Use **Reset all** and **Apply** to clear overrides for the selected clone.
 
 ## Your own textures
 

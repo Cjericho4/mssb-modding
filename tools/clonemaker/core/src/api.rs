@@ -6,6 +6,8 @@ use crate::colour::{Recolour, Region, hsv_to_rgb, rgb_to_hsv, source_regions};
 use crate::constants::*;
 use crate::custom_textures::{self, Painted};
 use crate::disc::{Disc, preflight};
+pub use crate::stats::CharacterStats;
+use crate::stats::{self, Overrides};
 use crate::texture::{Gpc, decode_texture};
 use crate::{Error, Result};
 use base64::Engine;
@@ -149,6 +151,7 @@ pub fn default_rows(choices: &[SlotChoice]) -> Vec<CloneRow> {
             anims: None,
             source: None,
             regions: None,
+            stats: Overrides::new(),
         })
         .collect()
 }
@@ -569,6 +572,9 @@ pub struct CloneRow {
     /// "Animations from" (#9): the charID whose animations this clone plays; none = the source's.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub anims: Option<usize>,
+    /// Stat values that differ from the selected source or donor baseline.
+    #[serde(default, skip_serializing_if = "Overrides::is_empty")]
+    pub stats: Overrides,
     /// The character this clone copies (#18); none = the job's `source`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub source: Option<usize>,
@@ -625,6 +631,7 @@ pub fn validate_job(job: &Job, free_bytes: Option<u64>) -> Result<()> {
     check_id(job.source)?;
     for row in &job.clones {
         check_id(row.slot)?;
+        stats::validate(&row.stats)?;
         if let Some(a) = row.anims {
             check_id(a)?;
         }
@@ -859,6 +866,12 @@ pub fn run_job(job: &Job, emit: &dyn Fn(Event), cancel: &AtomicBool) -> Result<D
             iso: Some(partial.clone()),
             ui_source: job.ui_source,
             no_stats: !job.copy_stats,
+            stats: job
+                .clones
+                .iter()
+                .filter(|row| !row.stats.is_empty())
+                .map(|row| (row.slot, row.stats.clone()))
+                .collect(),
             colour_word: if job.keep_colour_word {
                 ColourWord::Donor
             } else {
@@ -1159,6 +1172,23 @@ impl Core {
                 })
                 .collect(),
         })
+    }
+    /// Read editable values for a clone's inherited source or donor from the selected disc.
+    pub fn character_stats(
+        &self,
+        character: usize,
+    ) -> std::result::Result<CharacterStats, ApiError> {
+        check_id(character)?;
+        let lock = self.game.lock().unwrap();
+        let game = lock.as_ref().ok_or_else(|| ApiError {
+            error: "Choose a game first.".into(),
+        })?;
+        let row = game.disc.read(
+            "ZZZZ.dat",
+            stats::OFFSET + (character * stats::ROW) as u64,
+            stats::ROW,
+        )?;
+        Ok(stats::describe(&row, character)?)
     }
     /// Choose the first unused compatible donor for a new clone row.
     pub fn next_free_slot(

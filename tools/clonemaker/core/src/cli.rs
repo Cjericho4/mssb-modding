@@ -21,6 +21,7 @@ const OPTIONS: &[&str] = &[
     "--colour-word",
     "--relocate-menu-art",
     "--no-stats",
+    "--stat",
     "--no-gameplay",
     "--list-slots",
     "--list-regions",
@@ -206,6 +207,7 @@ pub fn parse(argv: &[String]) -> Result<Command> {
             "--out",
             "--source",
             "--slot",
+            "--stat",
             "--iso",
             "--ui",
             "--colour-word",
@@ -236,6 +238,25 @@ pub fn parse(argv: &[String]) -> Result<Command> {
                 }
                 "--source" => args.source = value,
                 "--slot" => args.slots.push(value),
+                "--stat" => {
+                    let (slot, field_value) = value
+                        .split_once(':')
+                        .ok_or_else(|| Error::new("--stat expects SLOT:FIELD=VALUE".into()))?;
+                    let (field, number) = field_value
+                        .split_once('=')
+                        .ok_or_else(|| Error::new("--stat expects SLOT:FIELD=VALUE".into()))?;
+                    let slot = parse_char(slot)?;
+                    let byte = number.parse::<u8>().map_err(|_| {
+                        Error::new(format!("Invalid stat value '{number}' for {field}"))
+                    })?;
+                    let fields = args.stats.entry(slot).or_default();
+                    if fields.insert(field.to_owned(), byte).is_some() {
+                        return Err(Error::new(format!(
+                            "Duplicate --stat for slot {slot}: {field}"
+                        )));
+                    }
+                    crate::stats::validate(fields)?;
+                }
                 "--iso" => args.iso = Some(crate::normalize_path(Path::new(&value))),
                 "--ui" => {
                     if !["source", "donor"].contains(&value.as_str()) {
