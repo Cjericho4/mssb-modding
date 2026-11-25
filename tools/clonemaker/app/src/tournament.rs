@@ -21,9 +21,9 @@ use std::{
 const FORMAT: &str = "mssb-tournament-team-v1";
 const BASE_SHA256: &str = "e3cd4dc92dd85f72b3dd10a95f2e075f612c197862b94c86466c64970f4efae9";
 const CAPTAINS: [usize; 12] = [0, 1, 2, 3, 4, 5, 6, 9, 10, 11, 17, 19];
-const MAX_PNG: usize = 2 * 1024 * 1024;
-const MAX_TEAM_PNG: usize = 16 * 1024 * 1024;
-const MAX_TEAM_PIXELS: usize = 16 * 1024 * 1024;
+pub(super) const MAX_PNG: usize = 2 * 1024 * 1024;
+pub(super) const MAX_TEAM_PNG: usize = 16 * 1024 * 1024;
+pub(super) const MAX_TEAM_PIXELS: usize = 16 * 1024 * 1024;
 
 #[derive(Clone, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
@@ -113,6 +113,41 @@ static STOCK_TEXTURES: LazyLock<BTreeMap<(usize, &'static str), &'static str>> =
             .collect()
     });
 
+// The folder picker and team exporter share the same per-character stock filter and PNG normalization.
+pub(super) fn portable_texture(
+    source: usize,
+    name: &str,
+    encoded: &str,
+) -> Result<Option<Vec<u8>>, String> {
+    let expected = STOCK_TEXTURES.get(&(source, name)).ok_or_else(|| {
+        format!("{name} does not match a texture for this character. Use a changed PNG from this character’s Studio export.")
+    })?;
+    let (bytes, pixel_count) = texture_data(name, encoded)?;
+    let (w, h, mut rgba) = custom_textures::decode_png(&bytes, name).map_err(message)?;
+    if w * h != pixel_count {
+        return Err(format!("{name} must contain a full-size texture."));
+    }
+    for pixel in rgba.as_chunks_mut::<4>().0 {
+        if pixel[3] == 0 {
+            pixel[..3].fill(0);
+        }
+    }
+    let digest = format!("{:x}", Sha256::digest(&rgba));
+    if digest == *expected {
+        return Ok(None);
+    }
+    if STOCK_TEXTURES.values().any(|stock| *stock == digest) {
+        return Err(format!("{name} contains unchanged artwork from another original game texture. Choose your edited texture."));
+    }
+    let png = custom_textures::rgba_png(w, h, &rgba).map_err(message)?;
+    if png.len() > MAX_PNG {
+        return Err(format!(
+            "{name} exceeds the 2 MiB limit after normalizing its pixels."
+        ));
+    }
+    Ok(Some(png))
+}
+
 // All portable files carry the same explicit team fields. Rebuild each user-painted
 // PNG from its pixels so a selected file cannot bundle metadata or trailing file data.
 pub(crate) fn portable_sheet(mut team: TeamSheet) -> Result<TeamSheet, String> {
@@ -121,29 +156,11 @@ pub(crate) fn portable_sheet(mut team: TeamSheet) -> Result<TeamSheet, String> {
     for row in &mut team.rows {
         let Some(source) = row.source else { continue };
         for (name, encoded) in std::mem::take(&mut row.textures) {
-            let expected = STOCK_TEXTURES.get(&(source, name.as_str())).ok_or_else(|| {
-                format!("{name} does not match a texture for this character. Use a changed PNG from this character’s Studio export.")
-            })?;
-            let (bytes, pixel_count) = texture_data(&name, &encoded)?;
-            let (w, h, mut rgba) = custom_textures::decode_png(&bytes, &name).map_err(message)?;
-            if w * h != pixel_count {
-                return Err(format!("{name} must contain a full-size texture."));
-            }
-            for pixel in rgba.as_chunks_mut::<4>().0 {
-                if pixel[3] == 0 {
-                    pixel[..3].fill(0);
-                }
-            }
-            let digest = format!("{:x}", Sha256::digest(&rgba));
-            if digest == *expected {
+            let Some(png) = portable_texture(source, &name, &encoded)? else {
                 continue;
-            }
-            if STOCK_TEXTURES.values().any(|stock| *stock == digest) {
-                return Err(format!("{name} contains unchanged artwork from another original game texture. Choose your edited texture."));
-            }
-            let png = custom_textures::rgba_png(w, h, &rgba).map_err(message)?;
+            };
             total += png.len();
-            if png.len() > MAX_PNG || total > MAX_TEAM_PNG {
+            if total > MAX_TEAM_PNG {
                 return Err(format!("The exported texture pixels exceed the 2 MiB per picture or 16 MiB per team limit at {name}."));
             }
             row.textures.insert(name, STANDARD.encode(png));

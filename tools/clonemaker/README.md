@@ -145,10 +145,11 @@ Slots another character's clones already use are greyed out with *(used by anoth
 ## Edit one clone's stats
 
 1. Select the clone in the dock.
-2. Open **Stats**.
-3. Enter the values you want to change.
-4. Select **Apply**.
-5. Build the game with **Create Patched Game**.
+2. Open **Stats** to see the current values. Stat editing is locked when Clone Maker starts.
+3. Keep the default stats for normal play. In-game testing of custom stats is limited. Undisclosed changes can give one player an unfair advantage.
+4. If both players intend to use custom stats, read the warning, check the acknowledgement and choose **Enable stat editing for this session**.
+5. Enter the values you want to change and select **Apply**.
+6. Build the game with **Create Patched Game**.
 
 Each blank field inherits its value from the source character or the replaced slot.
 Use the stats checkbox in **Advanced options** to select that baseline.
@@ -162,7 +163,7 @@ Use **Reset all** and **Apply** to clear overrides for the selected clone.
 
 1. Open **Game Plan** and choose **Plan my team**. Pick characters in batting order or drop them onto field positions.
 2. Click a player's name in the lineup or on the field to edit it. Both views update together.
-3. To give a player a custom look, select their portrait and add your painted Studio PNGs under **Custom textures**.
+3. To give a player a custom look, select their portrait. Under **Own textures**, choose **My textures…** and open your painted Studio folder. Use **Add PNGs…** to add individual pictures. Click a thumbnail to see the full picture.
 4. Choose **Export team…**, name your team in the save dialog, and send the resulting `.team.json` file to the organizer.
 
 You can export an unfinished lineup. The file contains only the selected team’s character choices, batting order, positions, names, captain and superstar choices, optional stat edits, and custom texture pixels. Each player supplies their own original game when it is time to build.
@@ -183,6 +184,8 @@ For a file that contains both lineups, choose **Matchup files → Import matchup
 3. Open **Game Plan → Open finished-game roster…**. Choose the built `matchup.iso`, select **Load matchup…**, and open the generated `hud.json`.
 4. Compare the matchup IDs. Close Rio. Choose **Use in Rio…** and select the **HudFiles** folder on each computer. Clone Maker backs up the previous HUD there.
 5. Have both players join a private **No Game Mode** lobby in Project Rio 2.2.0. Assign controller ports before enabling **Fast Reset**. If the ports change, turn Fast Reset off and on again.
+
+After the host starts the game, both players press their mapped GameCube **A** button through the pregame menus. Rio loads the saved batting orders and positions even if the draft screen shows other players.
 
 Rio updates its HUD during play. Keep the portable matchup file to reuse both starting lineups.
 

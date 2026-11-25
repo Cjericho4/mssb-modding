@@ -284,14 +284,37 @@ body.planning .top .pages span { display: inline; }
 #tournament-plan .tourney-textures p, #tournament-plan .tourney-textures details, #tournament-plan .source-change p {
   margin: 4px 0 8px; color: var(--ink-2); font-size: 12px;
 }
-#tournament-plan .tourney-textures label { display: grid; gap: 5px; font-size: 12px; font-weight: 500; }
-#tournament-plan .tourney-textures input[type=file] { width: 100%; color: var(--ink-2); font: 11px var(--sans); }
-#tournament-plan .tourney-textures input::file-selector-button {
-  margin-right: 7px; padding: 5px 8px; font: 500 11px var(--sans); color: var(--ink); background: var(--paper);
-  border: 1px solid var(--rule); border-radius: 4px; cursor: pointer;
+#tournament-plan .tourney-textures .texbox { margin-top: 7px; }
+#tournament-plan .tourney-textures .textures { min-width: min(126px,100%); }
+#tournament-plan .tourney-add-pngs { padding-inline: 8px; }
+#tournament-plan .tourney-texture-gallery {
+  display: grid; grid-template-columns: repeat(auto-fill,minmax(min(74px,100%),1fr)); gap: 6px;
 }
-#tournament-plan .tourney-textures ul { padding-left: 16px; overflow-wrap: anywhere; }
-#tournament-plan .tourney-textures li button { margin-left: 4px; }
+#tournament-plan .tourney-texture-tile { position: relative; min-width: 0; }
+#tournament-plan .tourney-texture-thumb {
+  display: block; padding: 0; width: 100%; overflow: hidden; text-align: center;
+}
+#tournament-plan .tourney-texture-thumb img, #tournament-plan .tourney-texture-preview img {
+  display: block; object-fit: contain; image-rendering: pixelated;
+  background-color: var(--card); background-image: repeating-conic-gradient(#80808029 0 25%,transparent 0 50%);
+  background-size: 12px 12px;
+}
+#tournament-plan .tourney-texture-thumb img { width: 100%; height: 57px; }
+#tournament-plan .tourney-texture-thumb span {
+  display: block; padding: 4px 2px; color: var(--ink-2); font: 10px/1.2 var(--mono);
+}
+#tournament-plan .tourney-remove-png {
+  position: absolute; top: 2px; right: 2px; padding: 0; width: 22px; height: 22px;
+  color: var(--ink); background: var(--card); border-radius: 4px; font-size: 15px;
+}
+#tournament-plan .tourney-texture-preview {
+  width: min(384px,90vw); max-height: 90vh; padding: 16px; border: 1px solid var(--rule);
+  border-radius: 9px; background: var(--card); color: var(--ink);
+}
+#tournament-plan .tourney-texture-preview::backdrop { background: #0b1220b8; }
+#tournament-plan .tourney-texture-preview img {
+  width: 100%; height: min(320px,55vh); margin: 12px 0; border: 1px solid var(--rule);
+}
 #tournament-plan .source-change:not(:empty) { margin: 6px 0; padding: 8px; border: 1px solid var(--rule); border-radius: 5px; }
 #tournament-plan .source-change button { margin: 2px; }
 #tournament-plan .tourney-footer {
