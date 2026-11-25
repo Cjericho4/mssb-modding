@@ -2,6 +2,7 @@
 //! core (`tools/clonemaker/core`, `api::Core`) as described in `tools/clonemaker/API.md`.
 #![cfg_attr(windows, windows_subsystem = "windows")]
 
+mod planner_textures;
 mod portrait_assets;
 mod portraits;
 mod rio_teams;
@@ -208,6 +209,7 @@ fn main() {
             portrait_assets::load_custom_portrait_asset,
             rio_teams::save_rio_roster,
             rio_teams::install_rio_matchup,
+            planner_textures::pick_tournament_texture_folder,
             tournament_files::save_tournament_team,
             tournament_files::save_tournament_matchup_sheet,
             tournament_library::list_tournament_teams,

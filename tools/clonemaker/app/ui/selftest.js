@@ -274,19 +274,23 @@ export async function run(options, app) {
     check(slot("fielder",1).dataset.pos === "0" && slotName("fielder",1).textContent === "Away DK" &&
       slotName("row",1).textContent === "Away DK", "a field swap moves the named clone and preserves its batting spot");
     drop(slot("fielder",1), slot("fielder",0));
-    slot("row",2).querySelector(".tourney-pick").click();
+    slot("row",1).querySelector(".tourney-pick").click();
+    const texture = document.createElement("canvas");
+    texture.width = texture.height = 128;
+    const ctx = texture.getContext("2d");
+    ctx.fillStyle = "#00e7e7";
+    ctx.fillRect(0, 0, 128, 128);
+    const upload = new DataTransfer();
+    upload.items.add(new File([await new Promise(resolve => texture.toBlob(resolve))], "t08_128x128.png", {type:"image/png"}));
+    const files = tournamentField(".tourney-pngs");
+    files.files = upload.files;
+    files.dispatchEvent(new Event("change", {bubbles:true}));
+    await waitFor(() => !tournamentField("fieldset").disabled &&
+      tournamentField(".tourney-texture-thumb img")?.naturalWidth === 128, "the painted PNG thumbnail");
+    tournamentField(".tourney-texture-thumb").click();
+    check(tournamentField(".tourney-texture-preview").open, "a painted PNG can be inspected at full size");
+    tournamentField(".tourney-close-texture").click();
     if (cachedFaces.length && await invoke("prepare_custom_portraits", {sourcePath:null})) {
-      slot("row",1).querySelector(".tourney-pick").click();
-      const texture = document.createElement("canvas");
-      texture.width = texture.height = 128;
-      const ctx = texture.getContext("2d");
-      ctx.fillStyle = "#00e7e7";
-      ctx.fillRect(0, 0, 128, 128);
-      const upload = new DataTransfer();
-      upload.items.add(new File([await new Promise(resolve => texture.toBlob(resolve))], "t08_128x128.png", {type:"image/png"}));
-      const files = tournamentField(".tourney-pngs");
-      files.files = upload.files;
-      files.dispatchEvent(new Event("change", {bubbles:true}));
       const customSelector = '.roster-face[data-appearance="custom"] img.roster-portrait';
       const editedHead = () => tournamentField('.tourney-row[data-index="1"] ' + customSelector);
       const matchingHeads = () => {
@@ -326,8 +330,12 @@ export async function run(options, app) {
         const face = batterFaces()[1];
         say("DK portrait state " + face?.dataset.appearance + ", " + (face?.title || tournamentField('[role="status"]').textContent));
       }
-      slot("row",2).querySelector(".tourney-pick").click();
+    } else {
+      tournamentField(".tourney-texture-clear").click();
+      await waitFor(() => !tournamentField(".tourney-texture-thumb") && !tournamentField("fieldset").disabled,
+        "clearing painted textures without opening a game image");
     }
+    slot("row",2).querySelector(".tourney-pick").click();
     tournamentField('.tourney-tabs [data-side="Home"]').click();
     check(openSlots() === 9 && !(await invoke("list_tournament_teams")).some(entry => entry.kind !== "saved"),
       "the second team starts blank and the library contains only user saves");
@@ -424,6 +432,23 @@ export async function run(options, app) {
     const statInput = key => tournamentField('.tourney-stat-fields input[name="' + key + '"]');
     const applyBatterStats = () => tournamentField(".tourney-stat-apply").click();
     editBatterStats();
+    const batterStatDialog = tournamentField(".tourney-stat-dialog");
+    const acknowledge = () => batterStatDialog.querySelector(".stat-acknowledge");
+    const enableStats = () => batterStatDialog.querySelector(".stat-enable");
+    check(statInput("speed").readOnly && !acknowledge().checked && enableStats().disabled &&
+      tournamentField(".tourney-stat-apply").disabled && tournamentField(".tourney-stat-reset").disabled,
+      "a fresh session can inspect stats but cannot edit or reset them");
+    acknowledge().click();
+    check(!enableStats().disabled && statInput("speed").readOnly,
+      "checking the acknowledgement alone does not enable stat editing");
+    tournamentField(".tourney-stat-cancel").click();
+    editBatterStats();
+    check(!acknowledge().checked && enableStats().disabled && statInput("speed").readOnly,
+      "leaving before enabling discards the pending acknowledgement");
+    acknowledge().click();
+    enableStats().click();
+    check(!statInput("speed").readOnly && !tournamentField(".tourney-stat-apply").disabled,
+      "explicitly enabling stat editing unlocks the selected player's fields");
     const speed = statInput("speed"), runBar = statInput("running_bar");
     check(speed.value === "" && speed.min === "0" && runBar.min === "1" && runBar.max === "10",
       "tournament stats share Studio’s per-field ranges before loading a disc");

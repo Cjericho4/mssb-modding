@@ -8,6 +8,7 @@
 <link rel="stylesheet" href="rio-teams.css">
 <link rel="stylesheet" href="tournament.css">
 <link rel="stylesheet" href="planner-guide.css">
+<link rel="stylesheet" href="stat-consent.css">
 </head>
 <body>
 <header class="top">
@@ -69,7 +70,8 @@
         <hr>
         <label class="check"><input type="checkbox" id="chk-ui" checked><span id="chk-ui-text"></span></label>
         <label class="check indent"><input type="checkbox" id="chk-colour"><span>Keep the donor's name-box colour (e.g. Purple Toad's purple)</span></label>
-        <label class="check"><input type="checkbox" id="chk-stats" checked><span id="chk-stats-text"></span></label>
+        <label class="check"><input type="checkbox" id="chk-stats" checked disabled><span id="chk-stats-text"></span></label>
+        <button type="button" id="advanced-stats-access" aria-haspopup="dialog" aria-controls="clone-stats">Stat editing options…</button>
         <div id="shading-box" class="field">
           <div class="shading">
             <span class="lab">Keep shading</span>
@@ -111,6 +113,7 @@
   <form class="dialog" role="dialog" aria-modal="true" aria-labelledby="stats-title" aria-describedby="stats-note">
     <header><h2 id="stats-title">Clone stats</h2></header>
     <p id="stats-note" role="status"></p>
+    <div class="stat-consent"></div>
     <div id="stats-fields" class="form"></div>
     <div class="line end"><button type="button" id="stats-reset">Reset all</button><button type="button" id="stats-cancel">Cancel</button><button type="submit" id="stats-save" class="primary">Apply</button></div>
   </form>
@@ -199,6 +202,7 @@
       </details>
       <button type="button" data-open-teams aria-haspopup="dialog" aria-controls="rio-teams">Open finished-game roster…</button>
       <button type="button" class="tourney-switch-mode">Open in Tournament mode</button>
+      <span class="tourney-custom-stats" hidden></span>
       <button type="button" class="tourney-build">Build tournament matchup…</button>
       <button type="button" class="tourney-close">Back to Studio</button>
     </div>
@@ -208,6 +212,7 @@
     <form>
       <header><h2 id="tourney-stat-title">Batter stats</h2></header>
       <p id="tourney-stat-note"></p>
+      <div class="stat-consent"></div>
       <div class="tourney-stat-fields"></div>
       <div class="tourney-stat-actions">
         <button type="button" class="tourney-stat-reset">Reset all</button>
@@ -217,8 +222,20 @@
     </form>
   </dialog>
 </dialog>
+<template id="stat-consent-controls">
+  <div class="stat-locked">
+    <h3>Stats are read only</h3>
+    <p>Stat editing is not recommended. Its effects have had limited in-game testing. Undisclosed changes can give one player an unfair advantage.</p>
+    <label class="stat-promise"><input type="checkbox" class="stat-acknowledge">I understand and will tell my opponent which stats changed before we play.</label>
+    <button type="button" class="stat-enable" disabled>Enable stat editing for this session</button>
+  </div>
+  <div class="stat-unlocked" hidden>
+    <span>Stat editing is enabled for this session.</span>
+    <button type="button" class="stat-lock">Lock stat editing</button>
+  </div>
+</template>
 <script type="module" src="tournament.mjs"></script>
-<script src="app.js"></script>
+<script type="module" src="app.js"></script>
 <script type="module" src="rio-teams.mjs"></script>
 </body>
 </html>

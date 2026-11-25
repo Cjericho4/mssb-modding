@@ -3,6 +3,7 @@ import {loadDraft, saveDraft} from "./game-plan-draft.mjs";
 import {playerPool, resetPoolSearch} from "./game-plan-pool.mjs";
 import {initPortraits, lineupFaces} from "./roster-portraits.mjs";
 import {initPlannerGuide} from "./planner-guide.mjs";
+import {bindStatAccess, canEditStats} from "./stat-consent.mjs";
 
 const format = "mssb-tournament-team-v1";
 const matchupFormat = "mssb-tournament-matchup-v1";
@@ -550,19 +551,102 @@ function orderPanel(team, faceFor) {
   panel.append(ol);
   return panel;
 }
+// Folder names are local display hints. The portable team contains only the painted pixels.
+const textureFolderNames = new WeakMap();
+
+function textureGallery(row, removeTexture) {
+  const gallery = el("div","","tourney-texture-gallery");
+  gallery.setAttribute("role","group");
+  gallery.setAttribute("aria-label","Painted textures");
+  const preview = el("dialog","","tourney-texture-preview");
+  const filename = el("h3");
+  const fullImage = el("img");
+  const closePreview = button("Close",()=>preview.close(),"tourney-close-texture");
+  preview.append(filename,fullImage,closePreview);
+  let opener;
+  preview.onclose = () => opener?.focus();
+  for (const [name, png] of Object.entries(row.textures).sort(([a],[b])=>a.localeCompare(b))) {
+    const [,index,width,height] = /^t(\d+)_(\d+)x(\d+)\.png$/.exec(name);
+    const tile = el("div","","tourney-texture-tile");
+    const thumb = button("",()=>{
+      opener = thumb;
+      filename.textContent = name;
+      fullImage.src = image.src;
+      fullImage.alt = "Painted texture " + Number(index) + ", " + width + " by " + height + " pixels";
+      preview.setAttribute("aria-label","Preview " + name);
+      preview.showModal();
+    },"tourney-texture-thumb");
+    thumb.setAttribute("aria-label","Preview " + name);
+    thumb.setAttribute("aria-haspopup","dialog");
+    thumb.title = "Preview " + name;
+    const image = el("img");
+    image.alt = "";
+    image.loading = "lazy";
+    image.src = "data:image/png;base64," + png;
+    thumb.append(image, el("span", "T" + index + " · " + width + "×" + height));
+    const remove = button("×",()=>removeTexture(name),"tourney-remove-png");
+    remove.title = "Remove " + name;
+    remove.setAttribute("aria-label",remove.title);
+    tile.append(thumb,remove);
+    gallery.append(tile);
+  }
+  gallery.append(preview);
+  return gallery;
+}
+
 function texturePanel(team, row, i) {
   const area = el("div", "", "tourney-textures");
-  const entries = Object.keys(row.textures || {}).sort();
-  area.append(el("h4","Custom textures"), el("p",entries.length ? entries.length + " changed PNG" + (entries.length===1 ? "" : "s") : "Using the character’s original textures."));
+  const count = Object.keys(row.textures || {}).length;
+  const source = row.source;
+  const active = () => area.isConnected && dialog.open && teams[side] === team &&
+    selected[side] === i && team.rows[i] === row && row.source === source;
+  function apply(textures, message, folderName) {
+    if (!active()) return;
+    if (Object.keys(textures).length) {
+      const rows = team.rows.map(r=>r === row ? {...row,textures} : r);
+      validateTextures(rows);
+      row.textures = textures;
+      if (folderName) textureFolderNames.set(textures, folderName);
+    } else delete row.textures;
+    draw();
+    status.textContent = message;
+    requestAnimationFrame(() => {
+      if (dialog.open && teams[side] === team && selected[side] === i && team.rows[i] === row)
+        editor.querySelector(".tourney-texture-folder")?.focus({preventScroll:true});
+    });
+  }
+  area.append(el("h4","Own textures"));
+  const controls = el("div","","texbox");
+  const picker = el("div","",count ? "textures set" : "textures");
+  const pick = button(textureFolderNames.get(row.textures) || (count ? "Replace folder…" : "My textures…"),()=>run(async()=>{
+    const folder = await invoke("pick_tournament_texture_folder",{source});
+    if (!folder || !active()) return;
+    if (!Object.keys(folder.textures).length) {
+      status.textContent = "This folder contains only original textures. Choose a folder with your painted PNGs.";
+      return;
+    }
+    const skipped = folder.skipped ? " Skipped " + folder.skipped + (folder.skipped === 1 ? " unchanged PNG." : " unchanged PNGs.") : "";
+    apply(folder.textures,"Updated textures for " + title(row) + "." + skipped,folder.name);
+  }),"pick tourney-texture-folder");
+  pick.title = "Choose a Studio texture folder for " + title(row);
+  picker.append(pick);
+  if (count) {
+    const clear = button("×",()=>apply({},"Restored the original textures for " + title(row) + "."),"icon clear tourney-texture-clear");
+    clear.title = "Stop using these textures";
+    clear.setAttribute("aria-label",clear.title);
+    picker.append(clear);
+  }
   const files = el("input","","tourney-pngs");
   files.type = "file";
   files.multiple = true;
   files.accept = ".png,image/png";
-  files.setAttribute("aria-label", "Add changed PNGs to batter " + (i + 1));
+  files.hidden = true;
+  const add = button("Add PNGs…",()=>files.click(),"tourney-add-pngs");
+  add.title = "Add or replace individual painted Studio PNGs";
   files.onchange = () => run(async () => {
     const chosen = Array.from(files.files);
     files.value = "";
-    if (!chosen.length) return;
+    if (!chosen.length || !active()) return;
     if (chosen.length > 64 || chosen.reduce((sum,f)=>sum+f.size,0) > 16 * MiB)
       throw Error("Choose up to 64 PNGs. A team's changed PNGs must fit in 16 MiB.");
     const next = {...row.textures};
@@ -571,33 +655,26 @@ function texturePanel(team, row, i) {
     validateTextures(rows);
     const prepared = await invoke("prepare_team_sheet", {team:{...team,rows}});
     const changed = prepared.rows[i].textures || {};
-    const originalCount = chosen.filter(file => !Object.hasOwn(changed, file.name)).length;
-    if (Object.keys(changed).length) row.textures = changed;
-    else delete row.textures;
-    draw(".tourney-pngs");
-    const skipped = originalCount ? " Skipped " + originalCount + (originalCount === 1 ? " unchanged PNG." : " unchanged PNGs.") : "";
-    status.textContent = "Updated textures for " + title(row) + "." + skipped;
+    const originals = chosen.filter(file=>!Object.hasOwn(changed,file.name)).length;
+    const skipped = originals ? " Skipped " + originals + (originals === 1 ? " unchanged PNG." : " unchanged PNGs.") : "";
+    apply(changed,"Updated textures for " + title(row) + "." + skipped);
   });
-  area.append(labeled("Add your painted PNGs from Studio",files));
-  if (entries.length) {
-    const list = el("ul");
-    for (const name of entries) {
-      const li = el("li");
-      const remove = button("Remove", () => {
-        const next = {...row.textures};
-        delete next[name];
-        if (Object.keys(next).length) row.textures = next;
-        else delete row.textures;
-        draw(".tourney-pngs");
-      }, "tourney-remove-png");
-      remove.setAttribute("aria-label","Remove " + name);
-      li.append(el("span",name),remove);
-      list.append(li);
-    }
-    area.append(list);
-  }
+  controls.append(picker,add,files);
+  area.append(controls,el("p",count ? count + (count === 1 ? " painted texture" : " painted textures") :
+    "Choose a folder of PNGs you painted in a Studio texture export."));
+  if (count) area.append(textureGallery(row,name=>{
+    const next = {...row.textures};
+    delete next[name];
+    apply(next,"Removed " + name + " from " + title(row) + ".");
+  }));
   return area;
 }
+const plannerStatAccess = bindStatAccess(
+  statDialog.querySelector("form"), statDialog.querySelector(".tourney-stat-fields"),
+  statDialog.querySelector(".tourney-stat-reset"), statDialog.querySelector(".tourney-stat-apply"),
+  statDialog.querySelector(".tourney-stat-cancel")
+);
+
 function editStats(row, i) {
   const form = statDialog.querySelector("form");
   const fields = statDialog.querySelector(".tourney-stat-fields");
@@ -606,18 +683,16 @@ function editStats(row, i) {
   fields.replaceChildren();
   for (const {key, label, min, max} of statFields.values()) {
     const input = el("input");
-    Object.assign(input, {type:"number", name:key, min, max, step:1, placeholder:"Original", value:row.stats?.[key] ?? ""});
+    Object.assign(input, {type:"number", name:key, min, max, step:1, placeholder:"Original", defaultValue:row.stats?.[key] ?? ""});
     const field = labeled(label, input);
     field.append(el("small", min + "–" + max));
     fields.append(field);
   }
-  statDialog.querySelector(".tourney-stat-reset").onclick = () => {
-    for (const input of fields.querySelectorAll("input")) input.value = "";
-  };
+  plannerStatAccess.open();
   statDialog.querySelector(".tourney-stat-cancel").onclick = () => statDialog.close();
   form.onsubmit = event => {
     event.preventDefault();
-    if (!form.reportValidity()) return;
+    if (!canEditStats() || !form.reportValidity()) return;
     const overrides = {};
     for (const input of fields.querySelectorAll("input")) {
       if (input.value !== "") overrides[input.name] = input.valueAsNumber;
@@ -727,7 +802,7 @@ function inspector(team, faceFor) {
   } else {
     stats.append(el("p","Using the character’s original stats."));
   }
-  const edit = button("Edit stats…", () => editStats(row,i), "tourney-edit-stats");
+  const edit = button("View stats…", () => editStats(row,i), "tourney-edit-stats");
   edit.setAttribute("aria-haspopup","dialog");
   stats.append(edit);
   customization.append(stats);
@@ -761,6 +836,10 @@ function draw(focus, persist = true) {
     }));
   }
   editor.append(inspector(team,faceFor));
+  const statNotice = dialog.querySelector(".tourney-custom-stats");
+  const changedSides = sides.filter(s => teams[s].rows.some(row => Object.keys(row.stats || {}).length));
+  statNotice.hidden = mode !== "tournament" || !changedSides.length;
+  statNotice.textContent = statNotice.hidden ? "" : "Custom stats on " + changedSides.join(" and ") + ". Tell your opponent before play.";
   guide.update(side);
   if (focus) dialog.querySelector(focus)?.focus({preventScroll:true});
   if (persist) draftChanged();

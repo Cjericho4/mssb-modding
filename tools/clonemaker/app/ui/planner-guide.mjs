@@ -12,7 +12,7 @@ const arrange = {
 const nameAndPaint = {
   title:"Name a player or customize a clone",
   target:".tourney-row.is-selected .tourney-name, .tourney-fielder.is-selected .tourney-name",
-  text:"Click a name on the field or in the batting order and type. Both names update together. Select the player’s portrait to attach your painted Studio PNGs under Custom textures or change that player’s stats."
+  text:"Click a name on the field or in the batting order and type. Both names update together. Select the player’s portrait and choose My textures… to use a painted Studio folder. Click a thumbnail to see the paint up close."
 };
 const save = {
   title:"Send your team to the organizer",
@@ -43,7 +43,7 @@ const steps = {
     text:"Fill all nine spots on each side, choose one captain per team, and enter each player’s Rio username. Click Build tournament matchup…, choose your original USA disc image (.iso), then pick an output folder."
   }, {
     title:"Use the two lineups in Project Rio", target:".tourney-switch-mode",
-    text:"On both computers, open the finished-game roster in Game Plan. Choose the built game, load hud.json, then click Use in Rio… with Rio closed. Join a private No Game Mode lobby. The host clicks Assign Controller Ports, assigns each player one controller, then enables Fast Reset. If the ports change, turn Fast Reset off and on again."
+    text:"On both computers, open the finished-game roster in Game Plan. Choose the built game, load hud.json, then click Use in Rio… with Rio closed. Join a private No Game Mode lobby. The host clicks Assign Controller Ports, assigns each player one controller, then enables Fast Reset. If the ports change, turn Fast Reset off and on again. After the host starts, both players press their GameCube A button through the pregame menus. Rio loads the saved teams."
   }]
 };
 

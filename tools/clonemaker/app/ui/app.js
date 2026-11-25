@@ -1,6 +1,6 @@
 // The Clone Maker page: the window of the retired Tk app (see tools/modding/clone_gui.py for its logic), talking to the core
 // through the commands and events of tools/clonemaker/API.md.
-"use strict";
+import {bindStatAccess, canEditStats, onStatAccessChange} from "./stat-consent.mjs";
 
 const { invoke } = window.__TAURI__.core;
 const { listen } = window.__TAURI__.event;
@@ -92,7 +92,7 @@ function log(line) {
 function setEnabled(on) {
   state.inputsEnabled = on;
   updateStatsButtons(allRows().find((r) => r.id === state.previewRow));
-  const inputs = ["btn-group", "chk-ui", "chk-colour", "chk-stats", "keeplum", "chk-keep", "out-path", "btn-out", "btn-go"]
+  const inputs = ["btn-group", "chk-ui", "chk-colour", "keeplum", "chk-keep", "out-path", "btn-out", "btn-go"]
     .map($)
     .concat([...document.querySelectorAll("#groups input, #groups select, #groups button, #roster button")]);
   for (const w of inputs) w.disabled = !on;
@@ -695,13 +695,21 @@ function colourChanged(row) {
 
 // ---------------------------------------------------------------- clone stats
 let statsEditor = null;
+let copySourceStats = true;
+const studioStatAccess = bindStatAccess(
+  $("clone-stats").querySelector("form"), $("stats-fields"), $("stats-reset"), $("stats-save"), $("stats-cancel")
+);
 
 function updateStatsButtons(row) {
   const count = row ? Object.keys(row.stats).length : 0;
+  $("chk-stats").disabled = !state.inputsEnabled || !canEditStats();
+  $("advanced-stats-access").disabled = !state.inputsEnabled || !row;
+  $("advanced-stats-access").hidden = canEditStats();
   for (const id of ["nav-stats", "btn-stats"]) {
     const button = $(id);
     button.disabled = !state.inputsEnabled || !row;
-    button.title = row ? (count ? "Edit clone stats (" + count + " changed)" : "Edit this clone's stats") : "Select a clone to edit its stats";
+    button.querySelector("span").textContent = count ? "Stats · " + count : "Stats";
+    button.title = row ? (count ? "View clone stats (" + count + " changed)" : "View this clone's stats") : "Select a clone to view its stats";
   }
 }
 
@@ -713,13 +721,13 @@ function closeCloneStats() {
 async function openCloneStats() {
   const row = allRows().find((r) => r.id === state.previewRow);
   if (!state.inputsEnabled || !row) return;
-  const character = $("chk-stats").checked ? row.group.source : row.slot;
+  const character = copySourceStats ? row.group.source : row.slot;
   const editor = { row };
   statsEditor = editor;
   $("stats-title").textContent = "Stats for " + $("clone-name").textContent;
   $("stats-note").textContent = "Loading " + sourceName(character) + "'s stats…";
   $("stats-fields").replaceChildren();
-  $("stats-save").disabled = $("stats-reset").disabled = true;
+  studioStatAccess.open();
   setModal($("clone-stats"), true);
   $("stats-cancel").focus();
   try {
@@ -727,21 +735,26 @@ async function openCloneStats() {
     if (statsEditor !== editor) return;
     for (const { key, label, min, max, value } of fields) {
       const input = el("input", { type: "number", name: key, min, max, step: 1,
-        placeholder: String(value), value: row.stats[key] ?? "" });
+        placeholder: String(value), defaultValue: row.stats[key] ?? "" });
       $("stats-fields").append(el("label", { className: "field" }, [
         el("span", { className: "lab", textContent: label }),
         input, el("small", { className: "hint", textContent: "Inherited " + value + " · Range " + min + "–" + max })
       ]));
     }
     $("stats-note").textContent = "Empty fields inherit " + sourceName(character) + "'s stats.";
-    $("stats-save").disabled = $("stats-reset").disabled = false;
+    studioStatAccess.refresh();
   } catch (e) {
     if (statsEditor === editor) $("stats-note").textContent = "Could not load stats. " + (e.error ?? String(e));
   }
 }
 
 function bindCloneStats() {
-  for (const id of ["nav-stats", "btn-stats"]) $(id).addEventListener("click", openCloneStats);
+  for (const id of ["nav-stats", "btn-stats", "advanced-stats-access"]) $(id).addEventListener("click", openCloneStats);
+  onStatAccessChange(() => updateStatsButtons(allRows().find(row => row.id === state.previewRow)));
+  $("chk-stats").addEventListener("change", () => {
+    if (canEditStats() && state.inputsEnabled) copySourceStats = $("chk-stats").checked;
+    $("chk-stats").checked = copySourceStats;
+  });
   $("stats-cancel").addEventListener("click", closeCloneStats);
   $("clone-stats").addEventListener("keydown", (event) => {
     if (event.key === "Escape") {
@@ -749,12 +762,9 @@ function bindCloneStats() {
       closeCloneStats();
     }
   });
-  $("stats-reset").addEventListener("click", () => {
-    for (const input of $("stats-fields").querySelectorAll("input")) input.value = "";
-  });
   $("clone-stats").querySelector("form").addEventListener("submit", (event) => {
     event.preventDefault();
-    if (!statsEditor || $("stats-save").disabled || !event.target.reportValidity()) return;
+    if (!canEditStats() || !statsEditor || $("stats-save").disabled || !event.target.reportValidity()) return;
     const overrides = {};
     for (const input of $("stats-fields").querySelectorAll("input")) {
       if (input.value !== "") overrides[input.name] = input.valueAsNumber;
@@ -986,7 +996,7 @@ function makeJob() {
     keeplum: keeplum(),
     regions: tickedRegions(first),
     ui_source: $("chk-ui").checked,
-    copy_stats: $("chk-stats").checked,
+    copy_stats: copySourceStats,
     keep_colour_word: $("chk-colour").checked,
     keep_work: $("chk-keep").checked,
   };
