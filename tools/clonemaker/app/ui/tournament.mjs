@@ -14,8 +14,11 @@ const teams = Object.fromEntries(sides.map((s, t) => [s, {format, player:"", row
   source:i + t * 9, pos:i, captain:i === 0, star:false
 }))}]));
 const selected = {Away:0, Home:0};
+const saved = Object.fromEntries(sides.map(s => [s, {player:teams[s].player, rows:JSON.stringify(teams[s].rows)}]));
+const libraryChoice = {Away:"", Home:""};
 let side = "Away", names = new Map(), busy = false, dragging, opener;
 let statFields = new Map();
+let library = [], libraryError = "";
 
 function el(tag, text = "", className = "") {
   const e = document.createElement(tag);
@@ -132,6 +135,68 @@ function readPng(file) {
     reader.readAsDataURL(file);
   });
 }
+async function refreshLibrary() {
+  try {
+    library = await invoke("list_tournament_teams");
+    libraryError = "";
+  } catch (error) {
+    libraryError = "Could not load the team library. " + errorText(error);
+  }
+}
+function replaceTeam(team, keepLobbyName) {
+  if (keepLobbyName) team.player = teams[side].player;
+  else saved[side].player = team.player;
+  teams[side] = team;
+  saved[side].rows = JSON.stringify(team.rows);
+  selected[side] = 0;
+}
+function libraryPicker() {
+  const panel = el("div", "", "tourney-library");
+  const picker = el("select", "", "tourney-team-picker");
+  picker.add(new Option("Choose a team…", ""));
+  for (const [kind, label] of [["preset","ASSBLAST tournament teams"], ["saved","My saved teams"]]) {
+    const entries = library.filter(entry => entry.kind === kind);
+    if (!entries.length) continue;
+    const group = el("optgroup");
+    group.label = label;
+    for (const entry of entries) group.append(new Option(entry.label, entry.id));
+    picker.append(group);
+  }
+  const confirm = el("div", "", "tourney-replace");
+  confirm.setAttribute("aria-live","polite");
+  const load = button("Load into " + side, () => run(async () => {
+    const entry = library.find(item => item.id === picker.value);
+    if (!entry) return;
+    const team = validateTeam(await invoke("load_tournament_team", {id:entry.id}));
+    const isPreset = entry.kind === "preset";
+    const accept = () => {
+      replaceTeam(team, isPreset);
+      draw();
+      status.textContent = entry.label + " loaded into " + side + "." +
+        (team.player.trim() ? "" : " Enter your Rio lobby name for this side.");
+      const nextFocus = toolbar.querySelector(team.player.trim() ? ".tourney-team-picker" : ".tourney-lobby");
+      requestAnimationFrame(() => nextFocus.focus({preventScroll:true}));
+    };
+    const current = teams[side];
+    const replacingEdits = JSON.stringify(current.rows) !== saved[side].rows ||
+      (!isPreset && current.player !== saved[side].player && current.player !== team.player);
+    if (!replacingEdits) { accept(); return; }
+    const keep = button("Keep editing", () => {confirm.replaceChildren(); picker.focus();}, "tourney-keep");
+    confirm.replaceChildren(el("span", "Replace your unsaved " + side + " edits with " + entry.label + "?"),
+      keep, button("Replace " + side + " team", accept, "tourney-confirm"));
+  }), "tourney-load-picked");
+  picker.value = libraryChoice[side];
+  load.disabled = !picker.value;
+  picker.onchange = () => {
+    libraryChoice[side] = picker.value;
+    load.disabled = !picker.value;
+    confirm.replaceChildren();
+    status.textContent = "";
+  };
+  panel.append(labeled("Team library",picker),load,confirm);
+  if (libraryError) panel.append(el("p",libraryError));
+  return panel;
+}
 function makeToolbar() {
   const tabs = el("div", "", "tourney-tabs");
   tabs.setAttribute("role","group");
@@ -144,6 +209,7 @@ function makeToolbar() {
   }
   const name = el("input","","tourney-lobby");
   name.maxLength = 30;
+  name.placeholder = "Your Rio lobby name";
   name.value = teams[side].player;
   name.oninput = () => { teams[side].player = name.value; status.textContent = ""; };
   const input = el("input");
@@ -156,18 +222,23 @@ function makeToolbar() {
     if (!file) return;
     if (file.size > 24 * MiB) throw Error("Choose a portable team under 24 MiB.");
     const team = validateTeam(JSON.parse(await file.text()));
-    teams[side] = team;
-    selected[side] = 0;
+    replaceTeam(team, false);
+    libraryChoice[side] = "";
     draw();
     status.textContent = side + " team loaded for " + team.player + ".";
   });
   const load = el("span","","tourney-import");
-  load.append(button("Load team…",()=>input.click()),input);
+  load.append(button("Import team file…",()=>input.click()),input);
   const save = button("Save " + side + " team…", () => run(async () => {
     const path = await invoke("save_tournament_team",{team:validateTeam(teams[side])});
-    if (path) status.textContent = "Saved " + side + " team to " + path + ".";
+    if (path) {
+      saved[side] = {player:teams[side].player, rows:JSON.stringify(teams[side].rows)};
+      await refreshLibrary();
+      makeToolbar();
+      status.textContent = "Saved " + side + " team to " + path + ".";
+    }
   }), "tourney-save");
-  toolbar.replaceChildren(tabs, labeled("Rio lobby name",name), load, save);
+  toolbar.replaceChildren(tabs, labeled("Rio lobby name",name), load, save, libraryPicker());
 }
 function move(team, from, to) {
   moveBatter(team,from,to);
@@ -410,6 +481,7 @@ for (const trigger of document.querySelectorAll("[data-open-tournament]")) {
         names = new Map(sources.map(s=>[s.id,s.name]));
         statFields = new Map(fields.map(f=>[f.key,f]));
       }
+      await refreshLibrary();
       draw();
     });
   };

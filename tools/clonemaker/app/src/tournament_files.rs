@@ -15,7 +15,14 @@ pub(crate) async fn save_tournament_team(
         tournament::validate(&team)?;
         let mut json = serde_json::to_vec_pretty(&team).map_err(|e| e.to_string())?;
         json.push(b'\n');
-        save_json_dialog(&app, &json, "tournament-team.json")
+        let filename = crate::tournament_library::suggested_filename(&team.player);
+        let saved = save_json_dialog(&app, &json, &filename)?;
+        if let Some(path) = &saved {
+            crate::tournament_library::remember_export(&app, path, &json).map_err(|error| {
+                format!("Your team was exported to {path}. The team picker could not save a library copy: {error}")
+            })?;
+        }
+        Ok(saved)
     })
     .await
     .map_err(|e| e.to_string())?

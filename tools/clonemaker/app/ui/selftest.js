@@ -69,15 +69,65 @@ export async function run(options, app) {
     check($("welcome").hidden, "Not now closes the launch dialog");
 
     const plan = $("rio-teams");
+    const tournament = $("tournament-plan");
+    const tournamentField = selector => tournament.querySelector(selector);
+    const directTournament = document.querySelector(".pages [data-open-tournament]");
+    directTournament.click();
+    await waitFor(() => tournament.open && tournamentField(".tourney-team-picker") && !tournamentField("fieldset").disabled,
+      "Tournament mode opens directly from Studio without loading a disc");
+    check(!plan.open && !plan.querySelector(".tourney-team-picker, [data-open-tournament]"), "the ordinary Game plan stays separate");
+    tournamentField('.tourney-tabs [data-side="Home"]').click();
+    const presets = [...tournamentField(".tourney-team-picker").querySelectorAll("optgroup:first-of-type option")];
+    check(presets.length >= 14, "the ASSBLAST tournament rosters are available inside the picker");
+    const firstTeam = await invoke("load_tournament_team", {id:presets[0].value});
+    const pickPreset = id => {
+      choose(tournamentField(".tourney-team-picker"),id);
+      tournamentField(".tourney-load-picked").click();
+    };
+    const loadedIntoHome = () => tournamentField('[role="status"]').textContent.includes("loaded into Home") &&
+      !tournamentField("fieldset").disabled;
+    pickPreset(presets[0].value);
+    await waitFor(loadedIntoHome, "an official tournament team loads into Home");
+    check(tournamentField(".tourney-lobby").value === "" && Number(tournamentField(".tourney-source").value) === firstTeam.rows[0].source,
+      "a preset supplies the roster and asks for the player's own lobby name");
+    const homeLobby = tournamentField(".tourney-lobby");
+    homeLobby.value = "Local Player";
+    homeLobby.dispatchEvent(new Event("input", {bubbles:true}));
+    pickPreset(presets[1].value);
+    await waitFor(loadedIntoHome, "another preset loads while keeping the user's lobby name");
+    check(tournamentField(".tourney-lobby").value === "Local Player", "the tournament manager's name never replaces the player's");
+    const labelEdit = tournamentField(".tourney-label");
+    labelEdit.value = "My batter";
+    labelEdit.dispatchEvent(new Event("input", {bubbles:true}));
+    pickPreset(presets[0].value);
+    await waitFor(() => tournamentField(".tourney-keep") && !tournamentField("fieldset").disabled, "replacing an edited roster asks first");
+    tournamentField(".tourney-keep").click();
+    check(tournamentField(".tourney-label").value === "My batter", "keeping an edited team preserves its batter");
+    pickPreset(presets[0].value);
+    await waitFor(() => tournamentField(".tourney-confirm") && !tournamentField("fieldset").disabled, "replacement can be confirmed");
+    tournamentField(".tourney-confirm").click();
+    check(tournamentField(".tourney-label").value === (firstTeam.rows[0].label ?? ""), "confirmed replacement restores the chosen batting order");
+    tournamentField('.tourney-tabs [data-side="Away"]').click();
+    check(tournamentField(".tourney-lobby").value === "" && tournamentField(".tourney-source").value === "0",
+      "replacing Home leaves Away intact");
+    tournamentField(".tourney-close").click();
+    await waitFor(() => !tournament.open && !plan.open && document.activeElement === directTournament,
+      "closing a directly opened tournament returns to Studio");
     const teamTriggers = document.querySelectorAll("[data-open-teams]");
     const { showTeamImage } = await import("./rio-teams.mjs");
     teamTriggers[0].click();
     await waitFor(() => plan.open, "Game plan opens");
     check(plan.querySelector(".team-actions").hidden, "team export waits for the finished ISO");
-    const tournament = $("tournament-plan");
-    plan.querySelector("[data-open-tournament]").click();
-    await waitFor(() => tournament.open && tournament.querySelector(".tourney-source"), "portable team editor opens without an ISO");
-    const tournamentField = selector => tournament.querySelector(selector);
+    plan.querySelector(".team-close").click();
+    await waitFor(() => !plan.open && !tournament.open && document.activeElement === teamTriggers[0],
+      "closing Game plan returns to its own Studio navigation button");
+    directTournament.click();
+    await waitFor(() => tournament.open && tournament.querySelector(".tourney-source") && !tournamentField("fieldset").disabled,
+      "the independent tournament editor reopens");
+    tournamentField('.tourney-tabs [data-side="Home"]').click();
+    check(tournamentField(".tourney-lobby").value === "Local Player" && tournamentField(".tourney-label").value === (firstTeam.rows[0].label ?? ""),
+      "switching to ordinary Game plan and back preserves the tournament draft");
+    tournamentField('.tourney-tabs [data-side="Away"]').click();
     for (let i = 0; i < 3; i++) {
       tournamentField(`.tourney-row[data-index="${i}"]`).click();
       choose(tournamentField(".tourney-source"), 2);
@@ -186,6 +236,11 @@ export async function run(options, app) {
       control(".character-slot").value === "29" && control(".fielding-slot").value === "5",
       "Home edits leave the Away lineup intact");
     plan.querySelector(".team-close").click();
+    directTournament.click();
+    await waitFor(() => tournament.open && !tournamentField("fieldset").disabled, "an edited regular game and the tournament can coexist");
+    tournamentField('.tourney-tabs [data-side="Home"]').click();
+    check(tournamentField(".tourney-lobby").value === "Local Player", "ordinary team edits leave the tournament lineup intact");
+    tournamentField(".tourney-close").click();
     teamTriggers[1].click();
     await waitFor(() => plan.open, "the roster shortcut reopens Game Plan");
     teamTab("Home").click();
