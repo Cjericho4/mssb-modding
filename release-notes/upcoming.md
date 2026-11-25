@@ -1,33 +1,31 @@
-# MSSB Clone Maker — Bring your own team
+# MSSB Clone Maker release notes
 
 *Apple silicon beta · Changes since v0.4.0-beta*
 
-Each player can now build a team in Game Plan and send it to a tournament organizer as one file. The organizer picks the matchup. Both players can then take the same batting orders and starting defense into a private Project Rio game.
+You can now make your team in Game Plan and send it to whoever’s running the tournament. They can load your lineup without picking all nine players again.
 
-![Silverback DK and Golden Glove DK on the game’s fielder model. Silverback wears a burgundy tie with a mountain crest. Golden Glove wears a forest-green tie with a winged baseball.](game-plan-and-tournament/clone-looks.png)
+![Silverback DK in gray with a burgundy tie and Golden Glove DK in gold with a green tie, shown on the game’s fielder model.](game-plan-and-tournament/clone-looks.png)
 
-## Draft your nine in Game Plan
+## Game Plan
 
-Clone Maker opens in Studio. Choose **Game Plan → Plan my team** to start with nine open spots. Drag a batter up the order or move a fielder across the diamond. Edit a nickname in either view and it appears in both. Your draft saves as you go, even with spots left to fill.
+Open **Game Plan → Plan my team** from Studio. You start with nine empty spots. Drag players into batting order or drop them where you want them on the field. Click a name in either view to change it. The draft saves as you go, so you can pick a few players and finish later.
 
-![Game Plan shows the same nine starters in batting order and on the field.](game-plan-and-tournament/game-plan.png)
+**Export team…** saves one `.team.json` file with your batting order, field positions, captain, superstar picks, nicknames, stat changes and any textures you painted. You don’t need a disc to make or share a team. Your ISO and the game’s original textures stay on your computer.
 
-**Export team…** makes a single `.team.json` file you can send to the organizer. It carries your lineup, positions, captain and superstar choices, nicknames, stat edits, and painted textures. The game image and original textures stay on your computer. You can draft and share a team before choosing a disc.
+![The batting order and starting field positions for a nine-player team, with two DKs in the infield.](game-plan-and-tournament/game-plan.png)
 
-## Give two DKs different jobs
+## Clone stats and textures
 
-Give Silverback more charge power for the middle of the order. Give Golden Glove more speed to cover ground at second. Each clone has 22 editable fields. Blank fields keep their inherited values, and the four menu rating bars can be set independently of gameplay.
+The example team has two DKs. Silverback bats third and plays first, with extra power on his charged swing. Golden Glove bats cleanup and plays second, with more running speed. You can edit 22 fields for each clone. Leave a field blank to keep its original value. The four rating bars on the character menu have their own settings.
 
-![The player stat editor for Silverback shows individual overrides for this DK.](game-plan-and-tournament/player-stats.png)
+![Silverback’s stat sheet with charge power set to 205, throwing arm strength to 195 and the batting display bar to 9.](game-plan-and-tournament/player-stats.png)
 
-You can also paint a different look for each copy. Load portraits once from your own game, and the lineup and field show each clone’s custom head in both planning modes.
+Once you load portraits from your own game, each DK’s painted colors show up in the batting order and on the field in both modes. The [DK paint kit](game-plan-and-tournament/dk-paint-kit.zip) makes both looks from your own DK texture export.
 
-To make both looks from your own DK texture export, use the [showcase paint kit](game-plan-and-tournament/dk-paint-kit.zip).
+## Tournament Mode and Project Rio
 
-## Run a matchup in Tournament Mode
+Pick **Home** or **Away**, then import that player’s team. The other lineup stays put. If the player advances, you can load their team from the **Team library** for the next round. You can also save both teams together as one matchup. Game Plan and Tournament Mode each have a walkthrough.
 
-Pick **Away** or **Home** and choose **Import team into Away…** or **Import team into Home…**. Only that side changes. Imported teams stay in your **Team library**, ready for the next round. Save the whole matchup when you want to keep both sides together. Both modes include a walkthrough.
+![Tournament Mode with Home selected and the Import team into Home button visible.](game-plan-and-tournament/tournament-mode.png)
 
-![Tournament Mode shows which side will receive an imported team.](game-plan-and-tournament/tournament-mode.png)
-
-For a private Project Rio **No Game Mode** lobby, each player builds the shared matchup with their own clean USA disc image. Clone Maker assigns compatible slots for duplicate characters and creates the game image and Rio lineup file. Compare matchup IDs before first pitch.
+To play the matchup in a private Project Rio **No Game Mode** lobby, both players build it with their own clean USA ISO. Clone Maker finds slots for duplicate characters and writes the batting orders and starting positions to Rio’s lineup file. Compare matchup IDs to check that you’ve both loaded the same matchup.
