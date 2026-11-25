@@ -1,4 +1,8 @@
 /* Game plan and Tournament mode occupy Studio's workspace, underneath the same application bar. */
+#welcome:not([open]) { display: none; }
+#welcome[open] { width: min(490px,calc(100% - 32px)); padding: 0; color: var(--ink); }
+#welcome::backdrop { background: #0b1220b8; }
+#welcome .line { flex-wrap: wrap; }
 body.planning {
   grid-template: "top" auto "planner" minmax(0, 1fr) / minmax(0, 1fr);
 }
@@ -42,7 +46,13 @@ body.planning .top .pages span { display: inline; }
 }
 #tournament-plan .tourney-toolbar label { display: flex; align-items: center; gap: 7px; color: var(--ink-2); font-size: 12px; white-space: nowrap; }
 #tournament-plan .tourney-lobby { width: clamp(108px,15vw,175px); }
-#tournament-plan .tourney-import { margin-left: auto; }
+#tournament-plan .tourney-share-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-left: auto; }
+#tournament-plan[data-mode=plan] .tourney-save, #tournament-plan[data-mode=tournament] .tourney-import > button {
+  color: var(--on-accent); background: var(--ice-2); border-color: var(--ice-2); font-weight: 700;
+}
+#tournament-plan[data-mode=plan] .tourney-save:hover, #tournament-plan[data-mode=tournament] .tourney-import > button:hover {
+  background: var(--ice-hover);
+}
 #tournament-plan .tourney-toolbar button { white-space: nowrap; }
 #tournament-plan .tourney-library {
   display: flex; min-width: 0; align-items: center; gap: 6px 8px; flex-wrap: wrap;
@@ -55,14 +65,15 @@ body.planning .top .pages span { display: inline; }
 }
 #tournament-plan .tourney-replace:empty { display: none; }
 
-#tournament-plan .tourney-new-sheets { position: relative; }
-#tournament-plan .tourney-new-sheets summary {
+#tournament-plan :is(.tourney-new-sheets,.tourney-matchup-files) { position: relative; }
+#tournament-plan :is(.tourney-new-sheets,.tourney-matchup-files) summary {
   cursor: pointer; padding: 5px 8px; color: var(--ink); white-space: nowrap;
 }
 #tournament-plan .tourney-new-choices {
   position: absolute; z-index: 12; top: 100%; left: 0; display: grid; gap: 4px; padding: 5px;
   background: var(--card); border: 1px solid var(--rule); border-radius: 6px; box-shadow: 0 3px 12px #131d2a29;
 }
+#tournament-plan .tourney-matchup-import button { width: 100%; }
 #tournament-plan .tourney-count { margin-left: 8px; white-space: nowrap; color: var(--rail-dim); font: 11px var(--sans); }
 #tournament-plan .tourney-open-face {
   width: calc(var(--face-size) * .65); height: calc(var(--face-size) * .65); place-self: center;
@@ -347,7 +358,7 @@ body.planning .top .pages span { display: inline; }
   #tournament-plan .tourney-toolbar { gap: 6px; padding: 6px 9px; }
   #tournament-plan .tourney-toolbar :is(label,button) { font-size: 11.5px; }
   #tournament-plan .tourney-lobby { max-width: 123px; }
-  #tournament-plan .tourney-import { margin-left: 0; }
+  #tournament-plan .tourney-share-actions { margin-left: 0; }
   #tournament-plan .tourney-library { flex-basis: 100%; }
   #tournament-plan .tourney-editor, #tournament-plan .tourney-editor.without-pool { grid-template-columns: minmax(168px,30%) minmax(0,1fr); }
   #tournament-plan .tourney-editor { grid-template-rows: clamp(372px,calc(100dvh - 198px),465px) auto; }

@@ -15,7 +15,7 @@ use std::{
     fs::{self, File},
     io::{Read, Seek, Write},
     path::{Path, PathBuf},
-    sync::atomic::AtomicBool,
+    sync::{atomic::AtomicBool, LazyLock},
 };
 
 const FORMAT: &str = "mssb-tournament-team-v1";
@@ -98,6 +98,65 @@ pub(crate) type TeamSheet = Team<Option<usize>>;
 
 pub(crate) fn validate_sheet(team: &TeamSheet) -> Result<(), String> {
     validate_roster(team, false)
+}
+
+// Each fingerprint identifies the visible RGBA pixels of an original Studio texture.
+static STOCK_TEXTURES: LazyLock<BTreeMap<(usize, &'static str), &'static str>> =
+    LazyLock::new(|| {
+        include_str!("stock-team-textures.tsv")
+            .lines()
+            .map(|line| {
+                let (source, rest) = line.split_once('\t').expect("stock texture source");
+                let (name, digest) = rest.split_once('\t').expect("stock texture fingerprint");
+                ((source.parse().expect("stock character ID"), name), digest)
+            })
+            .collect()
+    });
+
+// All portable files carry the same explicit team fields. Rebuild each user-painted
+// PNG from its pixels so a selected file cannot bundle metadata or trailing file data.
+pub(crate) fn portable_sheet(mut team: TeamSheet) -> Result<TeamSheet, String> {
+    validate_sheet(&team)?;
+    let mut total = 0;
+    for row in &mut team.rows {
+        let Some(source) = row.source else { continue };
+        for (name, encoded) in std::mem::take(&mut row.textures) {
+            let expected = STOCK_TEXTURES.get(&(source, name.as_str())).ok_or_else(|| {
+                format!("{name} does not match a texture for this character. Use a changed PNG from this character’s Studio export.")
+            })?;
+            let (bytes, pixel_count) = texture_data(&name, &encoded)?;
+            let (w, h, mut rgba) = custom_textures::decode_png(&bytes, &name).map_err(message)?;
+            if w * h != pixel_count {
+                return Err(format!("{name} must contain a full-size texture."));
+            }
+            for pixel in rgba.chunks_exact_mut(4) {
+                if pixel[3] == 0 {
+                    pixel[..3].fill(0);
+                }
+            }
+            let digest = format!("{:x}", Sha256::digest(&rgba));
+            if digest == *expected {
+                continue;
+            }
+            if STOCK_TEXTURES.values().any(|stock| *stock == digest) {
+                return Err(format!("{name} contains unchanged artwork from another original game texture. Choose your edited texture."));
+            }
+            let png = custom_textures::rgba_png(w, h, &rgba).map_err(message)?;
+            total += png.len();
+            if png.len() > MAX_PNG || total > MAX_TEAM_PNG {
+                return Err(format!("The exported texture pixels exceed the 2 MiB per picture or 16 MiB per team limit at {name}."));
+            }
+            row.textures.insert(name, STANDARD.encode(png));
+        }
+    }
+    Ok(team)
+}
+
+#[tauri::command]
+pub(crate) async fn prepare_team_sheet(team: TeamSheet) -> Result<TeamSheet, String> {
+    tauri::async_runtime::spawn_blocking(move || portable_sheet(team))
+        .await
+        .map_err(message)?
 }
 
 pub(crate) fn validate(team: &Team) -> Result<(), String> {
@@ -536,6 +595,71 @@ mod tests {
         }
         let assigned: BTreeSet<_> = owners.into_iter().flatten().collect();
         assert_eq!(assigned, BTreeSet::from([0, 1, 2]));
+    }
+
+    #[test]
+    fn portable_team_keeps_painted_pixels_and_drops_nonimage_data() {
+        // A 16x16 RGBA PNG with a tEXt chunk and unrelated bytes after IEND.
+        let encoded = "iVBORw0KGgoAAAANSUhEUgAAABAAAAAQCAYAAAAf8/9hAAAAG3RFWHRDb21tZW50AHByaXZhdGUtZWRpdG9yLW5vdGVgVxP0AAAAGUlEQVR4nGOwqTzwnxLMMGrAqAGjBgwXAwCmtnQfE7bFwQAAAABJRU5ErkJggnByaXZhdGUtdHJhaWxlcg==";
+        let name = "t00_16x16.png";
+        let rows = team("Visitor", [0, 1, 2, 3, 4, 5, 6, 7, 8]);
+        let mut sheet: TeamSheet =
+            serde_json::from_value(serde_json::to_value(rows).unwrap()).unwrap();
+        sheet.rows[0].textures.insert(name.into(), encoded.into());
+        let clean = portable_sheet(sheet.clone()).unwrap();
+        let bytes = STANDARD.decode(&clean.rows[0].textures[name]).unwrap();
+        assert!(!bytes.windows(7).any(|part| part == b"private"));
+        let (w, h, rgba) = custom_textures::decode_png(&bytes, name).unwrap();
+        assert_eq!((w, h), (16, 16));
+        assert!(rgba.chunks_exact(4).all(|p| p == [0x3c, 0x79, 0xc0, 0xff]));
+        assert_eq!(
+            portable_sheet(clean.clone()).unwrap().rows[0].textures,
+            clean.rows[0].textures
+        );
+        sheet.rows[0]
+            .textures
+            .insert(name.into(), STANDARD.encode(&bytes[..33]));
+        assert!(portable_sheet(sheet).is_err());
+    }
+
+    #[test]
+    #[ignore = "uses the owner's original USA disc to verify stock fingerprints"]
+    fn sharing_omits_original_art_and_rejects_stock_art_from_another_slot() {
+        let path = PathBuf::from(std::env::var_os("MSSB_RIO_RETAIL_ISO").unwrap());
+        let disc = Disc::iso(&path).unwrap();
+        let dol = Dol::new(disc.system("main.dol").unwrap()).unwrap();
+        let mario = api::portrait_asset(&disc, &dol, 0).unwrap();
+        let rows = team("Visitor", [0, 1, 2, 3, 4, 5, 6, 7, 8]);
+        let mut sheet: TeamSheet =
+            serde_json::from_value(serde_json::to_value(rows).unwrap()).unwrap();
+        for (index, png) in mario.textures.into_iter().enumerate() {
+            let bytes = STANDARD.decode(&png).unwrap();
+            let (w, h, _) = custom_textures::decode_png(&bytes, "texture").unwrap();
+            sheet.rows[0]
+                .textures
+                .insert(format!("t{index:02}_{w}x{h}.png"), png);
+        }
+        assert!(!sheet.rows[0].textures.is_empty());
+        assert!(portable_sheet(sheet.clone()).unwrap().rows[0]
+            .textures
+            .is_empty());
+        // Luigi has the same named material at a number of slots but different original art.
+        let name = sheet.rows[0]
+            .textures
+            .keys()
+            .find(|n| {
+                STOCK_TEXTURES
+                    .get(&(1, n.as_str()))
+                    .is_some_and(|d| *d != STOCK_TEXTURES[&(0, n.as_str())])
+            })
+            .unwrap()
+            .clone();
+        let original = sheet.rows[0].textures.remove(&name).unwrap();
+        sheet.rows[1].textures.insert(name, original);
+        assert!(portable_sheet(sheet)
+            .err()
+            .unwrap()
+            .contains("original game texture"));
     }
 
     #[test]

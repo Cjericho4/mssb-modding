@@ -13,7 +13,7 @@ pub(crate) async fn save_tournament_team(
     side: Option<String>,
 ) -> Result<Option<String>, String> {
     tauri::async_runtime::spawn_blocking(move || {
-        tournament::validate_sheet(&team)?;
+        let team = tournament::portable_sheet(team)?;
         let mut json = serde_json::to_vec_pretty(&team).map_err(|e| e.to_string())?;
         json.push(b'\n');
         let name = if team.player.trim().is_empty() {
@@ -41,13 +41,13 @@ struct MatchupSheet<'a> {
     home: &'a TeamSheet,
 }
 
-fn matchup_sheet(away: &TeamSheet, home: &TeamSheet) -> Result<Vec<u8>, String> {
-    tournament::validate_sheet(away)?;
-    tournament::validate_sheet(home)?;
+fn matchup_sheet(away: TeamSheet, home: TeamSheet) -> Result<Vec<u8>, String> {
+    let away = tournament::portable_sheet(away)?;
+    let home = tournament::portable_sheet(home)?;
     let mut json = serde_json::to_vec_pretty(&MatchupSheet {
         format: "mssb-tournament-matchup-v1",
-        away,
-        home,
+        away: &away,
+        home: &home,
     })
     .map_err(|e| e.to_string())?;
     json.push(b'\n');
@@ -61,11 +61,8 @@ pub(crate) async fn save_tournament_matchup_sheet(
     home: TeamSheet,
 ) -> Result<Option<String>, String> {
     tauri::async_runtime::spawn_blocking(move || {
-        save_json_dialog(
-            &app,
-            &matchup_sheet(&away, &home)?,
-            &crate::tournament_library::matchup_filename(&away.player, &home.player),
-        )
+        let filename = crate::tournament_library::matchup_filename(&away.player, &home.player);
+        save_json_dialog(&app, &matchup_sheet(away, home)?, &filename)
     })
     .await
     .map_err(|e| e.to_string())?
@@ -152,12 +149,13 @@ mod tests {
         let away: TeamSheet = serde_json::from_value(document.clone()).unwrap();
         let mut home = away.clone();
         home.rows.swap(2, 5);
-        let packed: Value = serde_json::from_slice(&matchup_sheet(&away, &home).unwrap()).unwrap();
+        let packed: Value =
+            serde_json::from_slice(&matchup_sheet(away.clone(), home.clone()).unwrap()).unwrap();
         assert_eq!(packed["away"], document);
         assert_eq!(packed["home"]["rows"][2]["label"], "Our second DK");
         assert!(serde_json::from_value::<Team>(packed["away"].clone()).is_err());
         home.rows[1].star = true;
-        assert!(matchup_sheet(&away, &home).is_err());
+        assert!(matchup_sheet(away, home).is_err());
         let full = json!({"format":"mssb-tournament-team-v1", "player":"Visitor", "rows":
             (0..9).map(|i| json!({"source":i,"pos":i,"captain":i==0,"star":false})).collect::<Vec<_>>()});
         tournament::validate(&serde_json::from_value(full.clone()).unwrap()).unwrap();

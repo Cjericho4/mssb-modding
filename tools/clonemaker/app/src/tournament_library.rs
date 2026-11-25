@@ -1,5 +1,8 @@
 //! Team sheets saved by this player.
-use crate::tournament::{self, TeamSheet};
+use crate::{
+    selftest,
+    tournament::{self, TeamSheet},
+};
 use serde::Serialize;
 use sha2::{Digest, Sha256};
 use std::{
@@ -17,6 +20,9 @@ pub(crate) struct Entry {
 }
 
 fn library(app: &AppHandle) -> Result<PathBuf, String> {
+    if let Some(scratch) = app.state::<selftest::Options>().scratch_dir()? {
+        return Ok(scratch.join("Tournament teams"));
+    }
     Ok(app
         .path()
         .app_data_dir()
@@ -60,24 +66,70 @@ pub(crate) fn matchup_filename(away: &str, home: &str) -> String {
     format!("{} vs {}.matchup.json", side(away, "Away"), side(home, "Home"))
 }
 
-fn remember(folder: &Path, export: &Path, json: &[u8]) -> io::Result<()> {
-    fs::create_dir_all(folder)?;
-    let stem = export
+fn file_label(path: &Path) -> String {
+    let stem = path
         .file_stem()
         .and_then(|v| v.to_str())
         .unwrap_or("Tournament team");
-    let label = safe_name(stem.strip_suffix(".team").unwrap_or(stem));
-    // Saving the same portable file updates its entry. Two folders can contain different teams with the same name.
-    let id = Sha256::digest(export.as_os_str().as_encoded_bytes());
+    safe_name(stem.strip_suffix(".team").unwrap_or(stem))
+}
+
+fn store_entry(folder: &Path, stem: &str, json: &[u8]) -> io::Result<()> {
+    fs::create_dir_all(folder)?;
     let mut tmp = tempfile::NamedTempFile::new_in(folder)?;
     tmp.write_all(json)?;
     tmp.as_file().sync_all()?;
-    tmp.persist(folder.join(format!("{label}--{id:x}.json")))?;
+    tmp.persist(folder.join(format!("{stem}.json")))?;
     Ok(())
+}
+
+fn remember(folder: &Path, export: &Path, json: &[u8]) -> io::Result<()> {
+    // Saving the same portable file updates its entry. Two folders can contain different teams with the same name.
+    let id = Sha256::digest(export.as_os_str().as_encoded_bytes());
+    store_entry(folder, &format!("{}--{id:x}", file_label(export)), json)
 }
 
 pub(crate) fn remember_export(app: &AppHandle, export: &str, json: &[u8]) -> Result<(), String> {
     remember(&library(app)?, Path::new(export), json).map_err(|e| e.to_string())
+}
+
+fn remember_import(folder: &Path, team: &TeamSheet, filename: &str) -> Result<String, String> {
+    // Content identity keeps different teams sent as "Away.team.json" independent.
+    let json = serde_json::to_vec(team).map_err(|e| e.to_string())?;
+    let digest = Sha256::digest(&json);
+    let label = file_label(Path::new(filename));
+    let stem = format!("{label}--{digest:x}");
+    store_entry(folder, &stem, &json).map_err(|e| e.to_string())?;
+    Ok(format!("saved/{stem}"))
+}
+
+#[derive(Serialize)]
+pub(crate) struct ImportedTeam {
+    team: TeamSheet,
+    id: Option<String>,
+    warning: Option<String>,
+}
+
+#[tauri::command]
+pub(crate) async fn remember_imported_team(
+    app: AppHandle,
+    team: TeamSheet,
+    filename: String,
+) -> Result<ImportedTeam, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let team = tournament::portable_sheet(team)?;
+        let saved = library(&app).and_then(|dir| remember_import(&dir, &team, &filename));
+        let (id, warning) = match saved {
+            Ok(id) => (Some(id), None),
+            Err(reason) => (
+                None,
+                Some(format!("Could not save a Team library copy: {reason}")),
+            ),
+        };
+        Ok(ImportedTeam { team, id, warning })
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
 fn saved_entries(folder: &Path) -> Result<Vec<Entry>, String> {
@@ -126,8 +178,7 @@ fn load(folder: &Path, id: &str) -> Result<TeamSheet, String> {
     let file = fs::File::open(path).map_err(|e| e.to_string())?;
     let team: TeamSheet =
         serde_json::from_reader(file.take(24 * 1024 * 1024 + 1)).map_err(|e| e.to_string())?;
-    tournament::validate_sheet(&team)?;
-    Ok(team)
+    tournament::portable_sheet(team)
 }
 
 #[tauri::command]
@@ -186,5 +237,30 @@ mod tests {
         assert!(loaded.rows[1].source.is_none());
         assert!(loaded.player.is_empty());
         assert!(load(&folder, "saved/../../Settings").is_err());
+    }
+
+    #[test]
+    fn received_files_are_reusable_without_an_original_file_or_game() {
+        let tmp = tempfile::tempdir().unwrap();
+        let mut team: TeamSheet = serde_json::from_value(serde_json::json!({
+            "format":"mssb-tournament-team-v1", "player":"Coach",
+            "rows":(0..9).map(|pos| serde_json::json!({
+                "source":if pos == 0 { Some(2) } else {None}, "pos":pos, "captain":false, "star":false
+            })).collect::<Vec<_>>()
+        })).unwrap();
+        team.rows[0].label = "Blue DK".into();
+        let id = remember_import(tmp.path(), &team, "Moon Comets.team.json").unwrap();
+        assert_eq!(
+            id,
+            remember_import(tmp.path(), &team, "Moon Comets.team.json").unwrap()
+        );
+        assert_eq!(entries(tmp.path()).unwrap()[0].label, "Moon Comets");
+        assert_eq!(load(tmp.path(), &id).unwrap().rows[0].label, "Blue DK");
+        team.rows[0].label = "Green DK".into();
+        let other = remember_import(tmp.path(), &team, "Moon Comets.team.json").unwrap();
+        assert_ne!(id, other);
+        assert_eq!(entries(tmp.path()).unwrap().len(), 2);
+        assert_eq!(load(tmp.path(), &id).unwrap().rows[0].label, "Blue DK");
+        assert_eq!(load(tmp.path(), &other).unwrap().rows[0].label, "Green DK");
     }
 }

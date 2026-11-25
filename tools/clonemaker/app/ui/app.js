@@ -141,10 +141,6 @@ document.addEventListener("keydown", (e) => {
     startTour(TOUR.length);
     e.preventDefault();
   }
-  if (e.key === "Escape" && box.id === "welcome") {
-    setModal(box, false);
-    e.preventDefault();
-  }
   if (e.key !== "Tab") return;
   const controls = [...box.querySelectorAll("button, select, input, a[href], [tabindex='0']")]
     .filter((c) => !c.disabled && c.getClientRects().length);
@@ -1144,24 +1140,9 @@ async function main() {
   const options = await invoke("launch_options");
   state.selftest = options.selftest;
   $("feedback").addEventListener("click", () => invoke("open_feedback"));
-  for (const [id, pick] of [
-    ["welcome-iso", chooseIso],
-    ["welcome-dir", chooseFolder],
-    ["welcome-plan", () => document.querySelector(".pages [data-open-plan]").click()],
-    ["welcome-tournament", () => document.querySelector(".pages [data-open-tournament]").click()],
-    ["welcome-later", null],
-  ]) {
-    $(id).addEventListener("click", () => {
-      setModal($("welcome"), false);
-      pick?.();
-    });
-  }
-  if (!options.selftest) {
-    checkForUpdate();
-    showWelcome();
-  }
+  if (!options.selftest) checkForUpdate();
   if (options.selftest) {
-    await import("./selftest.js").then((m) => m.run(options, { state, makeJob, startLoad, exportTextures, exportBlender, setRowTextures, showInfo, showWelcome, stage }));
+    await import("./selftest.js").then((m) => m.run(options, { state, makeJob, startLoad, exportTextures, exportBlender, setRowTextures, showInfo, stage }));
   }
 }
 
@@ -1313,13 +1294,6 @@ function setMode(mode) {
     b.classList.toggle("on", b.dataset.mode === mode);
     b.ariaPressed = String(b.dataset.mode === mode);
   }
-}
-
-/** On launch with no game yet: ask for it in a dialog instead of leaving it to the top bar. */
-function showWelcome() {
-  if (state.game) return;
-  setModal($("welcome"), true);
-  $("welcome-plan").focus();
 }
 
 /** Show a header button when GitHub has a newer release; quietly does nothing offline. */

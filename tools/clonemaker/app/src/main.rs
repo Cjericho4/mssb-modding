@@ -212,6 +212,8 @@ fn main() {
             tournament_files::save_tournament_matchup_sheet,
             tournament_library::list_tournament_teams,
             tournament_library::load_tournament_team,
+            tournament_library::remember_imported_team,
+            tournament::prepare_team_sheet,
             tournament_files::build_tournament_matchup,
             open_game,
             sources,

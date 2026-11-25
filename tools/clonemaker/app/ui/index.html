@@ -97,15 +97,15 @@
   </div>
 </div>
 
-<div id="welcome" class="modal" hidden>
-  <div class="dialog welcome" role="dialog" aria-modal="true" aria-labelledby="welcome-title" aria-describedby="welcome-text">
-    <header><h2 id="welcome-title">Get started</h2></header>
-    <p id="welcome-text">Create two team sheets from scratch or import a team or matchup file. You can plan both sides without a game disc.</p>
-    <div class="line"><button id="welcome-plan" class="primary">Plan a roster</button><button id="welcome-tournament">Open Tournament Mode</button></div>
-    <p>To make clones in Studio, open your original USA game.</p>
-    <div class="line end"><button id="welcome-later">Not now</button><button id="welcome-dir">Open game folder…</button><button id="welcome-iso">Choose game image (.iso)…</button></div>
-  </div>
-</div>
+<dialog id="welcome" class="dialog" aria-labelledby="welcome-title" aria-describedby="welcome-text">
+  <header><h2 id="welcome-title">Get started with Game Plan</h2></header>
+  <p id="welcome-text">Draft your team in Game Plan and export it for the organizer. In Tournament Mode, import each player’s team into the matchup.</p>
+  <form class="line" method="dialog">
+    <button id="welcome-plan" class="primary" value="plan" autofocus>Plan my team</button>
+    <button id="welcome-tournament" value="tournament">Open Tournament Mode</button>
+    <button id="welcome-later" value="studio">Back to Studio</button>
+  </form>
+</dialog>
 
 <div id="clone-stats" class="modal" hidden>
   <form class="dialog" role="dialog" aria-modal="true" aria-labelledby="stats-title" aria-describedby="stats-note">
@@ -173,7 +173,7 @@
     <div class="planner-guide-head">
       <strong class="planner-guide-lead"></strong>
       <span class="planner-guide-hint"></span>
-      <button type="button" class="planner-guide-save-help" aria-controls="planner-guide-panel">How to save</button>
+      <button type="button" class="planner-guide-save-help" aria-controls="planner-guide-panel">How to share a team</button>
       <button type="button" class="planner-guide-start" aria-controls="planner-guide-panel" aria-expanded="false">Game Plan walkthrough</button>
     </div>
     <div id="planner-guide-panel" hidden>

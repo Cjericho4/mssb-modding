@@ -1,8 +1,8 @@
 // These guides stay open while a player tries each control on their own roster.
 const pickSide = {
-  title:"Choose the team you want to edit",
+  title:"Start your own team",
   target:".tourney-tabs",
-  text:"Start with Away or Home. Each team sheet has nine empty batting spots, one for each field position. To start from a file, use Import team or matchup…."
+  text:"Use either the Away or Home sheet for your nine players. You can send just this team. The organizer chooses which side it plays when importing it in Tournament Mode."
 };
 const arrange = {
   title:"Set who bats first and who plays where",
@@ -12,17 +12,17 @@ const arrange = {
 const nameAndPaint = {
   title:"Name a player or customize a clone",
   target:".tourney-row.is-selected .tourney-name, .tourney-fielder.is-selected .tourney-name",
-  text:"Click a name on the field or in the batting order and type. Both names update together. Click a portrait to add custom textures or edit stats for just that player."
+  text:"Click a name on the field or in the batting order and type. Both names update together. Select the player’s portrait to attach your painted Studio PNGs under Custom textures or change that player’s stats."
 };
 const save = {
-  title:"Save a team you can share",
-  target:".tourney-save, .tourney-save-matchup",
-  text:side => "Click Save " + side + " team… to share this team sheet. Use Save matchup… to keep Away and Home together in one file. You can save with empty spots and add the Rio usernames later."
+  title:"Send your team to the organizer",
+  target:".tourney-save",
+  text:side => "Click Export team… for the " + side + " sheet. Give your team file a name in Save As, then send the .team.json file to the organizer. It includes your lineup, names, positions, stat edits and custom PNGs. Your game files stay on your computer."
 };
 const reopen = {
-  title:"Edit a team you saved earlier",
+  title:"Reuse a team you received or exported",
   target:".tourney-library, .tourney-import",
-  text:side => "In the team library, pick one of your saved teams and click Load into " + side + ". Edit it, then save again. Choose the same file to update it or a new filename for another version. Use Import team or matchup… to open a file someone sent you."
+  text:side => "Imported and exported teams appear in Team library. Pick one, then click Load into " + side + ". Save both sides together under Matchup files."
 };
 const steps = {
   plan: [pickSide, {
@@ -30,11 +30,11 @@ const steps = {
     text:"Click a character in the pool to fill the highlighted spot. The next empty spot is selected for you. For a specific assignment, drag a character onto a batting spot or field position. You can pick the same character twice."
   }, arrange, nameAndPaint, save, {
     title:"Pick up where you left off", target:".tourney-switch-mode",
-    text:"Your draft saves automatically on this device. Import a team file into the selected side, or a matchup file to restore both teams. Tournament mode shares the same draft and can build a game from both lineups."
+    text:"Your draft saves automatically on this device. The organizer can import your team into either side of a tournament. To work on your own matchup, open Tournament Mode and import the other player’s team on the opposite side."
   }],
   tournament: [{
-    title:"Start or import a matchup", target:".tourney-tabs, .tourney-import",
-    text:side => "Choose Away or Home to fill a blank sheet. If you already made a Game Plan, your draft is here. Import team or matchup… loads one team into " + side + " or restores both sides from a matchup file."
+    title:"Import a player’s team", target:".tourney-tabs, .tourney-import",
+    text:side => "Choose Away or Home, then click Import team into " + side + "… and open the player’s .team.json file. Their lineup, names and customizations fill that side. Switch sides to import the other team."
   }, {
     title:"Change the players in this lineup", target:".tourney-source",
     text:"Select a batting spot or field position. Pick a character from the Character menu or the pool. Fill more spots the same way. You can pick a character more than once."
@@ -119,8 +119,9 @@ export function initPlannerGuide(planner) {
     update(newSide) {
       const switched = side !== newSide;
       side = newSide;
-      header.querySelector(".planner-guide-hint").textContent =
-        "Both teams autosave here. Save " + side + " team… keeps one lineup. Save matchup… keeps both.";
+      header.querySelector(".planner-guide-hint").textContent = mode === "plan"
+        ? "Draft your players on " + side + ". Export team… shares this lineup and its customizations."
+        : "Choose the side each player will play, then import their .team.json file.";
       if (!panel.hidden && switched) showStep();
       else if (!panel.hidden) highlight();
     }

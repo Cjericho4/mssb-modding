@@ -41,7 +41,8 @@ pub fn write_png(path: &Path, w: usize, h: usize, rgba: &[u8]) -> Result<()> {
     fs::write(path, rgba_png(w, h, rgba)?).map_err(|e| Error::from(e).at_path(path))
 }
 
-pub(crate) fn rgba_png(w: usize, h: usize, rgba: &[u8]) -> Result<Vec<u8>> {
+/// Encode the supplied pixels without carrying source metadata or other file contents.
+pub fn rgba_png(w: usize, h: usize, rgba: &[u8]) -> Result<Vec<u8>> {
     let mut out = Vec::new();
     {
         let mut encoder = png::Encoder::new(&mut out, w as u32, h as u32);
@@ -60,17 +61,24 @@ pub(crate) fn rgba_png(w: usize, h: usize, rgba: &[u8]) -> Result<Vec<u8>> {
 /// Read any PNG (grey, palette, RGB, 16-bit, with or without alpha) as width, height and RGBA8.
 pub fn read_png(path: &Path) -> Result<(usize, usize, Vec<u8>)> {
     let bytes = fs::read(path).map_err(|e| Error::from(e).at_path(path))?;
+    decode_png(&bytes, &display_name(path))
+}
+
+/// Decode an in-memory texture using the same pixel representation as a Studio texture file.
+pub fn decode_png(bytes: &[u8], name: &str) -> Result<(usize, usize, Vec<u8>)> {
     let not_png = || {
         Error::new(format!(
-            "{} is not a PNG picture. Save it as PNG (or delete it to keep the original texture).",
-            display_name(path)
+            "{name} is not a PNG picture. Save it as PNG (or delete it to keep the original texture)."
         ))
     };
     let mut decoder = png::Decoder::new(std::io::Cursor::new(bytes));
+    decoder.set_ignore_text_chunk(true);
+    decoder.set_ignore_iccp_chunk(true);
     decoder.set_transformations(png::Transformations::normalize_to_color8());
     let mut reader = decoder.read_info().map_err(|_| not_png())?;
     let mut buf = vec![0; reader.output_buffer_size().ok_or_else(not_png)?];
     let info = reader.next_frame(&mut buf).map_err(|_| not_png())?;
+    reader.finish().map_err(|_| not_png())?;
     let (w, h) = (info.width as usize, info.height as usize);
     let rows = buf[..info.buffer_size()].chunks_exact(info.line_size);
     let mut rgba = Vec::with_capacity(w * h * 4);

@@ -8,6 +8,7 @@ const format = "mssb-tournament-team-v1";
 const matchupFormat = "mssb-tournament-matchup-v1";
 const MiB = 1024 * 1024;
 const dialog = document.querySelector("#tournament-plan");
+const chooser = document.querySelector("#welcome");
 const toolbar = dialog.querySelector(".tourney-toolbar");
 const editor = dialog.querySelector(".tourney-editor");
 const status = dialog.querySelector("[role=status]");
@@ -15,6 +16,7 @@ const fieldset = dialog.querySelector("fieldset");
 const close = dialog.querySelector(".tourney-close");
 const nav = document.querySelector(".pages");
 const studioButton = nav.querySelector("[data-open-studio]");
+const planButton = nav.querySelector("[data-open-plan]");
 const showPortraits = initPortraits(dialog.querySelector(".portrait-tools"));
 const guide = initPlannerGuide(dialog);
 const statDialog = dialog.querySelector(".tourney-stat-dialog");
@@ -24,7 +26,7 @@ const emptyTeam = () => ({format, player:"", rows:positions.map((_,i) => emptyRo
 const teams = Object.fromEntries(sides.map(s => [s, emptyTeam()]));
 const selected = {Away:0, Home:0};
 const libraryChoice = {Away:"", Home:""};
-let side = "Away", names = new Map(), busy = false, dragging, opener;
+let side = "Away", names = new Map(), busy = false, dragging, opener, chooserOpener;
 let statFields = new Map();
 let library = [], libraryError = "";
 let mode = "plan", initialized = false;
@@ -109,21 +111,23 @@ function textureSize(name, encoded) {
       encoded.length % 4 || !/^[A-Za-z0-9+/]+={0,2}$/.test(encoded))
     throw Error(name + " must contain one base64 PNG of up to 2 MiB.");
   const bytes = encoded.length / 4 * 3 - (encoded.endsWith("==") ? 2 : Number(encoded.endsWith("=")));
-  if (bytes > 2 * MiB) throw Error(name + " exceeds 2 MiB.");
+  if (bytes < 33 || bytes > 2 * MiB) throw Error(name + " must contain a PNG of up to 2 MiB.");
   const hdr = atob(encoded.slice(0,32));
   const u32 = at => Array.from(hdr.slice(at, at + 4), b => b.charCodeAt(0)).reduce((v,b) => v * 256 + b, 0);
   if (hdr.slice(0,8) !== "\x89PNG\r\n\x1a\n" || u32(8) !== 13 || hdr.slice(12,16) !== "IHDR" ||
       u32(16) !== +match[2] || u32(20) !== +match[3]) throw Error(name + " must be a PNG with the pixel dimensions in its filename.");
-  return bytes;
+  return {bytes, pixels:Number(match[2]) * Number(match[3])};
 }
 function validateTextures(rows) {
-  let total = 0;
+  let total = 0, pixels = 0;
   for (const row of rows) {
     if (row.textures === undefined) continue;
     if (!record(row.textures) || Object.keys(row.textures).length > 64) throw Error("Use up to 64 changed PNGs per character.");
     for (const [name,data] of Object.entries(row.textures)) {
-      total += textureSize(name, data);
-      if (total > 16 * MiB) throw Error("A team's changed PNGs must fit in 16 MiB.");
+      const size = textureSize(name, data);
+      total += size.bytes;
+      pixels += size.pixels;
+      if (total > 16 * MiB || pixels > 16 * MiB) throw Error("A team's custom textures must fit in 16 MiB and 16 megapixels.");
     }
   }
 }
@@ -137,13 +141,17 @@ function validateStats(stats, batter) {
   }
 }
 function validateTeam(team, draft = false) {
-  if (!record(team) || team.format !== format) throw Error("Choose a portable tournament team saved with Save team.");
+  if (!record(team) || team.format !== format) throw Error("Choose a .team.json file created with Export team… in Game Plan.");
+  if (!draft && Object.keys(team).some(key => !["format","player","rows"].includes(key)))
+    throw Error("This team file has an unsupported field. Ask the sender to export their team in Game Plan.");
   if (typeof team.player !== "string" || team.player.length > 30 || /\p{Cc}/u.test(team.player)) throw Error("Use a Rio lobby name of up to 30 characters without control characters.");
   const player = draft ? team.player : team.player.trim();
   if (!Array.isArray(team.rows) || team.rows.length !== 9) throw Error("A tournament team needs nine batters.");
   const rows = team.rows.map((r, i) => {
     if (!record(r) || (r.source !== null && !names.has(r.source)) || !integer(r.pos, 8) || typeof r.captain !== "boolean" || typeof r.star !== "boolean")
       throw Error("Check the character, field position and flags for batter " + (i + 1) + ".");
+    if (!draft && Object.keys(r).some(key => !["source","pos","captain","star","label","stats","textures"].includes(key)))
+      throw Error("Batting spot " + (i + 1) + " has an unsupported field. Ask the sender to export their team in Game Plan.");
     if (r.source === null) {
       if (r.captain || r.star || (r.label !== undefined && r.label !== "") ||
           (r.textures !== undefined && (!record(r.textures) || Object.keys(r.textures).length)) ||
@@ -193,21 +201,33 @@ function replaceTeam(which, team) {
   libraryChoice[which] = "";
 }
 function confirmReplace(needed, message, actionLabel, action, returnTo) {
-  if (!needed) { action(); return; }
+  if (!needed) return action();
   const panel = toolbar.querySelector(".tourney-replace");
   const cancel = button("Keep editing", () => {
     panel.replaceChildren();
     returnTo?.focus();
   }, "tourney-keep");
-  panel.replaceChildren(el("span", message), cancel, button(actionLabel, action, "tourney-confirm"));
+  const accept = button(actionLabel, () => run(() => {
+    panel.replaceChildren();
+    return action();
+  }), "tourney-confirm");
+  panel.replaceChildren(el("span", message), cancel, accept);
   requestAnimationFrame(() => { if (cancel.isConnected) cancel.focus(); });
 }
-function loadSheet(team, label, trigger) {
-  confirmReplace(hasSheet(teams[side]), "Replace the current " + side + " sheet with " + label + "?",
-    "Replace " + side + " team", () => {
-      replaceTeam(side,team);
-      draw('.tourney-tabs [data-side="' + side + '"]');
-      status.textContent = label + " loaded into " + side + ".";
+function loadSheet(team, label, trigger, fromFile = false) {
+  const destination = side;
+  return confirmReplace(hasSheet(teams[destination]), "Replace the current " + destination + " sheet with " + label + "?",
+    "Replace " + destination + " team", async () => {
+      let result;
+      if (fromFile) {
+        result = await invoke("remember_imported_team", {team, filename:label});
+        if (mode === "tournament" && result.id) await refreshLibrary();
+      }
+      replaceTeam(destination, result ? result.team : team);
+      if (result?.id) libraryChoice[destination] = result.id;
+      draw('.tourney-tabs [data-side="' + destination + '"]');
+      const message = label + " loaded into " + destination + ".";
+      status.textContent = fromFile ? message + " " + (result.warning || "Added to your tournament team library.") : message;
     }, trigger);
 }
 function replaceMatchup(away, home) {
@@ -224,13 +244,18 @@ function libraryPicker() {
   if (entries.length) {
     const group = el("optgroup");
     group.label = "My saved teams";
-    for (const entry of entries) group.append(new Option(entry.label, entry.id));
+    const counts = new Map();
+    for (const {label} of entries) counts.set(label,(counts.get(label) || 0) + 1);
+    for (const entry of entries) {
+      const suffix = counts.get(entry.label) > 1 ? " · " + entry.id.slice(-8) : "";
+      group.append(new Option(entry.label + suffix, entry.id));
+    }
     picker.append(group);
   }
   picker.disabled = !entries.length;
   const load = button("Load into " + side, () => run(async () => {
     const entry = entries.find(item => item.id === picker.value);
-    if (entry) loadSheet(validateTeam(await invoke("load_tournament_team", {id:entry.id})), entry.label, picker);
+    if (entry) return loadSheet(validateTeam(await invoke("load_tournament_team", {id:entry.id})), entry.label, picker);
   }), "tourney-load-picked");
   picker.value = libraryChoice[side];
   load.disabled = !picker.value;
@@ -244,12 +269,38 @@ function libraryPicker() {
   if (libraryError) panel.append(el("p",libraryError));
   return panel;
 }
+function importButton(caption, className, maxMiB, useFile) {
+  const input = el("input");
+  input.type = "file";
+  input.accept = ".json,application/json";
+  input.hidden = true;
+  const trigger = button(caption, () => input.click());
+  input.onchange = () => run(async () => {
+    const file = input.files[0];
+    input.value = "";
+    if (!file) return;
+    toolbar.querySelector(".tourney-replace").replaceChildren();
+    if (file.size > maxMiB * MiB) throw Error("Choose a file under " + maxMiB + " MiB.");
+    let doc;
+    try { doc = JSON.parse(await file.text()); }
+    catch { throw Error("Choose a JSON file exported by Clone Maker."); }
+    return useFile(doc, file.name, trigger);
+  });
+  const control = el("span","",className);
+  control.append(trigger,input);
+  return control;
+}
 function makeToolbar() {
   const tabs = el("div", "", "tourney-tabs");
   tabs.setAttribute("role","group");
   tabs.setAttribute("aria-label","Team to edit");
   for (const s of sides) {
-    const tab = button(s, () => { side = s; status.textContent = ""; draw('.tourney-tabs [data-side="' + s + '"]'); });
+    const tab = button(s, () => {
+      if (s !== side) editor.scrollTop = 0;
+      side = s;
+      status.textContent = "";
+      draw('.tourney-tabs [data-side="' + s + '"]');
+    });
     tab.dataset.side = s;
     tab.setAttribute("aria-pressed",String(side === s));
     tabs.append(tab);
@@ -260,50 +311,41 @@ function makeToolbar() {
   name.title = "Enter the " + side + " player’s Project Rio username before building the game.";
   name.value = teams[side].player;
   name.oninput = () => { teams[side].player = name.value; name.setCustomValidity(""); status.textContent = ""; draftChanged(); };
-  const input = el("input");
-  input.type = "file";
-  input.accept = ".json,application/json";
-  input.hidden = true;
-  input.onchange = () => run(async () => {
-    const file = input.files[0];
-    input.value = "";
-    if (!file) return;
-    if (file.size > 48 * MiB) throw Error("Choose a matchup under 48 MiB or a team sheet under 24 MiB.");
-    let doc;
-    try { doc = JSON.parse(await file.text()); }
-    catch { throw Error("Choose a team or matchup JSON file saved by Clone Maker."); }
-    const trigger = load.querySelector("button");
-    if (doc?.format === matchupFormat) {
-      const away = validateTeam(doc.away), home = validateTeam(doc.home);
-      confirmReplace(sides.some(s => hasSheet(teams[s])), "Replace both the Away and Home sheets with " + file.name + "?",
-        "Import both teams", () => {
-          replaceMatchup(away,home);
-          status.textContent = "Imported Away and Home from " + file.name + ".";
-        }, trigger);
-    } else {
-      if (file.size > 24 * MiB) throw Error("Choose a team sheet under 24 MiB.");
-      loadSheet(validateTeam(doc), file.name, trigger);
-    }
+  const load = importButton("Import team into " + side + "…", "tourney-import", 24, (doc, filename, trigger) => {
+    if (doc?.format === matchupFormat) throw Error("This file contains both teams. Use Import matchup under Matchup files.");
+    return loadSheet(validateTeam(doc), filename, trigger, true);
   });
-  const load = el("span","","tourney-import");
-  load.append(button("Import team or matchup…",()=>input.click()),input);
-  const save = button("Save " + side + " team…", () => run(async () => {
+  const loadMatch = importButton("Import matchup…", "tourney-matchup-import", 48, async (doc, filename, trigger) => {
+    if (doc?.format === format) throw Error("This file contains one team. Choose Away or Home and use the Import team button for that side.");
+    if (doc?.format !== matchupFormat) throw Error("Choose a .matchup.json file created with Save matchup.");
+    const [away, home] = await Promise.all([doc.away, doc.home].map(team => invoke("prepare_team_sheet", {team:validateTeam(team)})));
+    const menu = trigger.closest("details");
+    menu.open = false;
+    return confirmReplace(sides.some(s => hasSheet(teams[s])), "Replace both the Away and Home sheets with " + filename + "?",
+      "Import both teams", () => {
+        replaceMatchup(away,home);
+        status.textContent = "Imported Away and Home from " + filename + ".";
+      }, menu.querySelector("summary"));
+  });
+  const save = button("Export team…", () => run(async () => {
     const path = await invoke("save_tournament_team",{team:validateTeam(teams[side]),side});
     if (path) {
       if (mode === "tournament") await refreshLibrary();
       makeToolbar();
-      const reopen = mode === "plan"
-        ? "Choose a side, then click Import team or matchup… to reopen this file."
-        : "Pick this team in Team library, or click Import team or matchup… to reopen the file.";
-      status.textContent = "Saved " + side + " team to " + path + ". " + reopen;
+      status.textContent = "Exported the " + side + " team to " + path + ". Send this file to the organizer. In Tournament Mode, they choose Away or Home and import it there.";
     }
   }), "tourney-save");
+  save.title = "Name the " + side + " team file in Save As, then send the .team.json file to your organizer.";
   const saveMatch = button("Save matchup…", () => run(async () => {
     const path = await invoke("save_tournament_matchup_sheet", {
       away:validateTeam(teams.Away), home:validateTeam(teams.Home)
     });
-    if (path) status.textContent = "Saved both teams to " + path + ". Use Import team or matchup… to reopen them together.";
+    if (path) status.textContent = "Saved both teams to " + path + ". Use Matchup files → Import matchup… to reopen them together.";
   }), "tourney-save-matchup");
+  const matchupFiles = el("details","","tourney-matchup-files");
+  const matchupActions = el("div","","tourney-new-choices");
+  matchupActions.append(loadMatch,saveMatch);
+  matchupFiles.append(el("summary", "Matchup files"), matchupActions);
   const newSheets = el("details","","tourney-new-sheets");
   const newMenu = el("summary","Start new…");
   const newTeam = button("New " + side + " sheet…", () => {
@@ -326,7 +368,9 @@ function makeToolbar() {
   const choices = el("div","","tourney-new-choices");
   choices.append(newTeam,newMatch);
   newSheets.append(newMenu,choices);
-  toolbar.replaceChildren(el("span","Edit team","tourney-side-label"), tabs, labeled("Rio lobby name",name), newSheets, load, save, saveMatch);
+  const sharing = el("div", "", "tourney-share-actions");
+  sharing.append(load, save);
+  toolbar.replaceChildren(el("span","Edit team","tourney-side-label"), tabs, labeled("Rio lobby name",name), newSheets, matchupFiles, sharing);
   if (mode === "tournament") toolbar.append(libraryPicker());
   const confirmation = el("div", "", "tourney-replace");
   confirmation.setAttribute("aria-live","polite");
@@ -523,12 +567,18 @@ function texturePanel(team, row, i) {
       throw Error("Choose up to 64 PNGs. A team's changed PNGs must fit in 16 MiB.");
     const next = {...row.textures};
     for (const file of chosen) next[file.name] = await readPng(file);
-    validateTextures(team.rows.map((r,n) => n===i ? {...r,textures:next} : r));
-    row.textures = next;
-    draw();
-    status.textContent = "Updated textures for batter " + (i + 1) + ".";
+    const rows = team.rows.map((r,n) => n === i ? {...r,textures:next} : r);
+    validateTextures(rows);
+    const prepared = await invoke("prepare_team_sheet", {team:{...team,rows}});
+    const changed = prepared.rows[i].textures || {};
+    const originalCount = chosen.filter(file => !Object.hasOwn(changed, file.name)).length;
+    if (Object.keys(changed).length) row.textures = changed;
+    else delete row.textures;
+    draw(".tourney-pngs");
+    const skipped = originalCount ? " Skipped " + originalCount + (originalCount === 1 ? " unchanged PNG." : " unchanged PNGs.") : "";
+    status.textContent = "Updated textures for " + title(row) + "." + skipped;
   });
-  area.append(labeled("Add changed Studio PNGs",files));
+  area.append(labeled("Add your painted PNGs from Studio",files));
   if (entries.length) {
     const list = el("ul");
     for (const name of entries) {
@@ -648,7 +698,7 @@ function inspector(team, faceFor) {
     team.rows.forEach(r=>{r.captain=r===row;}); draw(".tourney-captain");
   });
   const star = checkbox("Superstar","checkbox",row.star,false,"tourney-star",checked=>{row.star=checked; draw(".tourney-star");});
-  fields.append(labeled("Character",source),labeled("Player label",label),labeled("Batting spot",bat),
+  fields.append(labeled("Character",source),labeled("Player nickname",label),labeled("Batting spot",bat),
     labeled("Field position",pos),captain,star);
   const clear = button("Remove from sheet", () => {
     const discard = () => {
@@ -831,7 +881,30 @@ async function openMode(nextMode, trigger) {
     draw(null, false);
   });
 }
-dialog.querySelector(".tourney-switch-mode").onclick = () => openMode(mode === "plan" ? "tournament" : "plan");
+function enterGamePlan(trigger) {
+  if (busy || chooser.open || (dialog.open && mode === "plan")) return;
+  chooserOpener = trigger;
+  chooser.returnValue = "";
+  setCurrentPage(planButton);
+  chooser.showModal();
+}
+chooser.onclose = () => {
+  const choice = chooser.returnValue;
+  if (choice === "plan" || choice === "tournament") {
+    opener = chooserOpener;
+    openMode(choice,chooserOpener);
+  } else if (dialog.open) {
+    opener = chooserOpener;
+    backToStudio();
+  } else {
+    setCurrentPage(studioButton);
+    chooserOpener?.focus();
+  }
+};
+dialog.querySelector(".tourney-switch-mode").onclick = () => {
+  if (mode === "plan") openMode("tournament");
+  else enterGamePlan(planButton);
+};
 for (const trigger of document.querySelectorAll("[data-open-tournament],[data-open-plan]")) {
-  trigger.onclick = () => openMode(trigger.hasAttribute("data-open-plan") ? "plan" : "tournament", trigger);
+  trigger.onclick = () => trigger.hasAttribute("data-open-plan") ? enterGamePlan(trigger) : openMode("tournament", trigger);
 }

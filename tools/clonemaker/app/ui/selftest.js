@@ -62,10 +62,6 @@ export async function run(options, app) {
     say(`window ${innerWidth}x${innerHeight}, device pixel ratio ${devicePixelRatio}, screen ${screen.availWidth}x${screen.availHeight}`);
     check($("btn-go").disabled && $("source").disabled && $("btn-export").disabled && $("btn-blender").disabled && !$("btn-iso").disabled, "inputs wait for a game");
     await shot("empty");
-    app.showWelcome();
-    check(!$("welcome").hidden && document.activeElement === $("welcome-plan") && !$("welcome-tournament").disabled,
-      "both planners are available from launch before choosing a game");
-    await shot("welcome");
     const plan = $("rio-teams");
     const tournament = $("tournament-plan");
     const tournamentField = selector => tournament.querySelector(selector);
@@ -73,6 +69,21 @@ export async function run(options, app) {
     const directPlan = document.querySelector(".pages [data-open-plan]");
     const finishedRoster = tournamentField("[data-open-teams]");
     const ready = mode => tournament.open && tournament.dataset.mode === mode && tournamentField(".tourney-source") && !tournamentField("fieldset").disabled;
+    check(!$("welcome").open && !tournament.open && !plan.open && document.querySelector(".pages [data-open-studio]").getAttribute("aria-current") === "page",
+      "Clone Maker starts in Studio with no planning prompt");
+    directPlan.click();
+    check($("welcome").open && document.activeElement === $("welcome-plan") && !$("welcome-tournament").disabled,
+      "entering Game Plan opens the team setup chooser without a game disc");
+    await shot("welcome");
+    $("welcome-later").click();
+    await waitFor(() => !$("welcome").open && !tournament.open && document.activeElement === directPlan,
+      "dismissing team setup returns to Studio and the Game Plan button");
+    directPlan.click();
+    $("welcome-tournament").click();
+    await waitFor(() => ready("tournament") && !$("welcome").open, "Tournament opens from the Game Plan chooser");
+    tournamentField(".tourney-close").click();
+    await waitFor(() => !tournament.open && document.activeElement === directPlan, "return to Studio");
+    directPlan.click();
     const drop = (source, target) => {
       const transfer = new DataTransfer();
       const send = (el, type) => el.dispatchEvent(new DragEvent(type, {
@@ -85,7 +96,7 @@ export async function run(options, app) {
     };
     $("welcome-plan").click();
     await waitFor(() => ready("plan"), "one click from welcome opens the editable Game plan without a disc");
-    check($("welcome").hidden && !plan.open && !tournamentField(".tourney-team-picker") && tournamentField(".tourney-build").hidden,
+    check(!$("welcome").open && !plan.open && !tournamentField(".tourney-team-picker") && tournamentField(".tourney-build").hidden,
       "both roster drafts are available before tournament setup");
     const cachedFaces = await invoke("load_roster_portraits", {sourcePath:null});
     const faceSlots = selector => [...tournament.querySelectorAll(selector + " .roster-face")];
@@ -99,8 +110,12 @@ export async function run(options, app) {
     const batterFaces = () => faceSlots(".tourney-row");
     const openSlots = () => tournament.querySelectorAll(".tourney-row .tourney-open-face").length;
     const switchSide = side => tournamentField('.tourney-tabs [data-side="' + side + '"]').click();
-    const importSheet = async (sheet, name = "Practice.team.json") => {
-      const files = tournamentField(".tourney-import input");
+    const confirmReplacement = async () => {
+      tournamentField(".tourney-confirm").click();
+      await waitFor(() => !tournamentField("fieldset").disabled, "the confirmed roster operation to finish");
+    };
+    const importSheet = async (sheet, name = "Practice.team.json", selector = ".tourney-import input") => {
+      const files = tournamentField(selector);
       const transfer = new DataTransfer();
       transfer.items.add(new File([JSON.stringify(sheet)], name, {type:"application/json"}));
       files.files = transfer.files;
@@ -120,7 +135,7 @@ export async function run(options, app) {
     tournamentField(".tourney-keep").click();
     check(openSlots() === 7, "canceling a new sheet preserves the existing roster");
     tournamentField(".tourney-new-team").click();
-    tournamentField(".tourney-confirm").click();
+    await confirmReplacement();
     check(openSlots() === 9, "starting a new team restores nine empty spots");
     await shot("empty_team_sheet");
     for (let i = 0; i < 9; i++) {
@@ -296,6 +311,8 @@ export async function run(options, app) {
         check(cyan > sample.width * sample.height * 0.015, "the custom head contains the actual cyan DK paint");
         const tournamentPortrait = img.src;
         tournamentField(".tourney-switch-mode").click();
+        check($("welcome").open, "entering Game Plan from Tournament shows the team setup chooser");
+        $("welcome-plan").click();
         await waitFor(() => ready("plan") && matchingHeads() && editedHead().src === tournamentPortrait,
           "Game plan to use the same painted DK on the field and in the batting order");
         check(hasSourceImage(findDK().querySelector(".roster-face")), "the character pool keeps the original DK");
@@ -327,24 +344,31 @@ export async function run(options, app) {
     tournamentField(".tourney-keep").click();
     check(tournamentField(".tourney-label").value === "My batter", "canceling an import retains the edited sheet");
     await importSheet(firstTeam);
-    tournamentField(".tourney-confirm").click();
+    await confirmReplacement();
     check(tournamentField(".tourney-label").value === firstTeam.rows[0].label, "confirmed import restores the saved sheet");
+    const library = await invoke("list_tournament_teams");
+    check(library.length === 1 && (await invoke("load_tournament_team", {id:library[0].id})).rows[0].label === firstTeam.rows[0].label,
+      "imported team is reusable from the receiver's library and importing it twice keeps one copy");
     const {loadDraft} = await import("./game-plan-draft.mjs");
     await sleep(300);
     const snapshot = await loadDraft();
     const bothSheets = {format:"mssb-tournament-matchup-v1", away:snapshot.teams.Away, home:firstTeam};
-    await importSheet({...bothSheets, home:{...firstTeam, rows:[]}}, "Broken.matchup.json");
+    await importSheet(bothSheets, "Opponent.matchup.json");
+    check(!tournamentField(".tourney-confirm") && tournamentField(".tourney-lobby").value === "Local Player",
+      "the team-only import refuses a two-team matchup without prompting to replace either side");
+    const importMatchup = (data, filename) => importSheet(data, filename, ".tourney-matchup-import input");
+    await importMatchup({...bothSheets, home:{...firstTeam, rows:[]}}, "Broken.matchup.json");
     check(!tournamentField(".tourney-confirm") && tournamentField(".tourney-lobby").value === "Local Player",
       "a bad second sheet cannot replace either team");
     tournamentField(".tourney-new-matchup").click();
-    tournamentField(".tourney-confirm").click();
+    await confirmReplacement();
     check(openSlots() === 9, "new matchup starts Away blank");
     switchSide("Home");
     check(openSlots() === 9, "new matchup also clears Home");
     tournamentField(".tourney-build").click();
     check(document.activeElement === tournamentField(".tourney-source") && openSlots() === 9 &&
       tournamentField('[role="status"]').textContent.includes("0 of 9"), "Build highlights the first unassigned slot before opening a disc picker");
-    await importSheet(bothSheets, "Practice.matchup.json");
+    await importMatchup(bothSheets, "Practice.matchup.json");
     check(slotName("row",1).textContent === "Away DK", "matchup import restores Away's named clone");
     switchSide("Home");
     check(openSlots() === 8 && tournamentField(".tourney-label").value === firstTeam.rows[0].label, "matchup import restores Home's unfinished sheet");
@@ -354,6 +378,8 @@ export async function run(options, app) {
       slotName("row",1).textContent === "Away DK",
       "replacing Home leaves the planned Away team intact");
     tournamentField(".tourney-switch-mode").click();
+    check($("welcome").open, "entering Game Plan from Tournament shows the team setup chooser");
+    $("welcome-plan").click();
     await waitFor(() => ready("plan"), "Tournament returns to the shared Game plan");
     tournamentField('.tourney-tabs [data-side="Home"]').click();
     check(tournamentField(".tourney-lobby").value === "Local Player" && tournamentField(".tourney-label").value === (firstTeam.rows[0].label ?? ""),
@@ -370,6 +396,8 @@ export async function run(options, app) {
     tournamentField(".tourney-close").click();
     await waitFor(() => !tournament.open && document.activeElement === directTournament, "closing Tournament returns to its own navigation button");
     directPlan.click();
+    check($("welcome").open, "returning to Game Plan through Studio presents the team setup choices again");
+    $("welcome-plan").click();
     await waitFor(() => ready("plan"), "Game plan reopens from the main navigation without an ISO");
     const { showTeamImage } = await import("./rio-teams.mjs");
     finishedRoster.click();
@@ -485,6 +513,8 @@ export async function run(options, app) {
     tournamentField('.tourney-tabs [data-side="Home"]').click();
     check(tournamentField(".tourney-lobby").value === "Local Player", "finished-game slot edits preserve the portable sources");
     tournamentField(".tourney-switch-mode").click();
+    check($("welcome").open, "entering Game Plan from Tournament shows the team setup chooser");
+    $("welcome-plan").click();
     await waitFor(() => ready("plan"), "Game plan keeps its optional finished-game action");
     finishedRoster.click();
     await waitFor(() => plan.open, "the finished-game roster reopens with its own ISO-specific edits");
