@@ -263,6 +263,10 @@ pub fn colour_label(colour: &str) -> String {
 }
 /// Build the exact CLI recolour spec the Python window uses, including its hue rounding.
 pub fn colour_spec(colour: &str, keeplum: f64, regions: Option<&[usize]>) -> Result<String> {
+    // A tournament clone keeps the source colors, including its HUD palette.
+    if colour == "original" {
+        return Ok("tex=,minsat=2".into());
+    }
     let hue = if colour.starts_with('#') {
         format!("{:.3}", colour_hue(colour)?)
     } else {
@@ -434,6 +438,23 @@ pub fn load_game(path: &Path) -> (Option<Game>, OpenGame) {
         }
     }
 }
+/// Read the selected game's HUD portraits in character-slot order, as transparent base64 PNGs.
+pub fn roster_portraits(disc: &Disc, dol: &Dol) -> Result<Vec<String>> {
+    let desc = crate::menu::portrait_desc(dol)?;
+    let resource = crate::menu::TextureFile::new(disc.load("ZZZZ.dat", desc, 0)?)?;
+    resource
+        .portraits()?
+        .into_iter()
+        .map(|index| {
+            let texture = &resource.textures[index];
+            let pixels = texture.bytes(&resource.data)?;
+            let rgba = crate::texture_encode::decode_texture_rgba(&pixels, texture)?;
+            let png = custom_textures::rgba_png(texture.w, texture.h, &rgba)?;
+            Ok(base64::engine::general_purpose::STANDARD.encode(png))
+        })
+        .collect()
+}
+
 /// Texture placements and atlas height for the window's before/after previews.
 pub fn atlas_layout(g: &Gpc) -> (Vec<(usize, usize, usize)>, usize) {
     let mut order: Vec<_> = g.textures.iter().collect();

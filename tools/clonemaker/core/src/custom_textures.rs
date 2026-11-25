@@ -38,6 +38,10 @@ pub fn parse_name(name: &str) -> Option<(usize, usize, usize)> {
 
 /// Encode row-major RGBA8 as a PNG file.
 pub fn write_png(path: &Path, w: usize, h: usize, rgba: &[u8]) -> Result<()> {
+    fs::write(path, rgba_png(w, h, rgba)?).map_err(|e| Error::from(e).at_path(path))
+}
+
+pub(crate) fn rgba_png(w: usize, h: usize, rgba: &[u8]) -> Result<Vec<u8>> {
     let mut out = Vec::new();
     {
         let mut encoder = png::Encoder::new(&mut out, w as u32, h as u32);
@@ -50,7 +54,7 @@ pub fn write_png(path: &Path, w: usize, h: usize, rgba: &[u8]) -> Result<()> {
             .write_image_data(rgba)
             .map_err(|e| Error::new(e.to_string()))?;
     }
-    fs::write(path, out).map_err(|e| Error::from(e).at_path(path))
+    Ok(out)
 }
 
 /// Read any PNG (grey, palette, RGB, 16-bit, with or without alpha) as width, height and RGBA8.

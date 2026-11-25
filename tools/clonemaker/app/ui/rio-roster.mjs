@@ -6,6 +6,41 @@ const format = "mssb-rio-team-v1";
 const buildKey = "Clone Maker SHA256";
 
 function integer(value, max) { return Number.isInteger(value) && value >= 0 && value <= max; }
+
+function batterAt(team, index) {
+  if (!integer(index, 8) || !team.rows[index])
+    throw Error("Choose a batting spot from 1 to 9.");
+  return team.rows[index];
+}
+
+export function moveBatter(team, fromIndex, toIndex) {
+  const batter = batterAt(team, fromIndex);
+  batterAt(team, toIndex);
+  if (fromIndex === toIndex) return;
+  team.rows.splice(fromIndex, 1);
+  team.rows.splice(toIndex, 0, batter);
+}
+
+export function swapFieldPosition(team, rowIndex, toPosition) {
+  const batter = batterAt(team, rowIndex);
+  const defender = team.rows.find(row => row.pos === toPosition);
+  if (!integer(toPosition, 8) || !defender)
+    throw Error("Choose a starting field position assigned to a player.");
+  defender.pos = batter.pos;
+  batter.pos = toPosition;
+}
+
+export function replaceBatter(team, rowIndex, characterId) {
+  const batter = batterAt(team, rowIndex);
+  if (!integer(characterId, 53)) throw Error("Choose a character from the roster.");
+  if (batter.id === characterId) return;
+  if (team.rows.some(row => row.id === characterId))
+    throw Error("That character is already in this team's lineup.");
+  batter.id = characterId;
+  delete batter.label;
+  if (!captainSlots.has(characterId)) batter.captain = false;
+}
+
 function checkBuild(hash, expected) {
   if (!/^[a-f0-9]{64}$/.test(hash) || hash !== expected)
     throw Error("This team belongs to a different game image. Choose the same finished ISO on both computers.");

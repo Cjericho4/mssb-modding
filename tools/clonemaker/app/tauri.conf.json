@@ -11,6 +11,7 @@
     "windows": [
       {
         "title": "MSSB Clone Maker",
+        "dragDropEnabled": false,
         "width": 1320,
         "height": 780,
         "minWidth": 640,

@@ -13,6 +13,7 @@ path = "src/main.rs"
 tauri-build = { version = "2", features = [] }
 
 [dependencies]
+base64 = "0.23.1"
 tauri = { version = "2", features = [] }
 tauri-plugin-dialog = "2"
 serde = { version = "1", features = ["derive"] }
@@ -20,6 +21,9 @@ serde_json = "1"
 sha2 = "0.10"
 tempfile = "3"
 mssb-clone-core = { path = "../core" }
+
+[target.'cfg(any(target_os = "macos", target_os = "linux"))'.dependencies]
+rustix = { version = "1.1.5", features = ["fs"] }
 
 [features]
 # Embed ui/ into the binary (a plain `cargo build` then makes the portable exe; no tauri-cli needed)

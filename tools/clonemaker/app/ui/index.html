@@ -6,6 +6,7 @@
 <title>MSSB Clone Maker</title>
 <link rel="stylesheet" href="theme.css">
 <link rel="stylesheet" href="rio-teams.css">
+<link rel="stylesheet" href="tournament.css">
 </head>
 <body>
 <header class="top">
@@ -147,16 +148,31 @@
   </section>
 </template>
 <dialog id="rio-teams" aria-labelledby="rio-team-title">
-  <header><h2 id="rio-team-title">Teams for Project Rio</h2><button class="team-close">Close</button></header>
-  <fieldset><p>Choose the finished .iso that both players will open in Rio.</p>
-    <div class="team-pick"></div><p class="team-image"></p><div class="team-sheets"></div>
+  <header><h2 id="rio-team-title">Game plan</h2><button type="button" data-open-tournament aria-haspopup="dialog" aria-controls="tournament-plan">Tournament teams…</button><button type="button" class="team-close">Close</button></header>
+  <fieldset>
+    <div class="team-game"><div class="team-pick"></div><p class="team-image">Choose the finished ISO both players will use.</p></div>
     <div class="team-actions" hidden></div>
-  </fieldset><p role="status" aria-live="polite"></p>
-  <p>Share the same matchup file. Both players load it here to check their ISO and lineups.
-  Compare the matchup IDs, then select <strong>Use in Rio</strong> on both computers with the game closed.
-  Choose Rio’s <strong>HudFiles</strong> folder. Clone Maker saves the previous HUD there.
-  In a private No Game Mode lobby, enable Fast Reset from HUD. Confirm the lineups when play begins.</p>
+    <div class="team-sheets"></div>
+  </fieldset>
+  <p role="status" aria-live="polite"></p>
+  <details class="plan-help"><summary>Load this matchup in Project Rio</summary>
+    <p>Share the saved matchup. Both players open the same finished ISO and load the matchup in Game plan.
+    Compare the matchup IDs. With the game closed, select <strong>Use in Rio</strong> on both computers and choose
+    Rio’s <strong>HudFiles</strong> folder. Clone Maker backs up the previous HUD there.
+    In a private No Game Mode lobby, enable <strong>Fast Reset from HUD</strong> to start with both teams’ batting orders and field positions.</p>
+  </details>
 </dialog>
+<dialog id="tournament-plan" aria-labelledby="tourney-title">
+  <header><h2 id="tourney-title">Tournament teams</h2><button type="button" class="tourney-close">Close</button></header>
+  <p>Save each player’s nine as a portable team. Both players can build the same matchup from the two team files and their own clean retail ISO.</p>
+  <fieldset>
+    <div class="tourney-toolbar"></div>
+    <div class="tourney-editor"></div>
+    <div class="tourney-footer"><button type="button" class="tourney-build">Build tournament matchup…</button></div>
+  </fieldset>
+  <p role="status" aria-live="polite"></p>
+</dialog>
+<script type="module" src="tournament.mjs"></script>
 <script src="app.js"></script>
 <script type="module" src="rio-teams.mjs"></script>
 </body>

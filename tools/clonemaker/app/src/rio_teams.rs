@@ -1,5 +1,10 @@
 //! Native file operations for the two-player Project Rio roster editor.
-use mssb_clone_core::stats;
+use mssb_clone_core::{
+    binary::Dol,
+    constants::{ADDR_GLOVE, ADDR_SUBITEM_FILES, CHAR_NAMES},
+    disc::Disc,
+    stats,
+};
 use serde::Serialize;
 use sha2::{Digest, Sha256};
 use std::{
@@ -15,12 +20,45 @@ pub struct TeamImage {
     name: String,
     sha256: String,
     hands: Vec<[u8; 2]>,
+    portraits: Vec<String>,
+    #[serde(rename = "cloneSources")]
+    clone_sources: Vec<Option<usize>>,
+}
+
+// On the supported retail disc the glove row for each slot contains six times its charID.
+// Clone Maker copies this row, the body entry, and all six subitem descriptors from the source,
+// including when the donor keeps its original menu identity or uses a different set of stats.
+fn clone_sources(dol: &Dol) -> mssb_clone_core::Result<Vec<Option<usize>>> {
+    (0..CHAR_NAMES.len())
+        .map(|slot| {
+            let glove = dol.u16(ADDR_GLOVE + slot as u32 * 2)? as usize;
+            let source = glove / 6;
+            if glove % 6 != 0 || source >= CHAR_NAMES.len() || source == slot {
+                return Ok(None);
+            }
+            let items = |id: usize| dol.read(ADDR_SUBITEM_FILES + id as u32 * 6 * 16, 6 * 16);
+            let matches = dol.u16(ADDR_GLOVE + source as u32 * 2)? as usize == glove
+                && dol.pair(slot)?.0 == dol.pair(source)?.0
+                && items(slot)? == items(source)?;
+            Ok(matches.then_some(source))
+        })
+        .collect()
 }
 
 fn inspect(path: &Path) -> Result<TeamImage, String> {
     let mut input = File::open(path).map_err(|e| e.to_string())?;
     let before = input.metadata().map_err(|e| e.to_string())?;
     let hands = stats::roster_hands(&mut input, path).map_err(|e| e.to_string())?;
+    // A different art archive or identity table should still allow editing the roster by slot.
+    let (portraits, clone_sources) = Disc::iso(path)
+        .and_then(|disc| {
+            let dol = Dol::new(disc.system("main.dol")?)?;
+            Ok((
+                mssb_clone_core::api::roster_portraits(&disc, &dol).unwrap_or_default(),
+                clone_sources(&dol).unwrap_or_default(),
+            ))
+        })
+        .unwrap_or_default();
     input.rewind().map_err(|e| e.to_string())?;
     let mut hash = Sha256::new();
     let mut buf = vec![0u8; 1024 * 1024];
@@ -43,6 +81,8 @@ fn inspect(path: &Path) -> Result<TeamImage, String> {
             .into_owned(),
         sha256: format!("{:x}", hash.finalize()),
         hands,
+        portraits,
+        clone_sources,
     })
 }
 
@@ -77,33 +117,41 @@ pub async fn save_rio_roster(
         let _: serde_json::Map<String, serde_json::Value> =
             serde_json::from_str(&json).map_err(|e| e.to_string())?;
         let suggested = if single { "team.json" } else { "hud.json" };
-        let Some(file) = app
-            .dialog()
-            .file()
-            .add_filter("Roster JSON", &["json"])
-            .set_file_name(suggested)
-            .blocking_save_file()
-        else {
-            return Ok(None);
-        };
-        let path = file.into_path().map_err(|e| e.to_string())?;
-        if !path
-            .extension()
-            .and_then(|v| v.to_str())
-            .is_some_and(|v| v.eq_ignore_ascii_case("json"))
-        {
-            return Err("Choose a .json filename.".into());
-        }
-        let parent = path.parent().ok_or("Choose a folder for the roster.")?;
-        let mut tmp = tempfile::NamedTempFile::new_in(parent).map_err(|e| e.to_string())?;
-        tmp.write_all(json.as_bytes())
-            .and_then(|_| tmp.as_file().sync_all())
-            .map_err(|e| e.to_string())?;
-        tmp.persist(&path).map_err(|e| e.to_string())?;
-        Ok(Some(path.display().to_string()))
+        save_json_dialog(&app, json.as_bytes(), suggested)
     })
     .await
     .map_err(|e| e.to_string())?
+}
+
+pub(crate) fn save_json_dialog(
+    app: &AppHandle,
+    json: &[u8],
+    suggested: &str,
+) -> Result<Option<String>, String> {
+    let Some(file) = app
+        .dialog()
+        .file()
+        .add_filter("Roster JSON", &["json"])
+        .set_file_name(suggested)
+        .blocking_save_file()
+    else {
+        return Ok(None);
+    };
+    let path = file.into_path().map_err(|e| e.to_string())?;
+    if !path
+        .extension()
+        .and_then(|v| v.to_str())
+        .is_some_and(|v| v.eq_ignore_ascii_case("json"))
+    {
+        return Err("Choose a .json filename.".into());
+    }
+    let parent = path.parent().ok_or("Choose a folder for the roster.")?;
+    let mut tmp = tempfile::NamedTempFile::new_in(parent).map_err(|e| e.to_string())?;
+    tmp.write_all(json)
+        .and_then(|_| tmp.as_file().sync_all())
+        .map_err(|e| e.to_string())?;
+    tmp.persist(&path).map_err(|e| e.to_string())?;
+    Ok(Some(path.display().to_string()))
 }
 
 /// Stage the backup and replacement in the chosen directory. A failed write leaves the old HUD readable.
@@ -185,6 +233,15 @@ mod tests {
     fn inspect_retail_iso_matches_reference() {
         let path = std::env::var_os("MSSB_RIO_RETAIL_ISO").expect("set MSSB_RIO_RETAIL_ISO");
         let image = inspect(Path::new(&path)).unwrap();
+        assert_eq!(image.clone_sources, vec![None; 54]);
+        assert_eq!(image.portraits.len(), 54);
+        assert!(
+            image
+                .portraits
+                .iter()
+                .all(|png| png.starts_with("iVBORw0KGgo")),
+            "all HUD portraits must be PNG images"
+        );
         assert_eq!(
             image.sha256,
             "e3cd4dc92dd85f72b3dd10a95f2e075f612c197862b94c86466c64970f4efae9"

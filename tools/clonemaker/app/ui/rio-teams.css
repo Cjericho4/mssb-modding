@@ -1,16 +1,299 @@
-#rio-teams { color:var(--text, #eee); background:var(--panel,#20212a); border:1px solid var(--border,#555); border-radius:12px; width:min(88rem,95vw); max-height:90vh; padding:1.2rem; overflow:auto; }
-#rio-teams::backdrop { background: rgb(0 0 0 / 70%); }
-#rio-teams header,#rio-teams .team-actions { display:flex; align-items:center; gap:.7rem; flex-wrap:wrap; }
-#rio-teams header { justify-content:space-between; }
-#rio-teams fieldset { border:0; padding:0; min-width:0; }
-#rio-teams p,#rio-teams label { margin:.55rem 0; }
-#rio-teams .team-image { overflow-wrap:anywhere; font-family:monospace; }
-#rio-teams .team-sheets { display:grid; gap:1rem; grid-template-columns:repeat(auto-fit,minmax(min(100%,27rem),1fr)); }
-#rio-teams table { width:100%; border-collapse:collapse; margin:.65rem 0; }
-#rio-teams th,#rio-teams td { text-align:left; padding:.15rem; }
-#rio-teams select,#rio-teams .roster-label { max-width:100%; width:100%; }
-#rio-teams .roster-label { margin-top:.15rem; }
-#rio-teams .team-actions { margin-top:1rem; }
-#rio-teams [hidden] { display:none; }
-#rio-teams .team-close { margin-left:auto; }
-#rio-teams [role=status] { min-height:1.4em; overflow-wrap:anywhere; }
+#rio-teams {
+  --plan-gap: 14px;
+  width: min(1160px, calc(100vw - 24px));
+  max-width: none;
+  max-height: calc(100vh - 24px);
+  padding: 0 20px 16px;
+  overflow: auto;
+  color: var(--ink);
+  background: var(--paper);
+  border: 1px solid var(--rule);
+  border-radius: 12px;
+  box-shadow: 0 18px 60px #0005;
+}
+#rio-teams::backdrop { background: rgb(10 16 23 / .72); }
+#rio-teams header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 11px 20px;
+  margin: 0 -20px 12px;
+  color: var(--rail-text);
+  background: var(--rail);
+  border-bottom: 2px solid var(--ice);
+}
+#rio-teams h2, #rio-teams h3 { margin: 0; font-family: var(--display); line-height: 1.05; }
+#rio-teams h2 { font-size: 28px; }
+#rio-teams h3 { font-size: 21px; }
+#rio-teams p { margin: 5px 0 8px; }
+#rio-teams .team-close { margin-left: auto; color: var(--rail-text); background: var(--rail-2); border-color: var(--rail-dash); }
+#rio-teams fieldset {
+  display: grid;
+  grid-template-columns: minmax(0,1fr) auto;
+  align-items: center;
+  gap: 10px;
+  border: 0;
+  margin: 0;
+  padding: 0;
+  min-width: 0;
+}
+#rio-teams:not(:has(.plan-workspace)) { width: min(590px, calc(100vw - 24px)); }
+#rio-teams .team-game { display: flex; align-items: center; gap: 10px; min-width: 0; }
+#rio-teams .team-pick { flex: none; }
+#rio-teams :is(input:not([type="radio"],[type="checkbox"],[type="file"]),select) {
+  min-width: 0;
+  padding: 4px 7px;
+  border: 1px solid var(--rule);
+  border-radius: 5px;
+  background: var(--card);
+  color: var(--ink);
+}
+#rio-teams button { line-height: 1.25; }
+#rio-teams :is(input, button, select, summary):focus-visible { outline: 3px solid var(--ice); outline-offset: 2px; }
+#rio-teams .team-image { color: var(--ink-2); overflow-wrap: anywhere; font: 11px/1.4 var(--mono); }
+#rio-teams .team-sheets { grid-column: 1 / -1; display: grid; gap: var(--plan-gap); min-width: 0; }
+#rio-teams .plan-toolbar, #rio-teams .team-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+#rio-teams .plan-toolbar {
+  padding-block: 4px;
+}
+#rio-teams .plan-tabs {
+  display: inline-flex;
+  gap: 3px;
+  margin-right: 6px;
+  padding: 3px;
+  border-radius: 7px;
+  border: 1px solid var(--rule);
+  background: var(--card);
+}
+#rio-teams .plan-tabs button { padding: 6px 14px; color: var(--ink-2); background: transparent; border: 0; }
+#rio-teams .plan-tabs button[aria-pressed="true"] { background: var(--rail); color: var(--rail-text); box-shadow: inset 0 -2px var(--ice); }
+#rio-teams .plan-toolbar label { display: flex; align-items: center; gap: 6px; }
+#rio-teams .plan-workspace {
+  display: grid;
+  grid-template-columns: minmax(0, 1.25fr) minmax(0, 1fr);
+  gap: var(--plan-gap);
+}
+#rio-teams :is(.plan-field-panel,.plan-order-panel,.plan-inspector,.plan-pool) {
+  min-width: 0;
+  border: 1px solid var(--rule);
+  border-radius: 9px;
+  background: var(--card);
+}
+#rio-teams :is(.plan-field-panel,.plan-order-panel) { display: flex; flex-direction: column; padding: 12px 14px; }
+#rio-teams :is(.plan-field-panel,.plan-order-panel,.plan-pool) > p { margin: 4px 0 9px; color: var(--ink-2); font-size: 12px; }
+:is(#rio-teams,#tournament-plan) .plan-diamond {
+  position: relative;
+  flex: 1;
+  min-height: 304px;
+  overflow: hidden;
+  isolation: isolate;
+  border: 1px solid #33574a;
+  border-radius: 8px;
+  background: radial-gradient(ellipse 4% 5.5% at 50% 65%, #c39a72 0 97%, transparent 100%),
+    repeating-radial-gradient(ellipse 104% 110% at 50% 90%, #377353 0 10%, #326c4d 10% 20%);
+}
+/* The fair territory fans out from the plate. Both chalk paths share the same plate point. */
+:is(#rio-teams,#tournament-plan) .plan-diamond::before, :is(#rio-teams,#tournament-plan) .plan-diamond::after {
+  content: "";
+  pointer-events: none;
+  position: absolute;
+  inset: 0;
+}
+:is(#rio-teams,#tournament-plan) .plan-diamond::before {
+  background: radial-gradient(ellipse 1% 1.5% at 50% 35%, #fff4d8 90%, transparent 100%),
+    radial-gradient(ellipse 1% 1.5% at 27% 60%, #fff4d8 90%, transparent 100%),
+    radial-gradient(ellipse 1% 1.5% at 73% 60%, #fff4d8 90%, transparent 100%), #b48b60;
+  clip-path: polygon(evenodd, 50% 91%, 20% 52%, 28% 39%, 38% 31%, 50% 28%, 62% 31%, 72% 39%, 80% 52%, 50% 91%,
+    50% 83%, 69% 61%, 50% 41%, 31% 61%, 50% 83%);
+}
+:is(#rio-teams,#tournament-plan) .plan-diamond::after {
+  background: #f3e9cb;
+  clip-path: polygon(0 24.5%, 50% 90%, 100% 24.5%, 100% 25.1%, 50% 90.8%, 0 25.1%);
+}
+:is(#rio-teams,#tournament-plan) .plan-fielder {
+  position: absolute;
+  z-index: 1;
+  left: var(--field-x);
+  top: var(--field-y);
+  transform: translate(-50%, -50%);
+  display: grid;
+  justify-items: center;
+  gap: 2px;
+  width: 24%;
+  padding: 0;
+  color: #fff;
+  background: transparent;
+  border: 0;
+  cursor: grab;
+}
+:is(#rio-teams,#tournament-plan) .plan-fielder[data-pos="0"] { --field-x: 50%; --field-y: 65%; } /* pitcher */
+:is(#rio-teams,#tournament-plan) .plan-fielder[data-pos="1"] { --field-x: 50%; --field-y: 89%; } /* catcher */
+:is(#rio-teams,#tournament-plan) .plan-fielder[data-pos="2"] { --field-x: 79%; --field-y: 55%; } /* first */
+:is(#rio-teams,#tournament-plan) .plan-fielder[data-pos="3"] { --field-x: 64%; --field-y: 39%; } /* second */
+:is(#rio-teams,#tournament-plan) .plan-fielder[data-pos="4"] { --field-x: 21%; --field-y: 55%; } /* third */
+:is(#rio-teams,#tournament-plan) .plan-fielder[data-pos="5"] { --field-x: 36%; --field-y: 39%; } /* shortstop */
+:is(#rio-teams,#tournament-plan) .plan-fielder[data-pos="6"] { --field-x: 16%; --field-y: 20%; } /* left */
+:is(#rio-teams,#tournament-plan) .plan-fielder[data-pos="7"] { --field-x: 50%; --field-y: 10%; } /* center */
+:is(#rio-teams,#tournament-plan) .plan-fielder[data-pos="8"] { --field-x: 84%; --field-y: 20%; } /* right */
+#rio-teams .plan-portrait { object-fit: contain; pointer-events: none; }
+:is(#rio-teams,#tournament-plan) .plan-fielder:has(.plan-portrait) {
+  grid-template-columns: auto minmax(0,max-content);
+  grid-template-areas: "portrait portrait" "position name";
+  justify-content: center;
+  gap: 0;
+}
+:is(#rio-teams,#tournament-plan) .plan-fielder .plan-portrait {
+  grid-area: portrait;
+  width: 34px;
+  height: 34px;
+  border: 1px solid #e6edd2;
+  border-radius: 50%;
+  background: #b7cfb9;
+  box-shadow: 0 1px 4px #142b2066;
+}
+:is(#rio-teams,#tournament-plan) .position-badge {
+  display: inline-grid;
+  min-width: 30px;
+  place-items: center;
+  border-radius: 4px;
+  padding: 2px 4px;
+  font: 600 11px/1.2 var(--mono);
+}
+:is(#rio-teams,#tournament-plan) .plan-fielder .position-badge {
+  height: 23px;
+  background: #f3f2da;
+  color: #173729;
+  border: 1px solid #fff9;
+  border-radius: 14px;
+  box-shadow: 0 1px 4px #172a204d;
+}
+:is(#rio-teams,#tournament-plan) .plan-fielder .bat-name {
+  max-width: 100%;
+  padding: 2px 6px;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  border: 1px solid #a9c2ac;
+  border-radius: 4px;
+  background: #18392c;
+  font-weight: 600;
+  font-size: 12px;
+  line-height: 1.35;
+}
+:is(#rio-teams,#tournament-plan) .plan-fielder:is(.is-selected,[aria-pressed="true"]) .position-badge { background: #e7f595; border-color: #fff9c4; }
+:is(#rio-teams,#tournament-plan) .plan-fielder:is(.is-selected,[aria-pressed="true"]) .bat-name { border-color: #eff8af; box-shadow: 0 0 0 1px #eff8af; }
+:is(#rio-teams,#tournament-plan) .plan-fielder:focus-visible, :is(#rio-teams,#tournament-plan) .plan-fielder.drag-over { outline: 2px dashed #fff; border-radius: 5px; outline-offset: 2px; }
+:is(#rio-teams,#tournament-plan) .plan-fielder:has(.plan-portrait) .position-badge {
+  grid-area: position;
+  align-self: stretch;
+  height: auto;
+  min-width: 23px;
+  border-radius: 4px 0 0 4px;
+}
+:is(#rio-teams,#tournament-plan) .plan-fielder:has(.plan-portrait) .bat-name {
+  grid-area: name;
+  border-left: 0;
+  border-radius: 0 4px 4px 0;
+}
+:is(#rio-teams,#tournament-plan) .plan-fielder:is(.is-selected,[aria-pressed="true"]) .plan-portrait { outline: 2px solid #eff8af; }
+:is(#rio-teams,#tournament-plan) .plan-fielder:hover .bat-name { background: #0e281e; }
+#rio-teams .plan-order { display: grid; flex: 1; gap: 1px; min-width: 0; list-style: none; padding: 0; margin: 0; }
+#rio-teams .plan-order > li { min-width: 0; }
+#rio-teams .plan-batter {
+  display: grid;
+  grid-template-columns: 28px minmax(0,1fr) auto 18px;
+  align-items: center;
+  gap: 8px;
+  text-align: left;
+  width: 100%;
+  height: 100%;
+  min-height: 30px;
+  padding: 3px 9px;
+  background: var(--card);
+  border: 1px solid transparent;
+  border-bottom-color: var(--rule);
+  border-radius: 3px;
+  cursor: grab;
+}
+#rio-teams .plan-batter:has(.plan-portrait) {
+  grid-template-columns: 28px 28px minmax(0,1fr) auto 18px;
+  grid-template-areas: "number portrait name position grip";
+}
+#rio-teams .plan-batter .plan-portrait { grid-area: portrait; width: 25px; height: 25px; }
+#rio-teams .plan-batter:has(.plan-portrait) .bat-number { grid-area: number; }
+#rio-teams .plan-batter:has(.plan-portrait) .bat-name { grid-area: name; }
+#rio-teams .plan-batter:has(.plan-portrait) .position-badge { grid-area: position; }
+#rio-teams .plan-batter:has(.plan-portrait) .grip { grid-area: grip; }
+#rio-teams .plan-batter .bat-number { font: 12px/1 var(--mono); color: var(--ink-2); }
+#rio-teams .plan-batter .bat-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; }
+#rio-teams .plan-batter .position-badge { color: var(--ink-2); background: var(--paper); border: 1px solid var(--rule); }
+#rio-teams .plan-batter .grip { text-align: right; color: var(--ink-2); }
+#rio-teams .plan-batter:hover { background: var(--paper); }
+#rio-teams .plan-batter:is(.is-selected,[aria-pressed="true"]) { background: var(--ice-soft); box-shadow: inset 3px 0 var(--ice); }
+#rio-teams .plan-batter.drag-over { border: 2px dashed var(--ice); }
+#rio-teams .is-dragging { opacity: .65; }
+#rio-teams .plan-inspector, #rio-teams .plan-pool { padding: 12px 14px; }
+#rio-teams .plan-controls { display: flex; flex-wrap: wrap; align-items: end; gap: 9px 14px; margin-top: 8px; }
+#rio-teams .plan-controls label { display: grid; gap: 4px; color: var(--ink-2); font-size: 12px; }
+#rio-teams .plan-controls input { margin: 0; }
+#rio-teams .plan-controls label:has(input:is([type="radio"],[type="checkbox"])) { display: inline-flex; align-items: center; gap: 5px; padding-block: 6px; }
+#rio-teams .pool-filters { display: flex; align-items: center; flex-wrap: wrap; gap: 6px 10px; }
+#rio-teams .pool-filters .plan-check { display: inline-flex; align-items: center; gap: 4px; white-space: nowrap; font-size: 12px; }
+#rio-teams .pool-filters .pool-clones { margin: 0; }
+#rio-teams .plan-pool .pool-help { margin-bottom: 0; }
+#rio-teams .pool-options {
+  display: grid;
+  grid-template-columns: repeat(auto-fill,minmax(132px,1fr));
+  gap: 5px;
+  margin-top: 8px;
+  padding: 3px;
+  max-height: 130px;
+  overflow-y: auto;
+}
+#rio-teams .pool-options button { min-width: 0; overflow-wrap: anywhere; text-align: left; padding: 5px 8px; color: var(--ink); background: var(--paper); cursor: grab; }
+#rio-teams .pool-options button:has(.plan-portrait) { display: flex; align-items: center; gap: 7px; }
+#rio-teams .pool-options .plan-portrait { flex: none; width: 28px; height: 28px; }
+#rio-teams .pool-name { min-width: 0; }
+#rio-teams .pool-name small { display: block; font: 10px/1.35 var(--mono); color: var(--ink-2); }
+#rio-teams .team-actions { justify-content: flex-end; }
+#rio-teams .team-actions > button:last-child { background: var(--ice-2); color: var(--on-accent); border-color: transparent; font-weight: 600; }
+#rio-teams [role="status"]:not(:empty) {
+  position: sticky;
+  z-index: 3;
+  bottom: 0;
+  padding: 6px 10px;
+  color: var(--ink);
+  background: var(--card);
+  border: 1px solid var(--rule);
+  border-left: 3px solid var(--ice);
+  border-radius: 4px;
+  overflow-wrap: anywhere;
+}
+#rio-teams .plan-help { margin-top: 8px; font-size: 12px; color: var(--ink-2); }
+#rio-teams .plan-image-change { grid-column: 1 / -1; }
+#rio-teams .changed-slots { max-height: 10rem; overflow: auto; padding-left: 1.5rem; }
+#rio-teams summary { cursor: pointer; }
+@media (min-width: 1000px) {
+  #rio-teams .team-sheets { grid-template-columns: minmax(0,1fr) minmax(0,1.2fr); }
+  #rio-teams .plan-toolbar, #rio-teams .plan-workspace { grid-column: 1 / -1; }
+  #rio-teams .plan-pool { display: grid; align-content: start; grid-template-columns: minmax(0,1fr) auto; column-gap: 6px; }
+  #rio-teams .plan-pool h3 { align-self: center; }
+  #rio-teams .plan-pool .pool-filters { grid-column: 2; grid-row: 1; justify-content: flex-end; }
+  #rio-teams .plan-pool .pool-search { width: 145px; }
+  #rio-teams .plan-pool :is(.plan-hint,.pool-options) { grid-column: 1 / -1; }
+  #rio-teams .pool-options { margin-top: 0; }
+}
+@media (max-width: 760px) {
+  #rio-teams { --plan-gap: 9px; width: calc(100vw - 12px); max-height: calc(100vh - 12px); padding: 0 10px 12px; }
+  #rio-teams header { margin-inline: -10px; padding-inline: 10px; }
+  #rio-teams fieldset { grid-template-columns: minmax(0,1fr); }
+  #rio-teams .team-actions { justify-content: flex-start; }
+  #rio-teams .plan-workspace { grid-template-columns: minmax(0,1fr); }
+  #rio-teams .plan-diamond { min-height: 284px; }
+}

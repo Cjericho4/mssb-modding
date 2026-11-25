@@ -74,25 +74,104 @@ export async function run(options, app) {
     teamTriggers[0].click();
     await waitFor(() => plan.open, "Game plan opens");
     check(plan.querySelector(".team-actions").hidden, "team export waits for the finished ISO");
-    // Supply the native picker's result, then edit both teams through the regular controls.
-    showTeamImage({ name: "Team test.iso", sha256: "a".repeat(64), hands: Array(54).fill(0) });
-    const sheets = plan.querySelectorAll(".team-sheets section");
-    check(sheets.length === 2 && [...sheets].every((side) => side.querySelectorAll("tbody tr").length === 9),
-      "Game plan has nine batters for each side");
-    const away = sheets[0].querySelector("select");
-    const nickname = sheets[0].querySelector(".roster-label");
-    nickname.value = "Blue Mario";
-    nickname.dispatchEvent(new Event("input"));
-    choose(away, 42);
-    check(nickname.value === "", "changing a character slot clears its previous clone label");
-    sheets[1].querySelector("label input").value = "Second player";
-    sheets[1].querySelector("label input").dispatchEvent(new Event("input"));
+    const tournament = $("tournament-plan");
+    plan.querySelector("[data-open-tournament]").click();
+    await waitFor(() => tournament.open && tournament.querySelector(".tourney-source"), "portable team editor opens without an ISO");
+    const tournamentField = selector => tournament.querySelector(selector);
+    for (let i = 0; i < 3; i++) {
+      tournamentField(`.tourney-row[data-index="${i}"]`).click();
+      choose(tournamentField(".tourney-source"), 2);
+    }
+    const threeDKs = () => [...tournament.querySelectorAll(".tourney-row .tourney-name")]
+      .filter(row => row.textContent === "Donkey Kong").length === 3;
+    check(threeDKs(), "three independent DK batters can be entered without picking donor slots");
+    choose(tournamentField(".tourney-pos"), 7);
+    check(tournamentField('.tourney-row[data-index="2"] b').textContent === "CF" &&
+      tournamentField('.tourney-row[data-index="7"] b').textContent === "1B",
+      "tournament defense swaps both fielders");
+    tournamentField('.tourney-tabs [data-side="Home"]').click();
+    check(!threeDKs(), "Home has its own portable lineup");
+    tournamentField('.tourney-tabs [data-side="Away"]').click();
+    check(threeDKs(), "Away keeps all three DKs after switching back");
+    tournamentField(".tourney-close").click();
+    if (!plan.open) {
+      teamTriggers[0].click();
+      await waitFor(() => plan.open, "Game Plan reopens after the tournament editor");
+    }
+    // Exercise the same DOM controls that the native WebView uses for edits and drops.
+    const cloneSources = Array(54).fill(null);
+    cloneSources[29] = cloneSources[30] = 2;
+    showTeamImage({ name: "Team test.iso", sha256: "a".repeat(64), hands: Array(54).fill([0, 1]), cloneSources });
+    const control = selector => plan.querySelector(selector);
+    const batter = i => control(`.plan-batter[data-index="${i}"]`);
+    const fielder = pos => control(`.plan-fielder[data-pos="${pos}"]`);
+    const teamTab = side => control(`.plan-tabs [data-side="${side}"]`);
+    const inputText = (selector, text) => {
+      const input = control(selector);
+      input.value = text;
+      input.dispatchEvent(new Event("input", {bubbles:true}));
+    };
+    const drop = (source, target) => {
+      const transfer = new DataTransfer();
+      const send = (el, type) => el.dispatchEvent(new DragEvent(type, {
+        dataTransfer: transfer, bubbles: true, cancelable: true
+      }));
+      send(source, "dragstart");
+      check(!send(target, "dragover"), "the target accepts this drag");
+      send(target, "drop");
+      send(source, "dragend");
+    };
+    check(plan.querySelectorAll(".plan-batter").length === 9 &&
+      plan.querySelectorAll(".plan-fielder").length === 9, "nine batters and nine starting positions are visible together");
+    inputText(".lobby-name", "First player");
+    inputText(".roster-label", "Old clone label");
+    inputText(".pool-search", "DK");
+    const cloneTile = id => control(`.pool-options [data-character="${id}"]`);
+    check(cloneTile(29) && cloneTile(30), "both DK copies can be found by source name");
+    drop(cloneTile(29), batter(0));
+    drop(cloneTile(30), batter(1));
+    batter(0).click();
+    check(control(".roster-label").value === "" && control(".character-slot").value === "29",
+      "changing a character clears the old label and keeps the new slot");
+    inputText(".roster-label", "Blue DK");
+    drop(batter(0), batter(4));
+    check(control(".batting-slot").value === "4" && control(".fielding-slot").value === "0" &&
+      control(".character-slot").value === "29" && control(".roster-label").value === "Blue DK",
+      "dragging a batter keeps their identity, label and field position");
+    drop(fielder(0), fielder(5));
+    check(batter(4).querySelector(".bat-name").textContent === "Blue DK" &&
+      fielder(5).querySelector(".bat-name").textContent === "Blue DK" && fielder(0).dataset.index === "5",
+      "swapping starting fielders keeps batting order and exchanges both defensive assignments");
+    teamTab("Home").click();
+    check(plan.querySelectorAll(".plan-batter").length === 9 && control(".character-slot").value === "9",
+      "Home has a separate nine-player lineup");
+    inputText(".lobby-name", "Second player");
+    choose(control(".batting-slot"), 8);
+    choose(control(".fielding-slot"), 3);
+    teamTab("Away").click();
+    check(control(".lobby-name").value === "First player" &&
+      control(".character-slot").value === "29" && control(".fielding-slot").value === "5",
+      "Home edits leave the Away lineup intact");
     plan.querySelector(".team-close").click();
     teamTriggers[1].click();
-    await waitFor(() => plan.open, "the roster shortcut reopens Game plan");
-    check(plan.querySelector(".team-sheets section select").value === "42" &&
-      plan.querySelectorAll(".team-sheets section")[1].querySelector("label input").value === "Second player",
-      "both players keep their team edits when Game plan reopens");
+    await waitFor(() => plan.open, "the roster shortcut reopens Game Plan");
+    teamTab("Home").click();
+    check(control(".lobby-name").value === "Second player" && control(".batting-slot").value === "8" &&
+      control(".fielding-slot").value === "3" && control(".character-slot").value === "9",
+      "both views retain Home edits when the plan is reopened");
+    const nextSources = [...cloneSources];
+    nextSources[29] = 0;
+    const revised = {name:"Updated.iso", sha256:"b".repeat(64), hands:Array(54).fill([0,1]), cloneSources:nextSources};
+    showTeamImage(revised);
+    check(control('.changed-slots li[data-side="Away"][data-index="4"]'), "a changed occupied clone is identified");
+    control(".keep-iso").click();
+    teamTab("Away").click();
+    check(control(".roster-label").value === "Blue DK", "cancel keeps the previous clone label");
+    showTeamImage(revised);
+    control(".carry-teams").click();
+    check(control(".character-slot").value === "29" && control(".fielding-slot").value === "5" &&
+      control(".batting-slot").value === "4" && !control(".roster-label").value,
+      "carrying both drafts preserves assignments and clears the changed player's label");
     plan.querySelector(".team-close").click();
 
     // The roster becomes chips above the stage at the minimum supported width.

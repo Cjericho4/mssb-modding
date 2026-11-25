@@ -71,7 +71,8 @@ const FIELDS: &[(&str, &str, usize, u8, u8)] = &[
     ("fielding_bar", "Fielding display bar", 0x3a, 1, 10),
 ];
 
-pub(crate) fn validate(edits: &Overrides) -> Result<()> {
+/// Check that each override names an editable stat and fits its supported range.
+pub fn validate(edits: &Overrides) -> Result<()> {
     for (key, &value) in edits {
         let &(_, _, _, min, max) = FIELDS
             .iter()

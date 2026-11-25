@@ -4,6 +4,8 @@
 
 mod rio_teams;
 mod selftest;
+mod tournament;
+mod tournament_files;
 
 use std::path::PathBuf;
 
@@ -195,6 +197,8 @@ fn main() {
             rio_teams::rio_team_image,
             rio_teams::save_rio_roster,
             rio_teams::install_rio_matchup,
+            tournament_files::save_tournament_team,
+            tournament_files::build_tournament_matchup,
             open_game,
             sources,
             source_info,

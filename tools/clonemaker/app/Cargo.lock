@@ -1831,7 +1831,9 @@ dependencies = [
 name = "mssb-clone-maker"
 version = "0.4.0-beta"
 dependencies = [
+ "base64 0.23.1",
  "mssb-clone-core",
+ "rustix",
  "serde",
  "serde_json",
  "sha2",
